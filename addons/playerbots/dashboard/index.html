@@ -20,6 +20,7 @@
         <a class="nav-link active" href="#overview" data-view="overview"><span class="nav-icon">◈</span>Overview</a>
         <a class="nav-link" href="#pilots" data-view="pilots"><span class="nav-icon">✣</span>Pilots</a>
         <a class="nav-link" href="#corporations" data-view="corporations"><span class="nav-icon">▤</span>Corporations</a>
+        <a class="nav-link" href="#priorities" data-view="priorities"><span class="nav-icon">◆</span>Priorities</a>
         <a class="nav-link" href="#systems" data-view="systems"><span class="nav-icon">◎</span>Systems</a>
         <a class="nav-link" href="#operations" data-view="operations"><span class="nav-icon">⌁</span>Operations</a>
         <a class="nav-link" href="#killboard" data-view="killboard"><span class="nav-icon">✕</span>Killboard</a>
@@ -78,7 +79,13 @@
 
       <section class="page" id="view-corporations">
         <div class="page-heading"><div><div class="eyebrow">ORGANIZATION MAP</div><h1>Corporations</h1><p>Member counts, pilot specialization, and the current EVEJS corporation limit.</p></div></div>
-        <article class="panel"><div class="panel-heading"><div><div class="eyebrow">BOT CORPORATIONS</div><h2 id="corporation-count">Loading corporations</h2></div></div><div class="table-wrap"><table><thead><tr><th>CORPORATION</th><th>CORPORATION ID</th><th>ALLIANCE ID</th><th>SPECIALTIES</th><th class="numeric">BOT PILOTS</th><th class="numeric">MEMBERS / LIMIT</th><th>CAPACITY</th></tr></thead><tbody id="corporation-rows"></tbody></table></div></article>
+        <article class="panel"><div class="panel-heading"><div><div class="eyebrow">BOT CORPORATIONS</div><h2 id="corporation-count">Loading corporations</h2></div></div><div class="table-wrap"><table><thead><tr><th>CORPORATION</th><th>CORPORATION ID</th><th>ALLIANCE ID</th><th>SPECIALTIES</th><th>CURRENT PRIORITY</th><th class="numeric">BOT PILOTS</th><th class="numeric">MEMBERS / LIMIT</th><th>CAPACITY</th></tr></thead><tbody id="corporation-rows"></tbody></table></div></article>
+      </section>
+
+      <section class="page" id="view-priorities">
+        <div class="page-heading"><div><div class="eyebrow">CORPORATION OBJECTIVES</div><h1>Corporation priorities</h1><p>Choose focus areas for playerbot corporations. The director considers their pilots in that order, and completed tasks advance matching priorities. Corporations without priorities keep the normal order.</p></div></div>
+        <div id="priority-alert" class="alert hidden" role="status"></div>
+        <article class="panel"><div class="panel-heading"><div><div class="eyebrow">ACTIVE CORPORATION PRIORITIES</div><h2>Current priorities by corporation</h2></div></div><div class="table-wrap"><table><thead><tr><th>CORPORATION</th><th>CURRENT PRIORITIES</th><th>TASKS COMPLETED</th><th>SET PRIORITIES</th></tr></thead><tbody id="priority-rows"></tbody></table></div></article>
       </section>
 
       <section class="page" id="view-systems">

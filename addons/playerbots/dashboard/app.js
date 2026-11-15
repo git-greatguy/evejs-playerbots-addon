@@ -42,9 +42,10 @@ function setView(view) {
   state.view = view;
   document.querySelectorAll(".page").forEach((page) => page.classList.toggle("active", page.id === `view-${view}`));
   document.querySelectorAll(".nav-link").forEach((link) => link.classList.toggle("active", link.dataset.view === view));
-  const title = ({ overview: "Overview", pilots: "Pilots", corporations: "Corporations", systems: "Systems", operations: "Operations", killboard: "Killboard", territory: "Territory", performance: "Performance", settings: "Settings" })[view] || "Overview";
+  const title = ({ overview: "Overview", pilots: "Pilots", corporations: "Corporations", priorities: "Priorities", systems: "Systems", operations: "Operations", killboard: "Killboard", territory: "Territory", performance: "Performance", settings: "Settings" })[view] || "Overview";
   $("page-name").textContent = title;
   if (view === "pilots") void loadPilots();
+  if (view === "priorities" && state.snapshot) renderCorporationPriorities(state.snapshot.corporations || [], state.snapshot.corporationPriorityOptions || []);
   if (view === "operations") { void loadOperations(true); void loadPilotActivity(true); }
   if (view === "killboard") void loadKillboard(true);
   if (view === "settings") { void loadSettings(); void loadRosterReset(); void loadNameLibrary(); }
@@ -86,7 +87,8 @@ function renderSummary(data) {
   $("top-systems").innerHTML = systems.slice(0, 8).map((system) => `
     <tr><td><strong>${escapeHTML(system.systemName)}</strong></td><td class="mono">${number(system.systemID)}</td><td class="numeric">${number(system.botCount)}</td><td><div class="mini-bar"><i style="width:${Math.max(2, Math.round(system.botCount * 100 / maxSystemBots))}%"></i></div></td></tr>`).join("") || `<tr><td colspan="4" class="empty">No system locations are available.</td></tr>`;
 
-  renderCorporations(data.corporations || []);
+  renderCorporations(data.corporations || [], data.corporationPriorityOptions || []);
+  renderCorporationPriorities(data.corporations || [], data.corporationPriorityOptions || []);
   renderSystems(systems, roster.total || 0);
   renderOperations(data);
   renderTerritory(data);
@@ -126,15 +128,29 @@ function renderTerritory(data) {
   $("sovereignty-rows").innerHTML = systems.map((system) => `<tr><td><strong>${escapeHTML(system.solarSystemName)}</strong></td><td class="mono">${number(system.solarSystemID)}</td><td>${escapeHTML(system.allianceName)}</td><td class="mono">${number(system.allianceID)}</td></tr>`).join("") || `<tr><td colspan="4" class="empty">No player sovereignty claims are recorded.</td></tr>`;
 }
 
-function renderCorporations(corporations) {
+function renderCorporations(corporations, priorityOptions = []) {
   const sorted = [...corporations].sort((a, b) => b.botCount - a.botCount || a.corporationName.localeCompare(b.corporationName));
   $("corporation-count").textContent = `${number(sorted.length)} corporations · ${number(sorted.reduce((sum, corporation) => sum + corporation.botCount, 0))} bots`;
   $("corporation-rows").innerHTML = sorted.map((corporation) => {
     const limit = Number(corporation.memberLimit) || 0;
     const members = Number(corporation.memberCount) || 0;
     const used = limit > 0 ? Math.min(100, Math.round(members * 100 / limit)) : 0;
-    return `<tr><td><strong>${escapeHTML(corporation.corporationName)}</strong><small>${escapeHTML(corporation.ticker)}</small></td><td class="mono">${number(corporation.corporationID)}</td><td class="mono">${corporation.allianceID ? number(corporation.allianceID) : "—"}</td><td>${(corporation.specialties || []).map((value) => `<span class="tag">${escapeHTML(value)}</span>`).join(" ")}</td><td class="numeric">${number(corporation.botCount)}</td><td class="numeric">${number(members)} / ${limit ? number(limit) : "unlimited"}</td><td>${limit ? `<div class="capacity"><div class="mini-bar"><i style="width:${used}%"></i></div><small>${used}%</small></div>` : `<span class="muted">Not set</span>`}</td></tr>`;
-  }).join("") || `<tr><td colspan="7" class="empty">No corporations are represented.</td></tr>`;
+    const selectedPriority = String((corporation.priorityIDs || corporation.priorities?.map((priority) => priority.id) || [])[0] || "");
+    const corporationID = Math.trunc(Number(corporation.corporationID) || 0);
+    const prioritySelect = `<select class="corporation-priority-select" data-corporation-id="${corporationID}" aria-label="Current priority for ${escapeHTML(corporation.corporationName)}"><option value=""${selectedPriority ? "" : " selected"}>Not set</option>${priorityOptions.map((option) => `<option value="${escapeHTML(option.id)}"${selectedPriority === String(option.id) ? " selected" : ""}>${escapeHTML(option.label)}</option>`).join("")}</select><small class="corporation-priority-save-status" data-corporation-id="${corporationID}" role="status" aria-live="polite"></small>`;
+    return `<tr><td><strong>${escapeHTML(corporation.corporationName)}</strong><small>${escapeHTML(corporation.ticker)}</small></td><td class="mono">${number(corporation.corporationID)}</td><td class="mono">${corporation.allianceID ? number(corporation.allianceID) : "—"}</td><td>${(corporation.specialties || []).map((value) => `<span class="tag">${escapeHTML(value)}</span>`).join(" ")}</td><td>${prioritySelect}</td><td class="numeric">${number(corporation.botCount)}</td><td class="numeric">${number(members)} / ${limit ? number(limit) : "unlimited"}</td><td>${limit ? `<div class="capacity"><div class="mini-bar"><i style="width:${used}%"></i></div><small>${used}%</small></div>` : `<span class="muted">Not set</span>`}</td></tr>`;
+  }).join("") || `<tr><td colspan="8" class="empty">No corporations are represented.</td></tr>`;
+}
+
+function renderCorporationPriorities(corporations, options) {
+  const eligible = corporations.filter((corporation) => Number(corporation.botCount) > 0);
+  $("priority-rows").innerHTML = eligible.map((corporation) => {
+    const priorities = Array.isArray(corporation.priorities) ? corporation.priorities : [];
+    const summary = priorities.map((priority) => `<span class="tag">${escapeHTML(priority.label)}</span>`).join(" ") || `<span class="muted">No priorities set</span>`;
+    const progress = priorities.map((priority) => `${escapeHTML(priority.label)}: ${number(priority.completedTasks)} tasks`).join(" · ") || "—";
+    const selected = new Set((corporation.priorityIDs || priorities.map((priority) => priority.id)).map(String));
+    return `<tr><td><strong>${escapeHTML(corporation.corporationName)}</strong><small class="mono">${number(corporation.corporationID)}</small></td><td>${summary}</td><td>${escapeHTML(progress)}</td><td><form class="priority-form" data-corporation-id="${Math.trunc(Number(corporation.corporationID) || 0)}"><label class="priority-label"><span class="hidden">Select priorities for ${escapeHTML(corporation.corporationName)}</span><select name="priorityIDs" multiple size="4" aria-label="Priorities for ${escapeHTML(corporation.corporationName)}">${options.map((option) => `<option value="${escapeHTML(option.id)}"${selected.has(String(option.id)) ? " selected" : ""}>${escapeHTML(option.label)}</option>`).join("")}</select></label><button type="submit">Save</button></form></td></tr>`;
+  }).join("") || `<tr><td colspan="4" class="empty">No playerbot corporations are represented.</td></tr>`;
 }
 
 function renderSystems(systems, totalPilots) {
@@ -646,6 +662,74 @@ document.querySelectorAll(".nav-link").forEach((link) => link.addEventListener("
   setView(view);
 }));
 $("refresh").addEventListener("click", () => { state.operationsLoadedAt = 0; void refresh(); });
+$("corporation-rows").addEventListener("change", async (event) => {
+  const select = event.target.closest(".corporation-priority-select");
+  if (!select) return;
+  const corporationID = Number(select.dataset.corporationId);
+  const previous = state.snapshot?.corporations?.find((corporation) => Number(corporation.corporationID) === corporationID);
+  const previousPriorityIDs = Array.isArray(previous?.priorityIDs) ? [...previous.priorityIDs] : [];
+  // "Not set" clears the corporation's priorities; any other choice becomes
+  // the first priority and keeps the others.
+  const nextPriorityIDs = select.value
+    ? [select.value, ...previousPriorityIDs.filter((priorityID) => String(priorityID) !== select.value)]
+    : [];
+  const status = select.parentElement.querySelector(".corporation-priority-save-status");
+  select.disabled = true;
+  if (status) { status.textContent = "Saving…"; status.classList.remove("priority-save-error"); }
+  try {
+    const response = await fetch("/api/corporation-priorities", {
+      method: "POST", headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({ corporationID, priorityIDs: nextPriorityIDs }), cache: "no-store",
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success !== true) throw new Error(data.message || data.error || `Request failed (${response.status}).`);
+    if (previous) {
+      previous.priorityIDs = Array.isArray(data.priorityIDs) ? data.priorityIDs : nextPriorityIDs;
+      previous.priorities = data.priorities || previous.priorities;
+      previous.priorityUpdatedAt = data.updatedAt;
+    }
+    select.value = String(data.priorityIDs && data.priorityIDs[0] || "");
+    if (status) status.textContent = "Saved";
+    const latest = await getJSON("/api/summary");
+    renderSummary(latest);
+    const updatedSelect = [...$("corporation-rows").querySelectorAll(".corporation-priority-select")]
+      .find((node) => Number(node.dataset.corporationId) === corporationID);
+    const updatedStatus = [...$("corporation-rows").querySelectorAll(".corporation-priority-save-status")]
+      .find((node) => Number(node.dataset.corporationId) === corporationID);
+    if (updatedSelect && latest.corporations) {
+      const savedCorporation = latest.corporations.find((corporation) => Number(corporation.corporationID) === corporationID);
+      if (savedCorporation) updatedSelect.value = String(savedCorporation.priorityIDs && savedCorporation.priorityIDs[0] || "");
+    }
+    if (updatedStatus) updatedStatus.textContent = "Saved";
+  } catch (error) {
+    select.value = String(previousPriorityIDs[0] || "");
+    if (status) { status.textContent = `Not saved: ${error.message || error}`; status.classList.add("priority-save-error"); }
+  } finally { select.disabled = false; }
+});
+
+$("priority-rows").addEventListener("submit", async (event) => {
+  const form = event.target.closest(".priority-form");
+  if (!form) return;
+  event.preventDefault();
+  const button = form.querySelector("button[type='submit']");
+  const selected = [...form.elements.priorityIDs.selectedOptions].map((option) => option.value);
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/corporation-priorities", {
+      method: "POST", headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({ corporationID: Number(form.dataset.corporationId), priorityIDs: selected }), cache: "no-store",
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success !== true) throw new Error(data.message || data.error || `Request failed (${response.status}).`);
+    $("priority-alert").textContent = "Corporation priorities saved.";
+    $("priority-alert").classList.remove("hidden");
+    state.snapshot = null;
+    await refresh();
+  } catch (error) {
+    $("priority-alert").textContent = error.message || String(error);
+    $("priority-alert").classList.remove("hidden");
+  } finally { button.disabled = false; }
+});
 $("killboard-refresh").addEventListener("click", () => { state.killboardLoadedAt = 0; void loadKillboard(true); });
 $("apply-filters").addEventListener("click", () => { state.page = 0; void loadPilots(); });
 $("pilot-search").addEventListener("keydown", (event) => { if (event.key === "Enter") { state.page = 0; void loadPilots(); } });

@@ -1783,6 +1783,11 @@ async function runDirectorInternal(bots = [], options = {}) {
     botSystemIDs,
     activeSystemCounts,
     getLastAssignedAt: (bot) => Number(getBotDirectorAssignment(bot.characterID).lastAssignedAt || 0),
+    getPriorityRank: (corporationID, bot) => require("./playerBotCorporationPriorities").getDirectorSpecialtyRank(
+      corporationID,
+      bot && bot.specialty,
+      () => Number((readSharedCharacterRecord(bot && bot.characterID) || {}).shipTypeID) || 0,
+    ),
   });
 
   const autonomy = require("./playerBotAutonomyRuntime");
@@ -2227,6 +2232,9 @@ function sortDirectorCandidates(candidates, context) {
     keys.set(bot, {
       priority: context.humanCorporations.has(corporationID) &&
         Number(context.productiveByCorporation.get(corporationID) || 0) < MIN_PRODUCTIVE_BOTS_PER_HUMAN_CORP ? 0 : 1,
+      corporationPriority: typeof context.getPriorityRank === "function"
+        ? Number(context.getPriorityRank(corporationID, bot)) || 0
+        : 0,
       load: context.humanControlledBotIDs.has(characterID)
         ? -1 : systemID ? context.activeSystemCounts.get(systemID) || 0 : Number.MAX_SAFE_INTEGER,
       lastAssignedAt: context.getLastAssignedAt(bot),
@@ -2236,6 +2244,7 @@ function sortDirectorCandidates(candidates, context) {
     const leftKey = keys.get(left);
     const rightKey = keys.get(right);
     return leftKey.priority - rightKey.priority ||
+      leftKey.corporationPriority - rightKey.corporationPriority ||
       leftKey.load - rightKey.load ||
       leftKey.lastAssignedAt - rightKey.lastAssignedAt;
   });

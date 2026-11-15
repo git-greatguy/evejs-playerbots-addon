@@ -86,6 +86,7 @@ function defaultDeps() {
     characters: () => load("services/character/characterState"),
     corporations: () => load("services/corporation/corporationState"),
     structures: () => load("services/structure/structureState"),
+    deposit: () => load("services/playerbots/playerBotCorpDepositRuntime"),
     worldData: () => load("space/worldData"),
     replies: () => load("services/chat/commands/commandReplies"),
     hasStaffRole: (session) => load("services/chat/commands/commandAccess").hasStaffDebugRole(session),
@@ -500,9 +501,16 @@ function startWorkForBot(bot, job) {
   if (hasOperation(operations.getOperation(bot.characterID))) return { status: "already" };
   const plan = planFor(bot, job.mode);
   if (plan === "director") return { status: "director" };
-  const result = plan === "pi"
+  const start = () => (plan === "pi"
     ? operations.startColony(bot.characterName)
-    : startMiningFor(bot, job);
+    : startMiningFor(bot, job));
+  // Work ordered with /bots corp work takes its output to the HQ unless the
+  // corporation turned deposit off.
+  let deposit = null;
+  try { deposit = state.deps.deposit(); } catch (error) { warn(`Corporation deposit is unavailable: ${error.message}`); }
+  const result = deposit && typeof deposit.forceFor === "function"
+    ? deposit.forceFor(job.corporationID, start)
+    : start();
   return result && result.success
     ? { status: "started", plan }
     : { status: "failed", message: result && result.message || "start refused" };
@@ -583,6 +591,7 @@ const HELP = [
   "/bots corp work [corporationID] [auto|mine|pi|director] [trips <n>] - release the hold and start mining and PI around the HQ",
   "/bots corp status [corporationID] - show where the corporation's pilots are",
   "/bots corp hq [corporationID] [list | set <structureOrStationID> | clear] - show, list or change the HQ the commands above use (set/clear: CEO or staff)",
+  "/bots corp deposit [corporationID] [status | on | off | auto | deliveries | hangar <1-7>] - deliver completed mining and PI output to the corporation HQ instead of selling it",
   "Omit the corporation ID to use your own corporation. Staff/admin may use any corporation.",
 ].join("\n");
 
@@ -592,7 +601,7 @@ function parseArguments(argumentText) {
   const subcommand = (tokens.shift() || "help").toLowerCase();
   const parsed = {
     subcommand, corporationID: 0, station: 0, mode: "auto", trips: 1,
-    hqAction: "", hqTarget: 0, error: "",
+    hqAction: "", hqTarget: 0, depositAction: "", depositDivision: 0, error: "",
   };
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index].toLowerCase();
@@ -600,6 +609,8 @@ function parseArguments(argumentText) {
     else if (token === "trips") parsed.trips = Math.min(20, positive(tokens[index += 1]) || 1);
     else if (token === "set") { parsed.hqAction = "set"; parsed.hqTarget = positive(tokens[index += 1]); }
     else if (token === "clear" || token === "list") parsed.hqAction = token;
+    else if (subcommand === "deposit" && ["on", "off", "auto", "deliveries", "status"].includes(token)) parsed.depositAction = token;
+    else if (subcommand === "deposit" && token === "hangar") { parsed.depositAction = "hangar"; parsed.depositDivision = positive(tokens[index += 1]); }
     else if (MODES.has(token)) parsed.mode = token;
     else if (/^\d+$/.test(token) && !parsed.corporationID) parsed.corporationID = positive(token);
     else parsed.error = `Unrecognized argument: ${tokens[index]}.`;
@@ -685,6 +696,37 @@ function commandStatus(corporationID, bots) {
   ].join("\n");
 }
 
+function commandDeposit(parsed, session, corporationID) {
+  const deposit = state.deps.deposit();
+  const action = parsed.depositAction;
+  if (action && action !== "status") {
+    if (!canManageHeadquarters(session, corporationID)) {
+      return "Only the corporation's CEO or staff/admin can change the deposit settings.";
+    }
+    if (action === "hangar" && !(parsed.depositDivision >= 1 && parsed.depositDivision <= 7)) {
+      return "Usage: /bots corp deposit [corporationID] hangar <division 1-7>.";
+    }
+    const patch = {
+      on: { enabled: true },
+      off: { enabled: false },
+      auto: { enabled: null },
+      deliveries: { target: "deliveries" },
+      hangar: { target: "hangar", division: parsed.depositDivision },
+    }[action];
+    try { deposit.updateSettings(corporationID, patch); }
+    catch (error) { return `Could not save the deposit setting: ${error.message}.`; }
+  }
+  const info = deposit.describeSettings(corporationID);
+  const mode = info.explicit
+    ? (info.enabled ? "ON (set explicitly)" : "OFF (set explicitly)")
+    : (info.enabled ? "ON (automatic: an HQ is saved with /bots corp hq set)" : "OFF (automatic: no HQ saved; /bots corp work still deposits)");
+  return [
+    `Deposit for corporation ${corporationID}: ${mode}.`,
+    `Goods go to ${info.label}${info.depot ? ` at ${formatDestination(info.depot)}` : " (no usable HQ right now; see /bots corp hq)"}.`,
+    "Mining and PI collection jobs started from now on take their output to the HQ and hand it to the corporation instead of selling it; hangar divisions need a corporation office at the HQ and otherwise fall back to Corporation Deliveries.",
+  ].join("\n");
+}
+
 function commandHeadquarters(parsed, session, corporationID) {
   const action = parsed.hqAction;
   if (action === "list") {
@@ -743,6 +785,7 @@ const BOTS_HELP_ADDENDUM = [
   "/bots corp hq [corporationID] list - list the corporation's structures with ID, system and whether docking is online",
   "/bots corp hq [corporationID] set <structureOrStationID> - save the HQ that recall, work and status use (CEO or staff only; a structure must be corporation-owned with docking online)",
   "/bots corp hq [corporationID] clear - go back to the corporation's own NPC station HQ (CEO or staff only)",
+  "/bots corp deposit [corporationID] [status | on | off | auto | deliveries | hangar <1-7>] - deposit mining and PI output at the corporation HQ instead of selling; CEO or staff changes settings",
   "Omit corporationID to use your own corporation. Staff/admin may use any corporation. Braces are accepted, e.g. /bots corp recall {98000123}.",
   "HQ choice, first match wins: station|structure <id> on the command (that order only); the HQ saved with /bots corp hq set; the corporation's headquarters NPC station from the corporation window. A saved HQ that is destroyed, unanchoring, no longer owned or without docking blocks recall with a message instead of diverting pilots.",
   "Recall to an NPC station uses the durable relocate operation (undock, route, warp, dock) and pauses each pilot once docked. Recall to a structure pauses the pilot at once and steps it there with the same stargate-route and dock helpers; docking permission is checked first, and pilots in an industry cycle are reported rather than pulled away.",
@@ -759,7 +802,7 @@ function withBotsHelp(session, chatHub, options, baseMessage) {
 
 // Appended (never substituted) to the end of the /bots usage text; /bots help also gets the full section.
 function usageSuffix(argumentText) {
-  const concise = " | corp recall|work|status|hq|help [corporationID] (whole-corporation orders: recall pilots to the corporation HQ, dock and hold them, then put them to work)";
+  const concise = " | corp recall|work|status|hq|deposit|help [corporationID] (whole-corporation orders: recall pilots to the corporation HQ, dock and hold them, then put them to work)";
   return /^\s*help\s*$/i.test(String(argumentText || "")) ? `${concise}\n\n${BOTS_HELP_ADDENDUM}` : concise;
 }
 
@@ -770,7 +813,7 @@ function handle(session, argumentText, chatHub, options = {}) {
   if (parsed.subcommand === "help" || parsed.error) {
     return reply(parsed.error ? `${parsed.error}\n${HELP}` : BOTS_HELP_ADDENDUM);
   }
-  if (!["recall", "work", "status", "hq"].includes(parsed.subcommand)) {
+  if (!["recall", "work", "status", "hq", "deposit"].includes(parsed.subcommand)) {
     return reply(`Unknown /bots corp subcommand: ${parsed.subcommand}.\n${HELP}`);
   }
   const corporationID = parsed.corporationID ||
@@ -780,6 +823,7 @@ function handle(session, argumentText, chatHub, options = {}) {
     return reply("You can only control playerbots in your own corporation; staff/admin can control any corporation.");
   }
   if (parsed.subcommand === "hq") return reply(commandHeadquarters(parsed, session, corporationID));
+  if (parsed.subcommand === "deposit") return reply(commandDeposit(parsed, session, corporationID));
   const bots = botsOf(corporationID);
   if (!bots.length) return reply(`Corporation ${corporationID} has no playerbots to control.`);
   const context = { session, chatHub, options };
@@ -788,8 +832,20 @@ function handle(session, argumentText, chatHub, options = {}) {
   return reply(commandWork(parsed, corporationID, bots, context));
 }
 
+// Used by the corporation deposit: whether an HQ was saved with /bots corp hq
+// set, and the HQ the corporation's pilots would be recalled to.
+function hasSavedHeadquarters(corporationID) {
+  return positive(savedHeadquarters()[String(positive(corporationID))]) > 0;
+}
+
+function getHeadquarters(corporationID) {
+  return resolveHeadquarters(positive(corporationID), 0);
+}
+
 module.exports = {
   handle,
+  hasSavedHeadquarters,
+  getHeadquarters,
   withBotsHelp,
   usageSuffix,
   BOTS_HELP_ADDENDUM,

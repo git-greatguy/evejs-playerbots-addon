@@ -96,6 +96,17 @@ td.mono, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, mon
 .filters input, .filters select { background: #0c141d; border: 1px solid #293746; border-radius: 6px; color: var(--text); min-width: 170px; outline: none; padding: 8px 10px; }
 .filters input:focus, .filters select:focus { border-color: var(--cyan); }
 .filters button { height: 36px; }
+.priority-form { align-items: center; display: flex; gap: 8px; min-width: 280px; }
+.priority-form select, .corporation-priority-select { background: #0c141d; border: 1px solid #293746; border-radius: 6px; color: var(--text); min-width: 210px; padding: 6px 8px; }
+.corporation-priority-select { min-width: 190px; max-width: 240px; width: 100%; }
+.corporation-priority-select:disabled { cursor: wait; opacity: .6; }
+.corporation-priority-save-status { color: var(--green); display: block; font-size: 10px; margin-top: 4px; max-width: 230px; overflow-wrap: anywhere; white-space: normal; }
+.corporation-priority-save-status.priority-save-error { color: var(--red); }
+#view-corporations table { min-width: 1000px; }
+.priority-form button { background: linear-gradient(135deg, #218ba2, #2367a0); border: 1px solid rgba(94, 222, 231, .3); border-radius: 7px; color: white; cursor: pointer; padding: 8px 11px; }
+.priority-form button:disabled { cursor: wait; opacity: .55; }
+.priority-label { display: block; }
+#view-priorities table { min-width: 1000px; }
 .pagination { align-items: center; color: #8291a1; display: flex; font-size: 10px; gap: 10px; }
 .pagination button { font-size: 10px; padding: 6px 9px; }.pagination button:disabled { cursor: default; opacity: .35; }
 .pagination label { align-items: center; display: inline-flex; gap: 5px; white-space: nowrap; }

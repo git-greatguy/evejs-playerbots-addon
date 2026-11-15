@@ -42,6 +42,7 @@ function createPlayerBotDashboardRuntime(options = {}) {
   const structureState = options.structureState || require("../structure/structureState");
   const sovereigntyState = options.sovereigntyState || require("../sovereignty/sovState");
   const killmailState = options.killmailState || require("../killmail/killmailState");
+  const corporationPriorities = options.corporationPriorities || require("./playerBotCorporationPriorities");
 
   let snapshot = null;
   let snapshotAtMs = 0;
@@ -633,7 +634,16 @@ function createPlayerBotDashboardRuntime(options = {}) {
         humansInSpace,
         bySpecialty: Object.fromEntries([...bySpecialty.entries()].sort(([a], [b]) => a.localeCompare(b))),
       },
-      corporations: corporationsList,
+      corporations: corporationsList.map((corporation) => {
+        const priorities = corporationPriorities.getCorporationPriorities(corporation.corporationID);
+        return {
+          ...corporation,
+          priorityIDs: priorities.priorityIDs,
+          priorities: priorities.priorities,
+          priorityUpdatedAt: priorities.updatedAt,
+        };
+      }),
+      corporationPriorityOptions: corporationPriorities.listPriorityOptions(),
       systems: systemsList,
       systemCapacity: { autonomousBotsPerSystem: maxPerSystem },
       activity: {
@@ -825,7 +835,16 @@ function createPlayerBotDashboardRuntime(options = {}) {
     return operations.listOperations().find((operation) => String(operation.operationID || "") === String(operationID || "")) || null;
   }
 
-  return Object.freeze({ getSnapshot: refresh, getKillboardSnapshot, listBots, getOperations, getOperationHistoryPage, getOperationDetails });
+  function setCorporationPriorities(corporationID, priorityIDs) {
+    const result = corporationPriorities.setCorporationPriorities(corporationID, priorityIDs);
+    if (result.success) {
+      snapshot = null;
+      snapshotAtMs = 0;
+    }
+    return result;
+  }
+
+  return Object.freeze({ getSnapshot: refresh, getKillboardSnapshot, listBots, getOperations, getOperationHistoryPage, getOperationDetails, setCorporationPriorities });
 }
 
 module.exports = { createPlayerBotDashboardRuntime, MAX_PAGE_SIZE };

@@ -247,8 +247,15 @@ module.exports = function (serviceManager) {
 
   // Each open socket's lifecycle, so a shutdown can log its pilot off first.
   const socketLifecycles = new Map();
+  const playerConnectionAttempts = new WeakMap();
 
   const handleSocket = (socket) => {
+    let playerAttemptStarted = false;
+    const startPlayerAttempt = () => {
+      if (playerAttemptStarted) return;
+      playerAttemptStarted = true;
+      playerConnectionAttempts.set(socket, botLoadController.beginPlayerConnection());
+    };
     logInfo(
       `New connection from ${socket.remoteAddress}:${socket.remotePort}`,
     );
@@ -283,6 +290,7 @@ module.exports = function (serviceManager) {
     attachDirectGameSocketTransport(socket, {
       handleFrame(payload) {
         if (socketLifecycle.closed) return;
+        startPlayerAttempt();
         if (!handshakeComplete) {
           // Pass to handshake state machine
           try {
@@ -327,6 +335,8 @@ module.exports = function (serviceManager) {
                 `session created for ${clientSession.userName} (ID: ${clientSession.userid})`,
               );
               sessionRegistry.register(clientSession);
+              const playerAttempt = playerConnectionAttempts.get(socket);
+              if (playerAttempt) playerAttempt.complete();
               // One client for each account: the account's earlier clients
               // are closed (sessionMgr.CloseUserSessions spares the new one).
               closeOtherSessionsOfUser(clientSession);
@@ -437,8 +447,13 @@ module.exports = function (serviceManager) {
   };
 
   const sockets = new Set();
+  const botLoadController = require("../../services/playerbots/playerBotLoadController").getPlayerBotLoadController();
   const server = net.createServer((socket) => {
     sockets.add(socket);
+    socket.once("close", () => {
+      const playerAttempt = playerConnectionAttempts.get(socket);
+      if (playerAttempt) playerAttempt.release();
+    });
     socket.once("close", () => sockets.delete(socket));
     try {
       handleSocket(socket);

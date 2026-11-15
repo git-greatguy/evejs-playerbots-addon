@@ -280,6 +280,17 @@ function createDashboardServer(options = {}) {
       }
       return proxyApi(response, "/v1/dashboard/kills");
     }
+    if (url.pathname === "/api/corporation-priorities") {
+      if (request.method !== "POST") {
+        send(response, 405, "text/plain; charset=utf-8", "Method not allowed.", { allow: "POST" });
+        return;
+      }
+      if (!isSameOriginRequest(request)) {
+        send(response, 403, "application/json; charset=utf-8", JSON.stringify({ error: "Cross-origin dashboard updates are blocked." }));
+        return;
+      }
+      return proxyMutation(response, "/v1/dashboard/corporation-priorities", "POST", await readJsonBody(request));
+    }
     if (url.pathname === "/api/operations") {
       if (request.method !== "GET") {
         send(response, 405, "text/plain; charset=utf-8", "Method not allowed.", { allow: "GET" });

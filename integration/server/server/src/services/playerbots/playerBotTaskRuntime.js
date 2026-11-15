@@ -351,10 +351,14 @@ function completeTask(taskID, leaseToken, result = {}) {
   task.updatedAt = new Date().toISOString();
   task.leaseToken = null;
   task.leaseExpiresAtMs = null;
+  const completedTask = cloneTask(task);
   releaseProvider(task);
   task.providerCharacterID = null;
   pruneHistory(queue);
   saveQueue(queue);
+  try { require("./playerBotCorporationPriorities").recordCompletedTask(completedTask); } catch (error) {
+    // Priority accounting must not prevent the underlying task from completing.
+  }
   return { success: true, task: cloneTask(task) };
 }
 

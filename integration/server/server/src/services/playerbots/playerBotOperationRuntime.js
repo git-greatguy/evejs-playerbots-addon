@@ -915,6 +915,7 @@ function shouldWithdrawMinerWithoutEscort(state) {
 }
 
 async function advanceMining(operation, bot) {
+  if (operation.stage === "corp-deposit") return require("./playerBotCorpDepositRuntime").advance(operation, bot, corpDepositKit());
   if (Number(operation.miningThreatPolicyVersion) !== 2) {
     // Previous builds marked whole belts dangerous from nearby NPC presence or
     // any persisted armor damage. Neither proves that the miner is under fire.
@@ -3030,6 +3031,20 @@ async function advanceSell(operation, bot) {
     saveOperation(operation);
     return { delayMs: STEP_DELAY_MS };
   }
+  if (operation.depositOnly === true) {
+    // Corporation deposit: deliver to the headquarters; the deposit stage files the goods.
+    const delivery = await travelToStation(operation, bot, operation.marketStationID);
+    if (delivery) return delivery;
+    if (getInventory().listCargo(bot).length) getInventory().unloadCargo(bot);
+    if (operation.kind === "pi-collect" && operation.collectAgain && operation.containerID) {
+      operation.collectAgain = false;
+      operation.stage = "return-to-source";
+      record(operation, "PI cargo was delivered to the corporation headquarters; returning to the same launch container for the remaining stacks.");
+      saveOperation(operation);
+      return { delayMs: TRAVEL_DELAY_MS };
+    }
+    return finish(operation, "PI cargo delivered to the corporation headquarters.");
+  }
   const step = await travelToStation(operation, bot, operation.marketStationID);
   if (step) return step;
   if (getInventory().listCargo(bot).length) getInventory().unloadCargo(bot);
@@ -3539,6 +3554,7 @@ function startPlanetaryCollection(botQuery, options = {}) {
     unitsSold: 0, proceeds: 0, unitsListed: 0, brokerFees: 0,
     optimizeMarketDestination: true,
   });
+  corpDepositDecorate(operation, bot);
   record(operation, exportRequest
     ? "Preparing PI export from planet " + operation.exportRequest.planetID + "; the bot will launch only after it reaches the collection system and has enough cargo capacity."
     : "Collecting PI from launch container " + operation.containerID + ".");
@@ -3978,6 +3994,7 @@ async function advancePIExportLaunch(operation, bot, state, inventory) {
 }
 
 async function advancePlanetaryCollection(operation, bot) {
+  if (operation.stage === "corp-deposit") return require("./playerBotCorpDepositRuntime").advance(operation, bot, corpDepositKit());
   const inventory = getInventory();
   const space = getSpace();
   if (operation.stage === "to-source") {
@@ -4386,6 +4403,29 @@ function assertCanStart(bot, options = {}) {
     return `${bot.characterName} is in industry cycle ${cycle.cycleID}; stop it first.`;
   }
   return null;
+}
+
+// Corporation deposit (see playerBotCorpDepositRuntime.js): marks mining and PI jobs of
+// deposit-enabled corporations, and supplies the helpers the deposit stage needs.
+function corpDepositDecorate(operation, bot) {
+  try {
+    require("./playerBotCorpDepositRuntime").decorateOperation(operation, bot);
+  } catch (error) {
+    require("../../utils/logger").warn(`[PlayerBots] Corporation deposit setup skipped: ${error.message}`);
+  }
+}
+
+function corpDepositKit() {
+  return {
+    inventory: getInventory(),
+    record,
+    save: saveOperation,
+    finish,
+    block,
+    travelToStation: (operation, bot, stationID) => travelToStation(operation, bot, stationID),
+    getCharacterRecord,
+    STEP_DELAY_MS,
+  };
 }
 
 function baseOperation(kind, bot, fields) {
@@ -4877,6 +4917,7 @@ function startMining(botQuery, maxTrips = 1, options = {}) {
     miningCargoSnapshot: null,
     miningPhaseKey: null,
   });
+  corpDepositDecorate(operation, bot);
   record(operation, `Mining from ${homeStationID}: ${trips} trip(s)${operation.refine ? "; ore will be reprocessed" : ""}${operation.sell ? "; output will be sold or listed" : "; output will stay in the personal hangar"}.`);
   saveOperation(operation);
   return { success: true, operation, message: `${bot.characterName} will mine from ${homeStationID} for ${trips} trip(s)${operation.refine ? " and reprocess the ore" : ""}${operation.sell ? " and sell or list the output" : "; output will remain in the personal hangar"} (operation ${operation.operationID}).` };
@@ -5879,6 +5920,19 @@ async function advanceOperation(characterID) {
   }
   if (interrupted) return { delayMs: 1000, interrupted: true };
   if (handlerFailed) return result;
+  if (result && result.done === true && operation.status === "completed") {
+    try {
+      const corpDeposit = require("./playerBotCorpDepositRuntime");
+      if (corpDeposit.shouldDeposit(operation)) return corpDeposit.begin(operation, corpDepositKit());
+    } catch (error) {
+      require("../../utils/logger").warn(`[PlayerBots] Corporation deposit could not start for ${operation.operationID}: ${error.message}`);
+    }
+    try {
+      require("./playerBotCorporationPriorities").recordCompletedOperation(operation);
+    } catch (error) {
+      require("../../utils/logger").warn(`[PlayerBots] Corporation priority progress could not be recorded for ${operation.operationID}: ${error.message}`);
+    }
+  }
   if (["active", "completed"].includes(operation.status) && operation.lastError) {
     operation.lastError = null;
     record(operation, `Recovered from a transient error and continued at ${describeOperationStage(operation)}.`);

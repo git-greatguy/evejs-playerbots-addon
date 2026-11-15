@@ -40,6 +40,7 @@ function createPlayerBotAddonApiRuntime(options = {}) {
     require("./playerBotSpaceRuntime").getConnectedBotCharacterIDs());
   const logger = options.logger || require("../../utils/logger");
   const telemetry = options.telemetry || require("./playerBotPerformanceTelemetry").getTelemetry();
+  const loadController = options.loadController || require("./playerBotLoadController").getPlayerBotLoadController();
   const eventLoopDelay = options.eventLoopDelayMonitor || monitorEventLoopDelay({ resolution: 20 });
   const getEventLoopDelayP95Ms = options.getEventLoopDelayP95Ms || (() => Number(eventLoopDelay.percentile(95)) / 1_000_000 || 0);
   eventLoopDelay.enable();
@@ -79,6 +80,10 @@ function createPlayerBotAddonApiRuntime(options = {}) {
     highCpuSamples = processCpuPercent > cpuLimit ? highCpuSamples + 1 : 0;
     sampledEventLoopP95Ms = Math.max(0, Number(getEventLoopDelayP95Ms()) || 0);
     loadSampleCount += 1;
+    loadController.updateLoad({
+      eventLoopP95Ms: currentEventLoopP95Ms(),
+      processCpuPercent,
+    });
     if (typeof eventLoopDelay.reset === "function") eventLoopDelay.reset();
   }, LOAD_SAMPLE_INTERVAL_MS);
   loadSampleTimer.unref();
@@ -209,6 +214,15 @@ function createPlayerBotAddonApiRuntime(options = {}) {
         characterIDs: bots.map((bot) => Number(bot.characterID)).filter((id) => Number.isSafeInteger(id) && id > 0),
         count: bots.length,
       });
+      return;
+    }
+    if (url.pathname === "/v1/dashboard/corporation-priorities" && request.method === "POST") {
+      const body = await readBody(request);
+      const result = dashboard.setCorporationPriorities(
+        body.corporationID,
+        body.priorityIDs,
+      );
+      sendJson(response, result.success ? 200 : Number(result.statusCode) || 400, result);
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/dashboard/summary") {
@@ -381,13 +395,16 @@ function createPlayerBotAddonApiRuntime(options = {}) {
       }
       const currentLoopP95Ms = currentEventLoopP95Ms();
       const limits = effectiveSeedLimits(settings);
+      const playerPriorityLoad = loadController.getStatus();
       const telemetryReady = Boolean(isLoadTelemetryReady());
       const loopLimit = limits.eventLoopP95Ms;
       const cpuLimit = limits.processCpuPercent;
       const cpuBackpressure = processCpuPercent > cpuLimit || highCpuSamples >= 2;
-      if (!telemetryReady || currentLoopP95Ms > loopLimit || cpuBackpressure) {
+      if (playerPriorityLoad.pauseLowPriorityWork || !telemetryReady || currentLoopP95Ms > loopLimit || cpuBackpressure) {
         const rosterCount = typeof playerBots.getBotCount === "function" ? playerBots.getBotCount() : 0;
-        const stopReason = !telemetryReady
+        const stopReason = playerPriorityLoad.pauseLowPriorityWork
+          ? `player-priority load controller paused roster seeding: ${playerPriorityLoad.reason}`
+          : !telemetryReady
           ? `waiting for ${REQUIRED_LOAD_SAMPLES_BEFORE_SEED} server load samples before seeding`
           : cpuBackpressure
             ? `EveJS process CPU is ${Math.round(processCpuPercent)}% (effective limit ${cpuLimit}%)`
@@ -422,8 +439,8 @@ function createPlayerBotAddonApiRuntime(options = {}) {
             shouldContinue: () => {
               const currentSettings = configuration.getSettings();
               const currentLimits = effectiveSeedLimits(currentSettings);
-              return currentSettings.rosterSeedEnabled === true && Boolean(isLoadTelemetryReady()) &&
-                currentEventLoopP95Ms() <= currentLimits.eventLoopP95Ms &&
+              return currentSettings.rosterSeedEnabled === true && !loadController.shouldPauseLowPriorityWork() &&
+                Boolean(isLoadTelemetryReady()) && currentEventLoopP95Ms() <= currentLimits.eventLoopP95Ms &&
                 processCpuPercent <= currentLimits.processCpuPercent;
             },
             getStopReason: () => {
@@ -431,7 +448,9 @@ function createPlayerBotAddonApiRuntime(options = {}) {
               const currentLimits = effectiveSeedLimits(currentSettings);
               return currentSettings.rosterSeedEnabled !== true
                 ? "roster seeding is paused"
-                : !isLoadTelemetryReady()
+                : loadController.shouldPauseLowPriorityWork()
+                  ? `player-priority load controller paused roster seeding: ${loadController.getStatus().reason}`
+                  : !isLoadTelemetryReady()
                   ? `waiting for ${REQUIRED_LOAD_SAMPLES_BEFORE_SEED} server load samples before seeding`
                   : processCpuPercent > currentLimits.processCpuPercent
                     ? `EveJS process CPU is ${Math.round(processCpuPercent)}% (effective limit ${currentLimits.processCpuPercent}%)`
@@ -472,6 +491,15 @@ function createPlayerBotAddonApiRuntime(options = {}) {
       return;
     }
     if (request.method === "POST" && url.pathname === "/v1/cycles") {
+      const playerPriorityLoad = loadController.getStatus();
+      if (playerPriorityLoad.pauseAddonCycles) {
+        sendJson(response, 429, {
+          error: "PLAYERBOTS_PAUSED_FOR_PLAYER_PRIORITY",
+          retryAfterMs: 5_000,
+          load: playerPriorityLoad,
+        });
+        return;
+      }
       const snapshot = autonomy.getAutonomySnapshot();
       const lastCycleAtMs = Date.parse(snapshot && (snapshot.lastCycleAt || snapshot.completedAt) || "") || 0;
       const configuredIntervalMs = Number(configuration.getSettings().addonCycleIntervalMs) || 5 * 60 * 1000;
