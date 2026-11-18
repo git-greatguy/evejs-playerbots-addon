@@ -5,7 +5,7 @@ This repository contains the Playerbots add-on, its installer, the hash-guarded 
 The ZIP under `dist/` is the standard install and redistribution artifact. Keep its version synchronized with `addons/playerbots/manifest.json` and `tools/playerbots/build-addon-package.py`. Build against the supported original EveJS checkout with:
 
 ```sh
-python3 tools/playerbots/build-addon-package.py --compat-root "/path/to/EveJS-261108.1"
+python3 tools/playerbots/build-addon-package.py --compat-root "/path/to/EveJS-261115.2"
 ```
 
 Installation, verification (`verify.py`) and rollback instructions are in `INSTALLATION.md`; operator commands are in `GUIDE.md` and `OPERATIONS.md`. Tests that require EveJS runtime services must run from a compatible EveJS checkout after applying the add-on overlay.

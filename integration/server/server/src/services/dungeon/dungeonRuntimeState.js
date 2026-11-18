@@ -1,6 +1,7 @@
 "use strict";
 
 const path = require("path");
+const { cloneValue: walkCloneValue } = require("../../common/clone");
 
 // Phase 0 / 0.C: dungeon runtime state via an ownership-scoped repository.
 const { isDeepStrictEqual } = require("util");
@@ -26,6 +27,48 @@ const {
   updateIncrementalIndexes,
 } = require("./dungeonRuntimeIndexes");
 const repo = createTableRepository("service:dungeon", { strict: true });
+
+// Instances copy spawnState.populationHints verbatim from their site
+// template, so most of those copies are equal. Equal hints are one shared
+// deep-frozen object. Reads out of this cache copy everything else; the frozen
+// hints themselves are shared, since nothing can change them (see
+// cloneInstanceSharingHints).
+// Persisted rows are unchanged (same JSON text).
+const frozenIntern = require(path.join(__dirname, "../../common/frozenIntern"));
+const populationHintsIntern = frozenIntern.createFrozenIntern();
+const deepFreezeValue = frozenIntern.deepFreeze;
+
+// `spawnState` is a fresh normalized copy owned by the caller.
+function internSpawnStateHints(spawnState) {
+  const hints = spawnState.populationHints;
+  if (hints && typeof hints === "object") {
+    spawnState.populationHints = populationHintsIntern.intern(hints);
+  }
+  return spawnState;
+}
+
+// Cold build, after the normalization diff: the gameStore cache still holds its
+// own parsed copy of every instance. Point its populationHints at the shared
+// value when that value has the same JSON text. No write: the row's text is
+// unchanged, so nothing is dirty and a later flush of the row serializes the
+// same JSON.
+function shareInternedHintsWithStore(persistedState) {
+  const stored = persistedState && persistedState.instancesByID;
+  if (!stored || typeof stored !== "object") return 0;
+  let shared = 0;
+  for (const instance of Object.values(stored)) {
+    const spawnState = instance && instance.spawnState;
+    const hints = spawnState && spawnState.populationHints;
+    if (!hints || typeof hints !== "object" || Object.isFrozen(hints) || Object.isFrozen(spawnState)) continue;
+    const value = populationHintsIntern.lookup(hints);
+    if (value !== null) { spawnState.populationHints = value; shared += 1; }
+  }
+  return shared;
+}
+
+function getPopulationHintsInternStats() {
+  return populationHintsIntern.stats();
+}
 
 const DUNGEON_RUNTIME_TABLE = "dungeonRuntimeState";
 const DUNGEON_RUNTIME_VERSION = 1;
@@ -150,11 +193,11 @@ function cleanupRetiredMissionInstanceInventory(table = {}) {
   }
 }
 
+// A deep copy with the JSON round trip's result: common/clone walks the value
+// instead of building and parsing a string, and gives the same value or the
+// same error for every input. A top-level undefined still throws, as before.
 function cloneValue(value) {
-  // Preserve the old error for top-level undefined while avoiding large
-  // stringify/parse allocations on frequently copied site state.
-  if (value === undefined) return JSON.parse(JSON.stringify(value));
-  return cloneJsonValue(value);
+  return value === undefined ? JSON.parse(JSON.stringify(value)) : walkCloneValue(value);
 }
 
 // The table can exceed V8's string limit even when every stored row is small.
@@ -401,7 +444,7 @@ function normalizeInstanceRecord(record = {}) {
     ...(objectiveSatisfiedReason ? { objectiveSatisfiedReason } : {}),
     hazardState: normalizeJsonObject(record.hazardState),
     environmentState: normalizeJsonObject(record.environmentState),
-    spawnState: normalizeJsonObject(record.spawnState),
+    spawnState: internSpawnStateHints(normalizeJsonObject(record.spawnState)),
     runtimeFlags: normalizeJsonObject(record.runtimeFlags),
     metadata: normalizeJsonObject(record.metadata),
   };
@@ -544,6 +587,7 @@ function buildCache(sourceState = null) {
       error.persistenceResult = normalizationCommit || null;
       throw error;
     }
+    shareInternedHintsWithStore(persistedState);
   }
   // Persistent rows keep historical loadState/result.data views stable without
   // copying every instance key on a local mutation.
@@ -1317,9 +1361,22 @@ function getUniverseReconcileMeta() {
   return cloneValue(loadState().universeReconcileMeta || normalizeUniverseReconcileMeta());
 }
 
+// A private copy of an instance that keeps its interned, deep-frozen
+// populationHints by reference. The hints are most of an instance's size and
+// nothing writes into them, yet each copy duplicated them: a site pass made over
+// a hundred such copies to read a few fields. Writing into the shared hints
+// throws (strict mode), as it would for the frozen cache entry itself.
+function cloneInstanceSharingHints(instance) {
+  const hints = instance && instance.spawnState && instance.spawnState.populationHints;
+  if (!hints || typeof hints !== "object" || !Object.isFrozen(hints)) return cloneValue(instance);
+  const copy = cloneValue({ ...instance, spawnState: { ...instance.spawnState, populationHints: null } });
+  copy.spawnState.populationHints = hints;
+  return copy;
+}
+
 function getInstanceSnapshot(instanceID) {
   const instance = ensureCache().instancesByID.get(Math.max(0, toInt(instanceID, 0)));
-  return instance ? cloneValue(instance) : null;
+  return instance ? cloneInstanceSharingHints(instance) : null;
 }
 
 // The live cache entry, NOT a copy. Only for callers that read a few fields and
@@ -1332,6 +1389,23 @@ function getInstanceSnapshot(instanceID) {
 // At the observed store size that clone is ~45us against ~0.02us for this read.
 function getInstanceRef(instanceID) {
   return ensureCache().instancesByID.get(Math.max(0, toInt(instanceID, 0))) || null;
+}
+
+// A deep-frozen copy of an instance, built once per stored version and shared.
+// A mutation stores a new instance object (unchanged instances keep theirs), so
+// the copy cached for an entry is always that entry's current content. For
+// readers on frequent paths that read a few fields: a full copy per read was
+// most of the site pass. A write into it throws instead of reaching the cache.
+const readOnlyInstanceViews = new WeakMap();
+function getInstanceReadOnly(instanceID) {
+  const instance = ensureCache().instancesByID.get(Math.max(0, toInt(instanceID, 0)));
+  if (!instance) return null;
+  let view = readOnlyInstanceViews.get(instance);
+  if (!view) {
+    view = deepFreezeValue(cloneInstanceSharingHints(instance));
+    readOnlyInstanceViews.set(instance, view);
+  }
+  return view;
 }
 
 function getInstanceSummary(instanceID) {
@@ -1557,6 +1631,8 @@ module.exports = {
   clearRuntimeCache,
   findInstanceSummaryBySiteKey,
   getInstanceRef,
+  getInstanceReadOnly,
+  getPopulationHintsInternStats,
   getInstanceSnapshot,
   getInstanceSummary,
   getNextActiveExpiryAtMs,

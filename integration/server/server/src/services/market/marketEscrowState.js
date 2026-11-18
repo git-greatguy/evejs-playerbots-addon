@@ -2,6 +2,7 @@
 
 const { randomUUID } = require("crypto");
 const path = require("path");
+const { cloneValue: walkCloneValue } = require("../../common/clone");
 
 const database = require(path.join(__dirname, "../../gameStore"));
 
@@ -10,8 +11,11 @@ const META_KEY = "_meta";
 let pendingOrderIndex = null;
 let pendingOrdersByEscrowKey = null;
 
+// A deep copy with the JSON round trip's result: common/clone walks the value
+// instead of building and parsing a string, and gives the same value or the
+// same error for every input. A top-level undefined still throws, as before.
 function cloneValue(value) {
-  return JSON.parse(JSON.stringify(value));
+  return value === undefined ? JSON.parse(JSON.stringify(value)) : walkCloneValue(value);
 }
 
 function normalizeOrderKey(orderId) {
@@ -140,14 +144,20 @@ function putEscrowRecord(record) {
     };
   }
 
-  const stored = {
-    ...cloneValue(record),
-    orderId: orderKey,
-  };
-  const result = database.write(TABLE, `/${orderKey}`, stored);
+  const entryPath = `/${orderKey}`;
+  const next = { ...cloneValue(record), orderId: orderKey };
+  // An asynchronous fill can finish from its pre-expiry snapshot after the
+  // terminal event was held. Keep that recovery marker across row rewrites.
+  if (!next.terminalSettlementHold) {
+    const current = database.read(TABLE, entryPath);
+    if (current.success && current.data?.terminalSettlementHold) {
+      next.terminalSettlementHold = cloneValue(current.data.terminalSettlementHold);
+    }
+  }
+  const result = database.write(TABLE, entryPath, next);
   if (result.success && pendingOrderIndex) {
     removePendingIndexEntry(orderKey);
-    addPendingIndexEntry(orderKey, stored);
+    addPendingIndexEntry(orderKey, next);
   }
   return result;
 }

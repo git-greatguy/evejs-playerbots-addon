@@ -697,6 +697,24 @@ function ensureCommanderOrBoss(session, fleetID = null) {
   return fleet;
 }
 
+// The boss or the fleet commander; with `wingID`, also that wing's commander.
+function ensureFleetCommandOrBoss(session, fleetID = null, wingID = null) {
+  const fleet = ensureFleetMembership(session, fleetID);
+  const member = getMemberRecord(fleet, getSessionCharacterID(session));
+  const role = toInteger(member && member.role, FLEET.FLEET_ROLE_MEMBER);
+  if (
+    member &&
+    ((toInteger(member.job, 0) & FLEET.FLEET_JOB_CREATOR) !== 0 ||
+      role === FLEET.FLEET_ROLE_LEADER ||
+      (wingID !== null &&
+        role === FLEET.FLEET_ROLE_WING_COMMANDER &&
+        toInteger(member.wingID, -1) === toInteger(wingID, -2)))
+  ) {
+    return fleet;
+  }
+  throwWrappedUserError("FleetNotCommanderOrBoss");
+}
+
 function collectFleetSessions(fleet, options = {}) {
   const sessions = [];
   for (const member of fleet.members.values()) {
@@ -732,12 +750,13 @@ function isMemberInCommandScope(commander, member) {
   return false;
 }
 
-// Resolve the live member sessions a fleet warp issued by `commanderCharID`
-// should pull along. Honors the command hierarchy (fleet/wing/squad) and the
-// per-member acceptsFleetWarp opt-out, and excludes the commander (who issues
-// their own warp through the normal path). Same-system/on-grid eligibility is
-// the caller's concern because that lives in the space runtime, not here.
-function collectFleetWarpFollowers(commanderCharID) {
+// Resolve the live member sessions a command issued by `commanderCharID`
+// reaches: the members under that commander in the command hierarchy
+// (fleet/wing/squad) who have not set the `optOutKey` member preference to
+// false. The commander is excluded (they act through the normal path).
+// Same-system/on-grid eligibility is the caller's concern because that lives
+// in the space runtime, not here.
+function collectCommandFollowers(commanderCharID, optOutKey) {
   const numericCommander = toInteger(commanderCharID, 0);
   const fleet = getFleetForCharacter(numericCommander);
   if (!fleet) {
@@ -753,7 +772,7 @@ function collectFleetWarpFollowers(commanderCharID) {
     if (!isMemberInCommandScope(commander, member)) {
       continue;
     }
-    if (member.memberOptOuts && member.memberOptOuts.acceptsFleetWarp === false) {
+    if (member.memberOptOuts && member.memberOptOuts[optOutKey] === false) {
       continue;
     }
     const session = findSessionByCharacterID(member.charID);
@@ -767,6 +786,16 @@ function collectFleetWarpFollowers(commanderCharID) {
     });
   }
   return followers;
+}
+
+// The members a fleet warp pulls along, honoring acceptsFleetWarp.
+function collectFleetWarpFollowers(commanderCharID) {
+  return collectCommandFollowers(commanderCharID, "acceptsFleetWarp");
+}
+
+// The members a fleet regroup calls in, honoring acceptsFleetRegroups.
+function collectFleetRegroupFollowers(commanderCharID) {
+  return collectCommandFollowers(commanderCharID, "acceptsFleetRegroups");
 }
 
 function notifySession(session, notificationName, payload, idType = "fleetid") {
@@ -2188,12 +2217,31 @@ function kickMember(session, fleetID, characterID) {
   if (!fleet.members.has(numericCharacterID)) {
     return false;
   }
+  // The boss may kick anyone. A commander may kick only a lower-ranked member
+  // under their own command, and never the boss.
+  const caller = getMemberRecord(fleet, getSessionCharacterID(session));
+  const target = getMemberRecord(fleet, numericCharacterID);
+  const wasBoss = getBossCharacterID(fleet) === numericCharacterID;
+  const callerIsBoss = (toInteger(caller.job, 0) & FLEET.FLEET_JOB_CREATOR) !== 0;
+  if (
+    !callerIsBoss &&
+    (
+      wasBoss ||
+      !isMemberInCommandScope(caller, target) ||
+      toInteger(target.role, FLEET.FLEET_ROLE_MEMBER) <= toInteger(caller.role, FLEET.FLEET_ROLE_MEMBER)
+    )
+  ) {
+    throwWrappedUserError("FleetNotCommanderOrBoss");
+  }
   if (fleet.members.size <= 1) {
     destroyFleet(fleet);
     return true;
   }
   removeMemberFromFleet(fleet, numericCharacterID);
-  disbandFleetIfOnlyPlayerBotsRemain(fleet);
+  if (disbandFleetIfOnlyPlayerBotsRemain(fleet)) return true;
+  if (wasBoss) {
+    assignBossToAnyRemainingMember(fleet);
+  }
   return true;
 }
 
@@ -2305,6 +2353,7 @@ function createSquad(session, fleetID, wingID) {
   if (!wing) {
     throwWrappedUserError("FleetNotFound");
   }
+  ensureFleetCommandOrBoss(session, fleet.fleetID, wing.wingID);
   if (wing.squads.size >= FLEET.MAX_SQUADS_IN_WING) {
     throwWrappedUserError("FleetError");
   }
@@ -2330,6 +2379,7 @@ function deleteSquad(session, fleetID, squadID) {
   if (!ownerWing) {
     throwWrappedUserError("FleetNotFound");
   }
+  ensureFleetCommandOrBoss(session, fleet.fleetID, ownerWing.wingID);
   for (const member of fleet.members.values()) {
     if (member.squadID === numericSquadID) {
       throwWrappedUserError("FleetError");
@@ -2354,15 +2404,18 @@ function changeSquadName(session, fleetID, squadID, name) {
   const fleet = ensureCommanderOrBoss(session, fleetID);
   const numericSquadID = toInteger(squadID, 0);
   let squad = null;
+  let ownerWing = null;
   for (const wing of fleet.wings.values()) {
     squad = wing.squads.get(numericSquadID) || null;
     if (squad) {
+      ownerWing = wing;
       break;
     }
   }
   if (!squad) {
     throwWrappedUserError("FleetNotFound");
   }
+  ensureFleetCommandOrBoss(session, fleet.fleetID, ownerWing.wingID);
   squad.name = normalizeText(name, "").slice(0, FLEET.MAX_NAME_LENGTH);
   notifyFleet(fleet, "OnFleetSquadNameChanged", [numericSquadID, squad.name]);
   return true;
@@ -2408,7 +2461,7 @@ function setFleetMaxSize(session, fleetID, maxSize) {
 }
 
 function setMotd(session, fleetID, motd) {
-  const fleet = ensureFleetMembership(session, fleetID);
+  const fleet = ensureFleetCommandOrBoss(session, fleetID);
   fleet.motd = normalizeText(motd, "");
   chatRuntime.setChannelMotd(`fleet_${fleet.fleetID}`, fleet.motd, {
     metadata: {
@@ -2647,8 +2700,9 @@ function shouldReceiveBroadcast(recipient, sender, scope) {
   const senderRole = toInteger(sender.role, FLEET.FLEET_ROLE_MEMBER);
   const recipientRole = toInteger(recipient.role, FLEET.FLEET_ROLE_MEMBER);
 
+  // Up reaches only the sender's own chain of command: the fleet commander,
+  // the commander of the sender's wing and the commander of the sender's squad.
   const isRecipientSuperiorToSender = (
-    recipientRole < senderRole ||
     (recipientRole === FLEET.FLEET_ROLE_LEADER && senderRole !== FLEET.FLEET_ROLE_LEADER) ||
     (recipientRole === FLEET.FLEET_ROLE_WING_COMMANDER &&
       senderRole >= FLEET.FLEET_ROLE_SQUAD_COMMANDER &&
@@ -2782,31 +2836,68 @@ function buildJoinRequestFromSession(session) {
   };
 }
 
+function toOptionalAdvertLimit(value) {
+  const raw = value && typeof value === "object" && "value" in value ? value.value : value;
+  if (raw === null || raw === undefined || raw === "") {
+    return null;
+  }
+  const numeric = Number(raw);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+// The advanced restrictions an advert sets for one group of applicants:
+// "membergroups" (the boss's corporation, alliance or militia) or "public".
+// The client fills the allowed and disallowed sets from the boss's standings
+// against the minimum standing it chose, so a pilot, corporation or alliance in
+// neither set has no standing with the boss and is held to the minimum as 0.
+function doesAdvertGroupAdmit(advert, groupPrefix, applicant) {
+  const entityIDs = [applicant.charID, applicant.corpID, applicant.allianceID]
+    .filter((entityID) => toInteger(entityID, 0) > 0);
+  const disallowed = advert[`${groupPrefix}_disallowedEntities`];
+  if (disallowed instanceof Set && entityIDs.some((entityID) => disallowed.has(entityID))) {
+    return false;
+  }
+  const minStanding = toOptionalAdvertLimit(advert[`${groupPrefix}_minStanding`]);
+  if (minStanding !== null && minStanding > 0) {
+    const allowed = advert[`${groupPrefix}_allowedEntities`];
+    if (!(allowed instanceof Set) || !entityIDs.some((entityID) => allowed.has(entityID))) {
+      return false;
+    }
+  }
+  const minSecurity = toOptionalAdvertLimit(advert[`${groupPrefix}_minSecurity`]);
+  if (minSecurity !== null && Number(applicant.securityStatus || 0) < minSecurity) {
+    return false;
+  }
+  return true;
+}
+
 function isAdvertOpenToSession(advert, session) {
   if (!advert) {
     return false;
   }
 
-  if (advert.inviteScope & FLEET.INVITE_PUBLIC_OPEN) {
-    return true;
-  }
+  const applicant = buildJoinRequestFromSession(session);
+  let inMemberGroup = false;
   if (advert.inviteScope & FLEET.INVITE_CORP) {
     if (toOptionalInteger(session && (session.corpid || session.corporationID), null) === advert.leader.corpID) {
-      return true;
+      inMemberGroup = true;
     }
   }
   if (advert.inviteScope & FLEET.INVITE_ALLIANCE) {
     if (advert.leader.allianceID && toOptionalInteger(session && (session.allianceid || session.allianceID), null) === advert.leader.allianceID) {
-      return true;
+      inMemberGroup = true;
     }
   }
   if (advert.inviteScope & FLEET.INVITE_MILITIA) {
     if (advert.leader.warFactionID && toOptionalInteger(session && (session.warfactionid || session.warFactionID), null) === advert.leader.warFactionID) {
-      return true;
+      inMemberGroup = true;
     }
   }
-  if (advert.inviteScope & FLEET.INVITE_PUBLIC) {
+  if (inMemberGroup && doesAdvertGroupAdmit(advert, "membergroups", applicant)) {
     return true;
+  }
+  if (advert.inviteScope & (FLEET.INVITE_PUBLIC | FLEET.INVITE_PUBLIC_OPEN)) {
+    return doesAdvertGroupAdmit(advert, "public", applicant);
   }
   return false;
 }
@@ -2871,10 +2962,20 @@ function updateAdvertAllowedEntities(session, allowedEntitiesInfo) {
   }
 
   const source = getMarshalObjectSource(allowedEntitiesInfo);
-  fleet.advert.membergroups_allowedEntities = normalizeAdvertEntitySet(source.membergroups_allowedEntities);
-  fleet.advert.public_allowedEntities = normalizeAdvertEntitySet(source.public_allowedEntities);
-  fleet.advert.membergroups_disallowedEntities = normalizeAdvertEntitySet(source.membergroups_disallowedEntities);
-  fleet.advert.public_disallowedEntities = normalizeAdvertEntitySet(source.public_disallowedEntities);
+  // Contact updates pass the standings dictionary directly. Advert payloads
+  // and the separate boss-change RPC use the underscored names.
+  fleet.advert.membergroups_allowedEntities = normalizeAdvertEntitySet(
+    source.membergroupsAllowedEntities ?? source.membergroups_allowedEntities,
+  );
+  fleet.advert.public_allowedEntities = normalizeAdvertEntitySet(
+    source.publicAllowedEntities ?? source.public_allowedEntities,
+  );
+  fleet.advert.membergroups_disallowedEntities = normalizeAdvertEntitySet(
+    source.membergroupsDisallowedEntities ?? source.membergroups_disallowedEntities,
+  );
+  fleet.advert.public_disallowedEntities = normalizeAdvertEntitySet(
+    source.publicDisallowedEntities ?? source.public_disallowedEntities,
+  );
   fleet.advert.advertTime = currentFileTime();
   return copyAdvert(fleet.advert);
 }
@@ -3108,6 +3209,7 @@ module.exports = {
   getRespawnPoints,
   setRespawnPoints,
   collectFleetWarpFollowers,
+  collectFleetRegroupFollowers,
   setFleetTargetTag,
   getTargetTagForCharacter,
   setBridgeMode,
@@ -3124,6 +3226,7 @@ module.exports = {
   getFleetHelpersSnapshot,
   _testing: {
     collectBroadcastRecipientSessions,
+    shouldReceiveBroadcast,
     resetRuntimeCaches() {
       runtimeState.nextFleetSerial = 1;
       runtimeState.fleets.clear();

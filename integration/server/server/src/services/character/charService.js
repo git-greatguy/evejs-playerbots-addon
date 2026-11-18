@@ -1683,6 +1683,12 @@ class CharService extends BaseService {
       log.warn(`[CharService] Void replay recovery pending char=${charId}: ${error.message}`);
       throwWrappedUserError("CustomInfo", { info: "Void replay recovery is settling your ship. Please try again shortly." });
     }
+    try {
+      if (tutorialSkipResult?.changed) require("../npe/airEncounterRuntime").leaveBeforeSelection(charId);
+      require("../activity/voidSystems").reconcileBeforeSelection(charId);
+    } catch (error) {
+      log.warn(`[CharService] Void system recovery failed char=${charId}: ${error.message}`);
+    }
 
     let abyssalPreselectRecoveryResult = null;
     try {
@@ -1886,6 +1892,13 @@ class CharService extends BaseService {
           abyssalSelectionReconciliation.spaceRestored === true
             ? true
             : restoreSpaceSession(session);
+        // The client has no space scene until this ballpark's SetState. The node graph notices
+        // wait for it (nodeGraphRuntime publish): an AIR scene's start swaps the nebula and
+        // moves the camera.
+        if (restored && session._space && !(abyssalSelectionReconciliation &&
+          abyssalSelectionReconciliation.spaceRestored === true)) {
+          session._space.loginSceneAwaited = true;
+        }
         log.info(
           `[CharService] Space restore ${restored ? "completed" : "skipped"} for ` +
           `${session.characterName || charId} in ${Date.now() - restoreStartedAtMs}ms`,
@@ -1896,6 +1909,8 @@ class CharService extends BaseService {
         session,
         applyResult.notificationPlan,
       );
+      require("../../_secondary/express/publicGatewayNotices").getPublicGateway()
+        ?.primeShipSkinStatesForSession?.(session);
       const notificationFlushElapsedMs = Date.now() - notificationFlushStartedAtMs;
       if (notificationFlushElapsedMs >= 250) {
         log.info(
@@ -1960,8 +1975,8 @@ class CharService extends BaseService {
 
   Handle_DeleteCharacter(args, session, kwargs) {
     const charId = resolveCharacterRequestId(args, kwargs, 0);
-    deleteCharacter(charId, session && session.userid);
-    return null;
+    const result = deleteCharacter(charId, session && session.userid);
+    return result.success ? null : result.errorMsg;
   }
 
   Handle_GetValidRandomName(args, session) {

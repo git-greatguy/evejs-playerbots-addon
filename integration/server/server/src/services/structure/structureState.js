@@ -1,5 +1,6 @@
 "use strict";
 
+const { cloneValue: walkCloneValue } = require("../../common/clone");
 const path = require("path");
 
 // Memoized resolver for lazy (circular-dependency-safe) requires that run on the
@@ -46,7 +47,7 @@ const { getTypeAttributeValue } = require(path.join(
   __dirname,
   "../fitting/liveFittingState",
 ));
-const { normalizeRoleValue } = require(path.join(
+const { normalizeRoleValue, hasStaffAccountRole } = require(path.join(
   __dirname,
   "../account/accountRoleProfiles",
 ));
@@ -191,7 +192,7 @@ const structureChangeListeners = new Set();
 const pendingMarketOrderCancellationTasks = new Set();
 
 function cloneValue(value) {
-  return JSON.parse(JSON.stringify(value));
+  return value === undefined ? JSON.parse(JSON.stringify(value)) : walkCloneValue(value);
 }
 
 function toInt(value, fallback = 0) {
@@ -2435,8 +2436,28 @@ function hasStructureGmBypass(session) {
   if (!session) {
     return false;
   }
+  // session.role also carries the chat role. A player's default chat role
+  // keeps ROLE_CHTADMINISTRATOR and ROLE_ACCOUNTMANAGEMENT, which are both in
+  // GM_BYPASS_ROLE_MASK, so the role mask alone let every player through.
+  // Only a staff account gets the bypass.
+  if (session.isGM === false || !hasStaffAccountRole(session)) {
+    return false;
+  }
   const role = normalizeRoleValue(session && session.role, 0n);
   return role > 0n && (role & GM_BYPASS_ROLE_MASK) !== 0n;
+}
+
+// structure.allianceID is stamped when the structure is anchored and nothing
+// refreshes it, so a corporation that later joins, leaves or changes alliance
+// would keep the old alliance's access. The owner corporation's current
+// alliance decides; the stamp is used only when that record is missing.
+function getStructureOwnerAllianceID(structure) {
+  const ownerCorpID = toPositiveInt(structure && (structure.ownerCorpID || structure.ownerID), 0);
+  const { getCorporationRecord } = lazyRequire("../corporation/corporationState");
+  const corporation = ownerCorpID > 0 ? getCorporationRecord(ownerCorpID) : null;
+  return corporation
+    ? toPositiveInt(corporation.allianceID, 0)
+    : toPositiveInt(structure && structure.allianceID, 0);
 }
 
 function buildDockAccessPolicy(structure, policyName, session) {
@@ -2466,10 +2487,7 @@ function buildDockAccessPolicy(structure, policyName, session) {
     return corpID > 0 && corpID === ownerCorpID;
   }
   if (policy === "alliance") {
-    const ownerCorporation = require("../corporation/corporationState").getCorporationRecord(ownerCorpID);
-    const ownerAllianceID = ownerCorporation
-      ? toPositiveInt(ownerCorporation.allianceID, 0)
-      : toPositiveInt(structure && structure.allianceID, 0);
+    const ownerAllianceID = getStructureOwnerAllianceID(structure);
     return isStructureOwnerOrAllianceMember(corpID, allianceID, ownerCorpID, ownerAllianceID);
   }
   return false;
@@ -5016,6 +5034,7 @@ Object.assign(module.exports, {
   removeStructure,
   destroyStructure,
   hasStructureGmBypass,
+  getStructureOwnerAllianceID,
   isDockingServiceOnline,
   isStructureTetheringAllowed,
   canCharacterDockAtStructure,

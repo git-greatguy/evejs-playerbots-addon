@@ -18,6 +18,7 @@ const {
   buildRow,
   currentFileTime,
   extractList,
+  unwrapMarshalValue,
 } = require(path.join(__dirname, "../_shared/serviceHelpers"));
 const {
   buildCachedMethodCallResult,
@@ -77,6 +78,12 @@ const {
   normalizePositiveInteger,
   normalizeText,
   recordCorporationRoleHistory,
+  recordCorporationMemberEvent,
+  MEMBER_EVENT_LEFT,
+  MEMBER_EVENT_JOINED,
+  MEMBER_EVENT_APPLIED,
+  MEMBER_EVENT_BECAME_CEO,
+  MEMBER_EVENT_LEFT_CEO,
   toRoleMaskBigInt,
   updateCorporationRecord,
   updateCorporationRuntime,
@@ -673,6 +680,12 @@ function moveCharacterToCorporation(
 
   ensureCharacterMemberState(targetCorporation.corporationID, characterID);
   syncMemberStateToCharacterRecord(targetCorporation.corporationID, characterID);
+  if (Number(fromCorporationID) !== Number(targetCorporation.corporationID)) {
+    // AuditMember's member events: Left in the corporation left, Joined in the one joined
+    // (an NPC corporation keeps none).
+    recordCorporationMemberEvent(fromCorporationID, characterID, MEMBER_EVENT_LEFT);
+    recordCorporationMemberEvent(targetCorporation.corporationID, characterID, MEMBER_EVENT_JOINED);
+  }
   if (options.applicationAccept === true) {
     if (!sourceIsNpcCorporation) {
       notifyCorporationMemberChanged(
@@ -2241,15 +2254,21 @@ class CorpRegistryRuntimeService extends BaseService {
     return bulletin ? buildBulletinRow(bulletin) : null;
   }
 
-  Handle_AddBulletin(args, session) {
+  Handle_AddBulletin(args, session, kwargs) {
     const corporationID = resolveCorporationID(session);
     if (!canManageCorporationBulletins(corporationID, session)) {
       throwCorporationAccessDenied();
     }
     const title = normalizeText(args && args[0], "");
     const body = normalizeText(args && args[1], "");
-    const bulletinID = normalizePositiveInteger(args && args[2], null);
-    const editDateTime = args && args[3] ? args[3] : null;
+    // base_corporation.UpdateBulletin sends bulletinID and editDateTime as keywords (AddBulletin(title, body,
+    // bulletinID=..., editDateTime=...)); positional ones are kept for the UpdateBulletin alias.
+    const keywords = unwrapMarshalValue(kwargs) || {};
+    const bulletinID = normalizePositiveInteger(
+      args && args[2] !== undefined && args[2] !== null ? args[2] : keywords.bulletinID,
+      null,
+    );
+    const editDateTime = args && args[3] ? args[3] : keywords.editDateTime || null;
     let nextBulletinID = bulletinID;
     updateCorporationRuntime(corporationID, (runtime, corporationRecord, table) => {
       if (!nextBulletinID) {
@@ -2410,6 +2429,7 @@ class CorpRegistryRuntimeService extends BaseService {
       buildCorporationApplicationRow(createdApplication),
     );
     notifyCorporationApplicationReceived(corporationID, characterID, applicationText);
+    recordCorporationMemberEvent(corporationID, characterID, MEMBER_EVENT_APPLIED);
     // Corporations made up only of playerbots admit applicants automatically.
     require("../playerbots/playerBotRecruitmentRuntime").onApplicationInserted(
       this, corporationID, characterID, applicationID, session, applicationText,
@@ -4054,6 +4074,8 @@ class CorpRegistryRuntimeService extends BaseService {
       });
       syncMemberStateToCharacterRecord(corporationID, actingCharacterID);
       syncMemberStateToCharacterRecord(corporationID, newCEOID);
+      recordCorporationMemberEvent(corporationID, actingCharacterID, MEMBER_EVENT_LEFT_CEO);
+      recordCorporationMemberEvent(corporationID, newCEOID, MEMBER_EVENT_BECAME_CEO);
       notifyCorporationChanged(corporationID, previousCorporation);
       notifyCorporationMemberChanged(
         corporationID,

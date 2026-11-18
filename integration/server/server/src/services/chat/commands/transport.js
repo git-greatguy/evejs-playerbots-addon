@@ -786,6 +786,9 @@ function formatTransportTransitionError(result, fallback) {
   if (errorMsg === "SOLAR_JUMP_IN_PROGRESS" || errorMsg === "STATION_JUMP_IN_PROGRESS") {
     return "A transport is already in progress for this character.";
   }
+  if (errorMsg === "VOID_SYSTEM_RESERVED") {
+    return "That void system is held for another pilot.";
+  }
   return fallback;
 }
 

@@ -317,6 +317,27 @@ function writeState(state) {
   return flushStateToDisk();
 }
 
+// Persist only the named colonies, each at its own path, so the flush writes
+// just those colony rows. writeState() is a root write, which makes the flush
+// re-serialize every colony, launch and receipt on the server.
+function writeColonies(state, keys) {
+  for (const key of keys) {
+    const result = database.write(
+      TABLE_NAME,
+      `/coloniesByKey/${key}`,
+      state.coloniesByKey[key],
+      { force: true },
+    );
+    if (!result.success) {
+      log.warn(
+        `[PlanetRuntimeStore] Failed to write ${TABLE_NAME} colony ${key}: ${result.errorMsg || "WRITE_ERROR"}`,
+      );
+      return false;
+    }
+  }
+  return flushStateToDisk();
+}
+
 function normalizeInteger(value, fallback = 0) {
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) {
@@ -4212,7 +4233,7 @@ function getColony(planetID, ownerID) {
   });
   if (simulationResult.changed) {
     state.coloniesByKey[key] = simulationResult.colony;
-    writeState(state);
+    writeColonies(state, [key]);
   }
   return simulationResult.colony;
 }
@@ -4225,7 +4246,7 @@ function listColoniesForCharacter(ownerID) {
 
   const state = readState({ repair: true });
   const colonies = [];
-  let changed = false;
+  const changedKeys = [];
   for (const [key, rawColony] of Object.entries(state.coloniesByKey)) {
     if (normalizeInteger(rawColony && rawColony.ownerID, 0) !== normalizedOwnerID) {
       continue;
@@ -4237,12 +4258,12 @@ function listColoniesForCharacter(ownerID) {
     });
     if (simulationResult.changed) {
       state.coloniesByKey[key] = simulationResult.colony;
-      changed = true;
+      changedKeys.push(key);
     }
     colonies.push(simulationResult.colony);
   }
-  if (changed) {
-    writeState(state);
+  if (changedKeys.length > 0) {
+    writeColonies(state, changedKeys);
   }
   return colonies;
 }
@@ -4314,7 +4335,7 @@ function listColoniesForPlanet(planetID) {
 
   const state = readState({ repair: true });
   const colonies = [];
-  let changed = false;
+  const changedKeys = [];
   for (const [key, rawColony] of Object.entries(state.coloniesByKey)) {
     if (normalizeInteger(rawColony && rawColony.planetID, 0) !== normalizedPlanetID) {
       continue;
@@ -4326,12 +4347,12 @@ function listColoniesForPlanet(planetID) {
     });
     if (simulationResult.changed) {
       state.coloniesByKey[key] = simulationResult.colony;
-      changed = true;
+      changedKeys.push(key);
     }
     colonies.push(simulationResult.colony);
   }
-  if (changed) {
-    writeState(state);
+  if (changedKeys.length > 0) {
+    writeColonies(state, changedKeys);
   }
   return colonies;
 }
@@ -4449,7 +4470,7 @@ function getColonyByPin(ownerID, pinID) {
   }
 
   const state = readState({ repair: true });
-  let changed = false;
+  const changedKeys = [];
   for (const [key, rawColony] of Object.entries(state.coloniesByKey || {})) {
     if (normalizeInteger(rawColony && rawColony.ownerID, 0) !== normalizedOwnerID) {
       continue;
@@ -4462,18 +4483,18 @@ function getColonyByPin(ownerID, pinID) {
     const colony = simulationResult.colony;
     if (simulationResult.changed) {
       state.coloniesByKey[key] = colony;
-      changed = true;
+      changedKeys.push(key);
     }
     if (findPin(colony, normalizedPinID)) {
-      if (changed) {
-        writeState(state);
+      if (changedKeys.length > 0) {
+        writeColonies(state, changedKeys);
       }
       return colony;
     }
   }
 
-  if (changed) {
-    writeState(state);
+  if (changedKeys.length > 0) {
+    writeColonies(state, changedKeys);
   }
   return null;
 }

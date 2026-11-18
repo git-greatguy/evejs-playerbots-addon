@@ -6,8 +6,11 @@ const {
 const { cloneValue: cloneJsonValue } = require("../../common/clone");
 
 const path = require("path");
+const { cloneValue: walkCloneValue } = require("../../common/clone");
 const securityBindings = require("../../contentPacks/securityMissionBinding");
 const { buildLegacyTemplate } = require("./capturedSecurityLegacyScenes");
+const { normalizeTemplateRoomFrameOffsets } = require("./roomFramePositions");
+const { applyFlashpointContent } = require("../observatoryFlashpoint/flashpointCatalog");
 
 const {
   applyDungeonContentPacks,
@@ -40,11 +43,11 @@ const BANNED_SOURCE_MISSION_IDS = new Set(
   ]),
 );
 
+// A deep copy with the JSON round trip's result: common/clone walks the value
+// instead of building and parsing a string, and gives the same value or the
+// same error for every input. A top-level undefined still throws, as before.
 function clone(value) {
-  // Keep JSON round-trip behavior for undefined while using the shared walker
-  // for the large dungeon templates cloned on live site updates.
-  if (value === undefined) return JSON.parse(JSON.stringify(value));
-  return cloneJsonValue(value);
+  return value === undefined ? JSON.parse(JSON.stringify(value)) : walkCloneValue(value);
 }
 
 // Adapted from ciefa/evejs-ciefa-fork 84136a92a1958118af2f9bc2888012a699fe2434.
@@ -250,10 +253,12 @@ function sanitizePayload(payload = {}) {
 
 function buildCache() {
   const payload = sanitizePayload(
-    applyCuratedHackableContent(
-      applyDungeonContentPacks(
-        readCoreDungeonAuthorityPayload(),
-        initializeContentPacks(),
+    applyFlashpointContent(
+      applyCuratedHackableContent(
+        applyDungeonContentPacks(
+          readCoreDungeonAuthorityPayload(),
+          initializeContentPacks(),
+        ),
       ),
     ),
   );
@@ -300,8 +305,10 @@ function buildCache() {
         _contentPack: template._contentPack,
       })));
     }
+    // Compiled packs give a later room's content in the dungeon's frame;
+    // the runtime adds content offsets to the room's anchor (roomFramePositions.js).
     const normalizedTemplate = {
-      ...template,
+      ...normalizeTemplateRoomFrameOffsets(template).template,
       templateID,
       source: String(template && template.source || "").trim().toLowerCase() || "unknown",
       siteFamily: String(template && template.siteFamily || "").trim().toLowerCase() || "unknown",

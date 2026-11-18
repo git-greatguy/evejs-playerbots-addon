@@ -1,5 +1,6 @@
 "use strict";
 
+const { cloneValue: walkCloneValue } = require("../../common/clone");
 const path = require("path");
 const zlib = require("zlib");
 
@@ -69,7 +70,7 @@ const MAILING_LIST_MEMBER_OPERATOR = 2;
 const MAILING_LIST_MEMBER_OWNER = 3;
 
 function cloneValue(value) {
-  return JSON.parse(JSON.stringify(value));
+  return value === undefined ? JSON.parse(JSON.stringify(value)) : walkCloneValue(value);
 }
 
 function currentFileTimeString() {
@@ -245,6 +246,13 @@ function findExistingCharacterWelcomeMail(state, characterID, senderID) {
   return null;
 }
 
+// Mailing lists already brought into shape since they were loaded. Every mail
+// read and write used to re-shape every list and stringify it twice. A list is
+// taken off this set when getMailingListRecord() hands it to a caller that may
+// change it, and is shaped again on the next call; a list replaced from outside
+// is a new object and is shaped too.
+const shapedMailingLists = new WeakSet();
+
 function getMutableState() {
   const result = repo.read(MAIL_TABLE, "/");
   let state =
@@ -289,6 +297,9 @@ function getMutableState() {
     mutated = true;
   }
   for (const [listID, record] of Object.entries(state.mailingLists)) {
+    if (shapedMailingLists.has(record)) {
+      continue;
+    }
     const before = JSON.stringify(record);
     const normalizedRecord = ensureMailingListShape(record, listID);
     if (!normalizedRecord) {
@@ -304,6 +315,7 @@ function getMutableState() {
       state.mailingLists[String(normalizedRecord.listID)] = normalizedRecord;
       mutated = true;
     }
+    shapedMailingLists.add(normalizedRecord);
   }
 
   if (mutated) {
@@ -329,7 +341,12 @@ function getMailingListRecord(state, listID) {
     return null;
   }
   const record = state.mailingLists[String(listID)];
-  return record && typeof record === "object" ? record : null;
+  if (!record || typeof record !== "object") {
+    return null;
+  }
+  // The caller may change this list.
+  shapedMailingLists.delete(record);
+  return record;
 }
 
 function ensureMailingListShape(record, listID) {
@@ -518,8 +535,16 @@ function buildMailingListSummary(record, characterID) {
   };
 }
 
-function persistState(state) {
-  return repo.write(MAIL_TABLE, "/", state);
+// changedPaths, when given, names every row the caller changed. The cache
+// already holds the changed objects, so the root write keeps its
+// same-reference meaning and the paths only keep the flush to those rows.
+function persistState(state, changedPaths = null) {
+  if (!Array.isArray(changedPaths) || changedPaths.length === 0) {
+    return repo.write(MAIL_TABLE, "/", state);
+  }
+  return repo.write(MAIL_TABLE, "/", state, {
+    knownChangedPaths: [...new Set(changedPaths)],
+  });
 }
 
 function ensureMailbox(state, characterID) {
@@ -655,6 +680,31 @@ function resolveMailingListRecipients(state, listID, senderID, saveSenderCopy) {
     success: true,
     recipients: [...new Set(recipients)].sort((left, right) => left - right),
   };
+}
+
+// A pilot's block list (charMgr BlockOwners) holds characters, corporations and
+// alliances. Mail from a blocked sender, or from a member of a blocked
+// corporation or alliance, is not delivered to that pilot; the sender keeps
+// their own copy.
+function isSenderBlockedByRecipient(characters, recipientID, senderID) {
+  const recipient = characters[String(recipientID)];
+  const blockedOwners =
+    recipient && recipient.blockedOwners && typeof recipient.blockedOwners === "object"
+      ? recipient.blockedOwners
+      : null;
+  if (!blockedOwners) {
+    return false;
+  }
+  const sender = characters[String(senderID)] || {};
+  const senderOwnerIDs = new Set([
+    senderID,
+    toPositiveInteger(sender.corporationID, 0),
+    toPositiveInteger(sender.allianceID, 0),
+  ].filter((ownerID) => ownerID > 0));
+  return Object.entries(blockedOwners).some(([key, entry]) => senderOwnerIDs.has(
+    toPositiveInteger(entry && (entry.senderID ?? entry.contactID), 0) ||
+      toPositiveInteger(key, 0),
+  ));
 }
 
 function buildDeliveryRecipients(
@@ -1008,7 +1058,7 @@ function mutateStatuses(characterID, messageIDs, mutator) {
   }
 
   if (mutated) {
-    persistState(state);
+    persistState(state, [`/mailboxes/${numericCharacterID}`]);
   }
   return { success: true, mutated, changedMessageIDs };
 }
@@ -1037,7 +1087,7 @@ function mutateAllStatuses(characterID, predicate, mutator) {
   }
 
   if (mutated) {
-    persistState(state);
+    persistState(state, [`/mailboxes/${numericCharacterID}`]);
   }
   return { success: true, mutated, changedMessageIDs };
 }
@@ -1122,7 +1172,7 @@ function sendMail(options = {}) {
     Math.trunc(normalizeNumber(options.statusMask, 0)),
   );
 
-  const state = cloneValue(getMutableState());
+  const state = getMutableState();
   const resolvedRecipients = buildDeliveryRecipients(
     state,
     explicitCharacterIDs,
@@ -1135,13 +1185,36 @@ function sendMail(options = {}) {
   if (!resolvedRecipients.success) {
     return resolvedRecipients;
   }
-  const recipientCharacterIDs = resolvedRecipients.recipients;
+  let recipientCharacterIDs = resolvedRecipients.recipients;
+  if (senderID > 0) {
+    const characters = getCharactersTable();
+    recipientCharacterIDs = recipientCharacterIDs.filter(
+      (characterID) =>
+        characterID === senderID ||
+        !isSenderBlockedByRecipient(characters, characterID, senderID),
+    );
+  }
 
   if (recipientCharacterIDs.length === 0 && !saveSenderCopy) {
     return { success: false, errorMsg: "NO_RECIPIENTS" };
   }
 
+  // A root write may fail after sendMail has edited the live cache. Keep the
+  // original rows that this send can change so a refused send can be retried.
+  const mailboxIDs = new Set(recipientCharacterIDs);
+  if (senderID > 0 && (saveSenderCopy || state.mailboxes[String(senderID)])) {
+    mailboxIDs.add(senderID);
+  }
+  const previousMailboxes = new Map();
+  for (const characterID of mailboxIDs) {
+    const mailbox = state.mailboxes[String(characterID)];
+    previousMailboxes.set(characterID, mailbox === undefined ? undefined : cloneValue(mailbox));
+  }
+  const previousCareerMail = state.careerPlayerMailSent;
+  const previousCareerReceipt = previousCareerMail?.[String(senderID)];
+  const previousNextMessageID = state._meta.nextMessageID;
   const messageID = allocateMessageID(state);
+  const previousMessage = state.messages[String(messageID)];
   const message = {
     messageID,
     senderID,
@@ -1216,9 +1289,50 @@ function sendMail(options = {}) {
     state.careerPlayerMailSent ||= {};
     state.careerPlayerMailSent[String(senderID)] ||= { messageID, completedAtMs: Date.now() };
   }
-  const writeResult = persistState(state);
-  if (!writeResult || !writeResult.success) {
-    return { success: false, errorMsg: "WRITE_ERROR" };
+  const changedPaths = [
+    "/_meta",
+    `/messages/${messageID}`,
+    ...recipientCharacterIDs.map((characterID) => `/mailboxes/${characterID}`),
+  ];
+  if (senderID > 0 && state.mailboxes[String(senderID)]) {
+    changedPaths.push(`/mailboxes/${senderID}`);
+  }
+  if (careerMail) {
+    changedPaths.push("/careerPlayerMailSent");
+  }
+  const rollback = () => {
+    state._meta.nextMessageID = previousNextMessageID;
+    if (previousMessage === undefined) {
+      delete state.messages[String(messageID)];
+    } else {
+      state.messages[String(messageID)] = previousMessage;
+    }
+    for (const [characterID, mailbox] of previousMailboxes) {
+      if (mailbox === undefined) {
+        delete state.mailboxes[String(characterID)];
+      } else {
+        state.mailboxes[String(characterID)] = mailbox;
+      }
+    }
+    if (careerMail) {
+      if (previousCareerMail === undefined) {
+        delete state.careerPlayerMailSent;
+      } else {
+        state.careerPlayerMailSent = previousCareerMail;
+        if (previousCareerMail && previousCareerReceipt === undefined) {
+          delete previousCareerMail[String(senderID)];
+        }
+      }
+    }
+  };
+  try {
+    if (!persistState(state, changedPaths)?.success) {
+      rollback();
+      return { success: false, errorMsg: "WRITE_ERROR" };
+    }
+  } catch (error) {
+    rollback();
+    throw error;
   }
 
   if (careerMail) {

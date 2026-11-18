@@ -45,13 +45,13 @@ This feature does not implement cross-system dispatch, turret/missile/capital co
 Run the controlled-dependency suite with Node.js and no third-party test packages:
 
 ```
-EVEJS_ROOT=/path/to/compatible/EveJS-261108.1 node tests/run-local-defense.cjs
+EVEJS_ROOT=/path/to/compatible/EveJS-261115.2 node tests/run-local-defense.cjs
 ```
 
 PowerShell:
 
 ```
-$env:EVEJS_ROOT = 'C:\path\to\EveJS-261108.1'
+$env:EVEJS_ROOT = 'C:\path\to\EveJS-261115.2'
 node tests/run-local-defense.cjs
 ```
 

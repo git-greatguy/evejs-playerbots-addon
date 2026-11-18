@@ -173,6 +173,12 @@ define(["incursionReplay"], {
   confidence: CONFIDENCE.INFERRED,
   note: "Incursion encounter progress, frozen fleet reward receipts, delayed LP pools and settlement outboxes.",
 });
+define(["observatoryFlashpointReplay"], {
+  tier: TIERS.RUNTIME,
+  domain: "service:observatoryFlashpoint",
+  confidence: CONFIDENCE.INFERRED,
+  note: "Observatory Flashpoint frozen payout rosters, settlement outbox, physical loot and cache exchange receipts.",
+});
 define(["incursionLifecycle"], {
   tier: TIERS.RUNTIME,
   domain: "service:incursion",
@@ -218,6 +224,12 @@ define(["missionRewardSettlements"], {
 define(["planetaryCustomsSettlements"], {
   tier: TIERS.RUNTIME, domain: "service:planet", confidence: CONFIDENCE.INFERRED,
   note: "Durable planetary customs tax, import, export, and escrow settlements.",
+});
+define(["voidSystemLeases"], {
+  tier: TIERS.RUNTIME,
+  domain: "service:activity",
+  confidence: CONFIDENCE.INFERRED,
+  note: "Who holds which void system (services/activity/voidSystems.js), keyed by system ID.",
 });
 define(["abyssalFilamentCompensations"], {
   tier: TIERS.RUNTIME,

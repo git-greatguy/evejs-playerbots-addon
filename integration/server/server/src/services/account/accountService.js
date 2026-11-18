@@ -867,7 +867,10 @@ class AccountService extends BaseService {
       );
     }
     return buildJournalRowset(
-      getCharacterWalletJournal(session && session.characterID),
+      getCharacterWalletJournal(session && session.characterID, {
+        year: args && args[1],
+        month: args && args[2],
+      }),
     );
   }
 

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "evejsVersion": "261108.1",
+  "evejsVersion": "261115.2",
   "files": {
     ".dockerignore": {
       "baseSha256": "db348ab57242ec235136c8ad3876faa5a4037422360fd1041de5243dd3fc1080",
@@ -15,9 +15,9 @@
       "subsystem": "fittings"
     },
     "server/bootstrap.js": {
-      "baseSha256": "963978119af445726b1b16c0c16e7bacbd541ad0c40c75215c5d99b6d3c21f4e",
-      "sourceSha256": "0e96bef55cd4c1be385164b17c964980ecf78871b0761f1d5e12d427d514b5c7",
-      "overlaySha256": "0e96bef55cd4c1be385164b17c964980ecf78871b0761f1d5e12d427d514b5c7",
+      "baseSha256": "5a1722b1129b717f020b5dcf74e40324871351134d244877a275847d3b337fcb",
+      "sourceSha256": "a3e942bf2488e3f5ba7a9158aac06743e5fe49d996b08aabe65d36692a53eca0",
+      "overlaySha256": "a3e942bf2488e3f5ba7a9158aac06743e5fe49d996b08aabe65d36692a53eca0",
       "subsystem": "platform"
     },
     "server/src/_secondary/express/gatewayServices/careerGoalGatewayService.js": {
@@ -33,33 +33,33 @@
       "subsystem": "fittings"
     },
     "server/src/gameStore/index.js": {
-      "baseSha256": "d3ad0cd6837ced5c49ce3899ebbe26d6e39688cdb2d2bd743016d900da8eb0d3",
-      "sourceSha256": "9903d63aa722bf0e90e7cf47c913f311ae24c122cdfba44e9e3a4f3eaaa723b5",
-      "overlaySha256": "9903d63aa722bf0e90e7cf47c913f311ae24c122cdfba44e9e3a4f3eaaa723b5",
+      "baseSha256": "c28ab321eaac630388850bde5c9f40c4086c015a1978314965c10fde07415d0b",
+      "sourceSha256": "11486d52e799fb281aef8525769a4398f995f2a2f3a0d9f8cc1363bdb598ad6a",
+      "overlaySha256": "11486d52e799fb281aef8525769a4398f995f2a2f3a0d9f8cc1363bdb598ad6a",
       "subsystem": "gamestore"
     },
     "server/src/gameStore/tableOwnership.js": {
-      "baseSha256": "cd239004e024a37adf217ed3aa7cdc7547b829d56176d56f01403adea6ab4c74",
-      "sourceSha256": "c2eda441d115d357ce1d26671a0d8aefd0233848c8732dc85abf214947b72baa",
-      "overlaySha256": "c2eda441d115d357ce1d26671a0d8aefd0233848c8732dc85abf214947b72baa",
+      "baseSha256": "f33a8d203598f87a38a8cc0b8d1db909f39d6e77206d5c901f208c9715e50a38",
+      "sourceSha256": "fe5e8b1524b0ac5b0e449f461b8ce3e5c5fec351bc7d2f893c1aa238c6f67ec1",
+      "overlaySha256": "fe5e8b1524b0ac5b0e449f461b8ce3e5c5fec351bc7d2f893c1aa238c6f67ec1",
       "subsystem": "gamestore"
     },
     "server/src/network/tcp/index.js": {
-      "baseSha256": "bfdc20ce759d1b5c758cd99cf121be4f5ec04f71c079e391b421007bac94916e",
-      "sourceSha256": "01116ba83ded449db3961c8c995320b1e47b7cb7a3dcb787133efa57586840b3",
-      "overlaySha256": "01116ba83ded449db3961c8c995320b1e47b7cb7a3dcb787133efa57586840b3",
+      "baseSha256": "ee4c5a14a0c0fbce1b00f26cd49167d7b8b3256530f091cf93888d83cf34ba91",
+      "sourceSha256": "7e9954859052ce4607d2081538d2d992ad3da5300ef82a1b5cb34af8b3917873",
+      "overlaySha256": "7e9954859052ce4607d2081538d2d992ad3da5300ef82a1b5cb34af8b3917873",
       "subsystem": "platform"
     },
     "server/src/services/account/accountService.js": {
-      "baseSha256": "f427b0968885c250a05b3c4b0aacf6025c6cf246cf474ce718cbfa13db9d464a",
-      "sourceSha256": "df6f34a7e90ccf6e648a00e21edf0429c6256cbe9211b4f54304a68fa6734822",
-      "overlaySha256": "df6f34a7e90ccf6e648a00e21edf0429c6256cbe9211b4f54304a68fa6734822",
+      "baseSha256": "59e508abefeafc38500af887c77a1892f75802cfaecfc7381107b53ddb544791",
+      "sourceSha256": "a04ae68c035d1155894e2a0437a24143bde9cca37b7202c6063bc64bd6dbf076",
+      "overlaySha256": "a04ae68c035d1155894e2a0437a24143bde9cca37b7202c6063bc64bd6dbf076",
       "subsystem": "economy-authorities"
     },
     "server/src/services/account/walletState.js": {
-      "baseSha256": "83965cb640b33208734db3d29f16bb8afa5549be621369e7e0d8b7b4bd107a59",
-      "sourceSha256": "673aa7a838f6e471f1d3a6fcbedbd01c3cfa9940e6f2945d1b55feccb0ed66d4",
-      "overlaySha256": "673aa7a838f6e471f1d3a6fcbedbd01c3cfa9940e6f2945d1b55feccb0ed66d4",
+      "baseSha256": "7caef0a74a8118a388654ea53796066fdd0fcdb3132120abe1d3b30d030eda7d",
+      "sourceSha256": "06eec76ae686e3484213a3a0841624428d5f18a60aeb4db3263268e5687f8ce4",
+      "overlaySha256": "06eec76ae686e3484213a3a0841624428d5f18a60aeb4db3263268e5687f8ce4",
       "subsystem": "economy-authorities"
     },
     "server/src/services/career/careerEventLedger.js": {
@@ -69,21 +69,21 @@
       "subsystem": "platform"
     },
     "server/src/services/career/careerExplorationSources.js": {
-      "baseSha256": "7f524d14b34f7194c31c4c86ed14991c1b8401f7c26ceb8a2135d1245ea95fe6",
-      "sourceSha256": "350aeee1cdb6994848c2fd671d233d41695ab69b59f38d533a630f988258d825",
-      "overlaySha256": "350aeee1cdb6994848c2fd671d233d41695ab69b59f38d533a630f988258d825",
+      "baseSha256": "8e1af8fe28c6bb83ff53228ed7d32f8b2cf84258606a62abc9070d9fc878bded",
+      "sourceSha256": "c4b8f236581f67202d9e80a194fcf846182b04045c15159e02afec80a85d6db6",
+      "overlaySha256": "c4b8f236581f67202d9e80a194fcf846182b04045c15159e02afec80a85d6db6",
       "subsystem": "platform"
     },
     "server/src/services/character/charService.js": {
-      "baseSha256": "5128a5ebd2f233e7e7cc1260069fce790ec440e5c9ac7c55921cb75df4f0ef9f",
-      "sourceSha256": "9eb55cba3959596eee75905b856a9e3a1cdb35c5be3f71f916501adda82033d1",
-      "overlaySha256": "9eb55cba3959596eee75905b856a9e3a1cdb35c5be3f71f916501adda82033d1",
+      "baseSha256": "825a6546302d0d8acc8bded3f2fd14180419d177886802ce4a0fdaf37ec7c73b",
+      "sourceSha256": "911dba5d872d240b4d9e1417a8bec6c114b117bd1804512e0ec7e6aa35c9d5ac",
+      "overlaySha256": "911dba5d872d240b4d9e1417a8bec6c114b117bd1804512e0ec7e6aa35c9d5ac",
       "subsystem": "platform"
     },
     "server/src/services/chat/chatCommands.js": {
-      "baseSha256": "e8d294cc1a971f7b1a5cb3b42c7a6d28ce0ffcac1885fdae811240f27b662805",
-      "sourceSha256": "9dada3008f2f2cb625c643a340100c23d9eabb620fa5c943e02b04c05bd22af8",
-      "overlaySha256": "9dada3008f2f2cb625c643a340100c23d9eabb620fa5c943e02b04c05bd22af8",
+      "baseSha256": "344e9c97bbeeb1714ded4124c6ff4d2b030cf9ec1d9b2d9e1825836b571c9530",
+      "sourceSha256": "04715352907b87a027b4ade7139e20c4c78b92fd487ca811ef83986385ee18c5",
+      "overlaySha256": "04715352907b87a027b4ade7139e20c4c78b92fd487ca811ef83986385ee18c5",
       "subsystem": "chat-commands"
     },
     "server/src/services/chat/commandSessionEffects.js": {
@@ -92,10 +92,16 @@
       "overlaySha256": "f52a2bd067d03e724906e6b7a60cbd5acd70cf735b30e89bc3da1c7f20e01e00",
       "subsystem": "chat-commands"
     },
+    "server/src/services/chat/commands/commandAccess.js": {
+      "baseSha256": "8b7821a656c82ac0b1618645d6cf03097b6ecc0dbdb9a4691b5b56455c8f7743",
+      "sourceSha256": "f37d540baa076c13040843886df13eddda4fb1bfb8f61f8fb4c0940d0d5fc7fa",
+      "overlaySha256": "f37d540baa076c13040843886df13eddda4fb1bfb8f61f8fb4c0940d0d5fc7fa",
+      "subsystem": "chat-commands"
+    },
     "server/src/services/chat/commands/transport.js": {
-      "baseSha256": "6a30bd367abbdef4a13f90e4d4a6e7db59f19d2b7d1ba24f8199dcf5c66c0645",
-      "sourceSha256": "6ca5baa49bdd2b7ced3e0496e270124d2fe76f1cbb88b79222f18d19b6da3412",
-      "overlaySha256": "6ca5baa49bdd2b7ced3e0496e270124d2fe76f1cbb88b79222f18d19b6da3412",
+      "baseSha256": "7601a921c536c1c4eb36771f7aab9bba9a8cab1107b1a54f5b89d0c1aa073c31",
+      "sourceSha256": "b4dac8b22a5ede3cf1ef494c836c94b1ef46f629c28ade840dd3cd537c59a93a",
+      "overlaySha256": "b4dac8b22a5ede3cf1ef494c836c94b1ef46f629c28ade840dd3cd537c59a93a",
       "subsystem": "chat-commands"
     },
     "server/src/services/chat/playerBotPrivateFitRequest.js": {
@@ -117,15 +123,15 @@
       "subsystem": "chat-commands"
     },
     "server/src/services/chat/xmppStubServer.js": {
-      "baseSha256": "9058203c0dc4253b2edde87df5f45a977ec51d44e08425e58ba18af7308afb65",
-      "sourceSha256": "2c93e4368773963db6077a2a1e9ad0cf0bb46008fbdb0dd57ea2f594066e2cd6",
-      "overlaySha256": "2c93e4368773963db6077a2a1e9ad0cf0bb46008fbdb0dd57ea2f594066e2cd6",
+      "baseSha256": "aaf610ba196e0b114623672e76efc7fb74541983b5039693be7da31db40fbf67",
+      "sourceSha256": "bc144ac16542a95fe2d6cb5caadce1e54a9ea283d56395830af318b58a5d4165",
+      "overlaySha256": "bc144ac16542a95fe2d6cb5caadce1e54a9ea283d56395830af318b58a5d4165",
       "subsystem": "chat-commands"
     },
     "server/src/services/contracts/contractRuntimeState.js": {
-      "baseSha256": "cb0a86ab657edcaedcaada4bb7e2cf78bfb93948945b53f9b0914c45a0f8fe5d",
-      "sourceSha256": "6dc648a89a660eb1af97c62391eadc44f2944ec01e7bc13c3e1c98217cb406ab",
-      "overlaySha256": "6dc648a89a660eb1af97c62391eadc44f2944ec01e7bc13c3e1c98217cb406ab",
+      "baseSha256": "986d31345c6d40eb41401c18199b3667ab12cfc8a9b391dc28bf00c7c5638875",
+      "sourceSha256": "ff58cebe5fb2290566a8feb729b377e369612b0a4baf7a0bb82c8f6f761ef772",
+      "overlaySha256": "ff58cebe5fb2290566a8feb729b377e369612b0a4baf7a0bb82c8f6f761ef772",
       "subsystem": "economy-authorities"
     },
     "server/src/services/corporation/allianceFormationEligibility.js": {
@@ -141,51 +147,51 @@
       "subsystem": "corporation-sovereignty-structures"
     },
     "server/src/services/corporation/corpRegistryRuntime.js": {
-      "baseSha256": "41d691387ff45dce3cf4680da40291557b868f0b3f589234d0eb244b77c4e35c",
-      "sourceSha256": "fb469034807fb705b65173e11790fc2ed5563029798054c93fde2c77b2b38db0",
-      "overlaySha256": "fb469034807fb705b65173e11790fc2ed5563029798054c93fde2c77b2b38db0",
+      "baseSha256": "d3a0dfba93f0e0b7998c53f7c81a767d26749690cc04852a29fe7988757f8a5d",
+      "sourceSha256": "2455eeae4cff09d0784a36174ebdb9a31215e476c9f55f8b71d308025de30361",
+      "overlaySha256": "2455eeae4cff09d0784a36174ebdb9a31215e476c9f55f8b71d308025de30361",
       "subsystem": "corporation-sovereignty-structures"
     },
     "server/src/services/corporation/warDeclarationState.js": {
-      "baseSha256": "5e0a89c44dd6429034bb0a8261317f0525e57840afcac83890fa57451660fb06",
+      "baseSha256": "f3283455647d39e55586e2530b3d3e1639b7ffc059f6514a76957ebef0b90327",
       "sourceSha256": "1395cb2ce77cc355bba6b565c4073f65af94754fbe9b9ff023c8e705ae030a7f",
       "overlaySha256": "1395cb2ce77cc355bba6b565c4073f65af94754fbe9b9ff023c8e705ae030a7f",
       "subsystem": "corporation-sovereignty-structures"
     },
     "server/src/services/dungeon/dungeonAuthority.js": {
-      "baseSha256": "92880d4f2e77f6c1ca49776a83383cc0108b8f870e5a4976577dab2bf8f9e989",
-      "sourceSha256": "b9c8730afb2dd4c25769e527fcb2a124f7e67bd53388cb3727915a4ee6741728",
-      "overlaySha256": "b9c8730afb2dd4c25769e527fcb2a124f7e67bd53388cb3727915a4ee6741728",
+      "baseSha256": "cf0fc6dd1c1ab247f6556eed3372bdb028d9790f92e322795714c4b7e71a974a",
+      "sourceSha256": "f7701c54650cb8eefad067d0dfaa0b28c38b1d25546ffcd475988c7a0c7f0996",
+      "overlaySha256": "f7701c54650cb8eefad067d0dfaa0b28c38b1d25546ffcd475988c7a0c7f0996",
       "subsystem": "dungeon"
     },
     "server/src/services/dungeon/dungeonRuntimeState.js": {
-      "baseSha256": "fd3306461421c8c1504f7b74fd4e969c5067fd3a8ea2ec3b7943a8e76a772407",
-      "sourceSha256": "a29508f1d07783cb9f0911152260d45b8e09b37819c58e32a096a54569e45cfe",
-      "overlaySha256": "a29508f1d07783cb9f0911152260d45b8e09b37819c58e32a096a54569e45cfe",
+      "baseSha256": "d414ba7a351d58606ba9afb24bdf1484c1a021dc82c8b55fed3c6b81089fda5f",
+      "sourceSha256": "fa6933882338042718d388fc015c6337bc72d1e36b1453ac80fda492283f9b1c",
+      "overlaySha256": "fa6933882338042718d388fc015c6337bc72d1e36b1453ac80fda492283f9b1c",
       "subsystem": "dungeon"
     },
     "server/src/services/dungeon/dungeonUniverseRuntime.js": {
-      "baseSha256": "3c91d5455512a6d43b6e96575f58b61163ce565ec8f4f0361a83d3e9e87db36b",
-      "sourceSha256": "b77b19143ab0bfd3a1ae8aabe8fba1529f4083483a20d43e0297f4a11b5fb663",
-      "overlaySha256": "b77b19143ab0bfd3a1ae8aabe8fba1529f4083483a20d43e0297f4a11b5fb663",
+      "baseSha256": "302492d982457a5ce424419b3a37e1e7a2f35e1c50c1f77f967e6ab32a37a9af",
+      "sourceSha256": "6cbacb6d944abd9982f870c516fd0c8c9d0fdd0ed376afa1321036c52dfcdbbd",
+      "overlaySha256": "6cbacb6d944abd9982f870c516fd0c8c9d0fdd0ed376afa1321036c52dfcdbbd",
       "subsystem": "dungeon"
     },
     "server/src/services/dungeon/dungeonUniverseSiteService.js": {
-      "baseSha256": "9e2e62853ea4a9fb7eb36bb185c8df88ce151ab443cc3eba8004ff19f9ffeba6",
-      "sourceSha256": "dce836547ffb5113409247152f60ed2d677bb483b91a9835f8e930b90e1416c7",
-      "overlaySha256": "dce836547ffb5113409247152f60ed2d677bb483b91a9835f8e930b90e1416c7",
+      "baseSha256": "df3375917b6044167acc7d176f3b151de5d648328018c4e02b6f8c5c400c2374",
+      "sourceSha256": "d38e68bd7514c953ff4b2bf1eb0a0fce4d9051ede1230e418cc3fc751386d1a4",
+      "overlaySha256": "d38e68bd7514c953ff4b2bf1eb0a0fce4d9051ede1230e418cc3fc751386d1a4",
       "subsystem": "dungeon"
     },
     "server/src/services/fleets/fleetRuntime.js": {
-      "baseSha256": "494727d0f0793202bd9195c417fffc63cce499ea157890fc12981919be521b8f",
-      "sourceSha256": "b4b94213c9071c6236552e8eb6b7c2783aece3cc5c40cb800986d55fb97f3ea5",
-      "overlaySha256": "b4b94213c9071c6236552e8eb6b7c2783aece3cc5c40cb800986d55fb97f3ea5",
+      "baseSha256": "a676beaa6509cda39d640d86f13c91466b5cc0adcc70ee05c96aaa52e29f5371",
+      "sourceSha256": "d2f496dfeef2aea0c322b126a8fbe5c2ba3704bbe0bb4b997c12113507312b33",
+      "overlaySha256": "d2f496dfeef2aea0c322b126a8fbe5c2ba3704bbe0bb4b997c12113507312b33",
       "subsystem": "fleets"
     },
     "server/src/services/mail/mailState.js": {
-      "baseSha256": "82b61a1f917ec16b5e3de3394718996a2e86a3d9c6352ad485e0a6a65bb36290",
-      "sourceSha256": "423dabc852927e4e07d0c95fe775cbec08dfa52d4ef9d97da688ce5a2a534f5c",
-      "overlaySha256": "423dabc852927e4e07d0c95fe775cbec08dfa52d4ef9d97da688ce5a2a534f5c",
+      "baseSha256": "419bb844e95e8704198c0afee9a70b14076cdc5faa69abb122e150affc78e09c",
+      "sourceSha256": "f51530727b8b88a70d4a86d30f7860227a2c16e9daafa9af51a46fdb0994fcbf",
+      "overlaySha256": "f51530727b8b88a70d4a86d30f7860227a2c16e9daafa9af51a46fdb0994fcbf",
       "subsystem": "platform"
     },
     "server/src/services/market/asyncWorkDeduper.js": {
@@ -195,15 +201,15 @@
       "subsystem": "economy-authorities"
     },
     "server/src/services/market/marketEscrowState.js": {
-      "baseSha256": "74dd194d2ac2ebccdb7a88dfa96d34b41c97eafa542e99e7adde46e77602fc52",
-      "sourceSha256": "a87d2d24e267a38fbb99be68a18f6b0620b2cf5b225e6f780f3141d62007920c",
-      "overlaySha256": "a87d2d24e267a38fbb99be68a18f6b0620b2cf5b225e6f780f3141d62007920c",
+      "baseSha256": "30350b5c5741120e6ae49bd01da9c73a0de456917de3b449ad49d7c3e9c98b9f",
+      "sourceSha256": "ae433efc0a5fe4d891ee21587943b702494d869825443c136fb3006b8879e292",
+      "overlaySha256": "ae433efc0a5fe4d891ee21587943b702494d869825443c136fb3006b8879e292",
       "subsystem": "economy-authorities"
     },
     "server/src/services/market/marketProxyService.js": {
-      "baseSha256": "f457cb1b181ceb570a5fa346c718d71a7ce7b84b8734c88cee7f2546a8ce175b",
-      "sourceSha256": "ea497320e59007f66713b476d4c36b1c58f1855da3bdd12d0fad3bb1c24134b6",
-      "overlaySha256": "ea497320e59007f66713b476d4c36b1c58f1855da3bdd12d0fad3bb1c24134b6",
+      "baseSha256": "3b8c2a5005c1003e2067f467a8e63e2aca4c6f683c4941622f311b58274171ca",
+      "sourceSha256": "eae81ba40e80ff6457b179a62f6a22231d4fde9bcebd7628c21bfdb263691c07",
+      "overlaySha256": "eae81ba40e80ff6457b179a62f6a22231d4fde9bcebd7628c21bfdb263691c07",
       "subsystem": "economy-authorities"
     },
     "server/src/services/mining/miningNpcOperations.js": {
@@ -213,9 +219,9 @@
       "subsystem": "platform"
     },
     "server/src/services/notifications/notificationState.js": {
-      "baseSha256": "a12d8c00da0da594e3d33d34863f4a94392871a6242d5cdc9ac614f0863f54a6",
-      "sourceSha256": "6944fec24dd2412997140f09a775691fb855d786327f303dcbdd1c58dbf6e3e3",
-      "overlaySha256": "6944fec24dd2412997140f09a775691fb855d786327f303dcbdd1c58dbf6e3e3",
+      "baseSha256": "faf2156bed806c9616f1cff175ee7c9e08ea033ec468da297b93260f98173157",
+      "sourceSha256": "ae8ab780c1c155341a4e16fdfb6ec9a1c7aa5388a7155ad0a2d985187fe7f09d",
+      "overlaySha256": "ae8ab780c1c155341a4e16fdfb6ec9a1c7aa5388a7155ad0a2d985187fe7f09d",
       "subsystem": "platform"
     },
     "server/src/services/online/onlineStatusRuntime.js": {
@@ -237,9 +243,9 @@
       "subsystem": "planetary"
     },
     "server/src/services/planet/planetRuntimeStore.js": {
-      "baseSha256": "cb74256d55a9add0fa5fedd022362118a1fe0d67b27caaff302f30a7a8ce45da",
-      "sourceSha256": "f9305b3b48d9ea4266cdfc6a108dbe8855d5eaece1b6d0445c1a8993d7cfc474",
-      "overlaySha256": "f9305b3b48d9ea4266cdfc6a108dbe8855d5eaece1b6d0445c1a8993d7cfc474",
+      "baseSha256": "6c4f9c89b8b5395561ce6be413a07b8f8d783d9c7582f4d9df0a92e6d7dcb555",
+      "sourceSha256": "256f60570378649382ad2bd0246d244a956a853c5c09609185e713e54ca22594",
+      "overlaySha256": "256f60570378649382ad2bd0246d244a956a853c5c09609185e713e54ca22594",
       "subsystem": "planetary"
     },
     "server/src/services/playerbots/playerBotAddonApiRuntime.js": {
@@ -651,9 +657,9 @@
       "subsystem": "playerbots-core"
     },
     "server/src/services/scheduler/durableScheduler.js": {
-      "baseSha256": "9a735e6f82dcfdf63641b59c3674dfde905c4e358a09efd4b57d06263c2ca053",
-      "sourceSha256": "300517f27b6629b6451b41a840da8cecb4c0f8b2502a98f720400a3ded7a6246",
-      "overlaySha256": "300517f27b6629b6451b41a840da8cecb4c0f8b2502a98f720400a3ded7a6246",
+      "baseSha256": "456870d45bbb4223608ca5a74bd4306d97d284c0145b669c4bee6e94051dfeb5",
+      "sourceSha256": "abe87c7f6def1d82c1a58ddb9b226cf21f1a1b295341da653fe8bc157b80e4f3",
+      "overlaySha256": "abe87c7f6def1d82c1a58ddb9b226cf21f1a1b295341da653fe8bc157b80e4f3",
       "subsystem": "scheduler"
     },
     "server/src/services/scheduler/durableSchedulerProcess.worker.js": {
@@ -675,9 +681,9 @@
       "subsystem": "scheduler"
     },
     "server/src/services/security/crimewatchState.js": {
-      "baseSha256": "46cf97d25ba2f99b925a3b4f1b5da80596be783ac6fcb1a3869628989a950f84",
-      "sourceSha256": "e699a252c15ba55c5ecacaabc1bfca5d060f3acc15e909d262e9b742132633fb",
-      "overlaySha256": "e699a252c15ba55c5ecacaabc1bfca5d060f3acc15e909d262e9b742132633fb",
+      "baseSha256": "6121b05941ec4f713f3516c1e5f95ee8a563a729b81a4c40036313ce0c35367e",
+      "sourceSha256": "75ec720ff2ff04fae7ab756878d520d34adc9bbccd47905a550a833a6fca3263",
+      "overlaySha256": "75ec720ff2ff04fae7ab756878d520d34adc9bbccd47905a550a833a6fca3263",
       "subsystem": "platform"
     },
     "server/src/services/security/customsInspectionCaseStore.js": {
@@ -687,9 +693,9 @@
       "subsystem": "platform"
     },
     "server/src/services/sovereignty/sovPlayerDeployment.js": {
-      "baseSha256": "3cb388d724c2bac03e5151298a325c5f494ba136fa0e7ac1cf4894c1e57cc2c1",
-      "sourceSha256": "fbd9369de1dab83e1e592e8155751781adc37bd20fc9fc6d5fd506fff592c9c1",
-      "overlaySha256": "fbd9369de1dab83e1e592e8155751781adc37bd20fc9fc6d5fd506fff592c9c1",
+      "baseSha256": "5c8c18bef342d333fce35e06a41897a7b82a8d0185c0d6fc6553438a213d51a8",
+      "sourceSha256": "ca8c4f97b75217a018e7ca9a7ac2bbcf9bb564c8ed6bc4d0f7220d522a9a69f3",
+      "overlaySha256": "ca8c4f97b75217a018e7ca9a7ac2bbcf9bb564c8ed6bc4d0f7220d522a9a69f3",
       "subsystem": "corporation-sovereignty-structures"
     },
     "server/src/services/structure/structureDeploymentPlacement.js": {
@@ -699,15 +705,15 @@
       "subsystem": "corporation-sovereignty-structures"
     },
     "server/src/services/structure/structureState.js": {
-      "baseSha256": "e12d487e9e2e0e5486ce03a60b1178eaadc5a74c0be39813b026f16206376c1c",
-      "sourceSha256": "8f4157a0696185826f2031729b6a8fe19a13866e3e7e675d8d43f4529f39d099",
-      "overlaySha256": "8f4157a0696185826f2031729b6a8fe19a13866e3e7e675d8d43f4529f39d099",
+      "baseSha256": "82af65a696bc8df7e2713e4d480bff3c1259df03ccdb1ea6a282dcc9db9f0866",
+      "sourceSha256": "7d09673d904bf8b997397a241a5672936205949631c025b47718e66ba7f9cf61",
+      "overlaySha256": "7d09673d904bf8b997397a241a5672936205949631c025b47718e66ba7f9cf61",
       "subsystem": "corporation-sovereignty-structures"
     },
     "server/src/space/combat/killmailTracker.js": {
-      "baseSha256": "97cbfc3c26c59effa3988ec687613ad6ad31eb7264d9a6bf2fcb0ec3bb747a8b",
-      "sourceSha256": "6ef6c3204de908c676c3ed0e3cf14198a63ea24ed9023a4be906257fc7ac6fb5",
-      "overlaySha256": "6ef6c3204de908c676c3ed0e3cf14198a63ea24ed9023a4be906257fc7ac6fb5",
+      "baseSha256": "25e5e3a28fa905f82a5ae6f8fd5a3f8bf6d632d01dab5262b896f084dfd4d5e7",
+      "sourceSha256": "271b73434e595ef6bdb877a755f79b90a4934eccd8dcd8859be410d8361cd64d",
+      "overlaySha256": "271b73434e595ef6bdb877a755f79b90a4934eccd8dcd8859be410d8361cd64d",
       "subsystem": "space-runtime"
     },
     "server/src/space/destiny/identity/entityID.js": {
@@ -723,15 +729,15 @@
       "subsystem": "space-runtime"
     },
     "server/src/space/modules/hostileModuleRuntime.js": {
-      "baseSha256": "db747aa99975012526f576e6042ba2c1c6d7d664c58cc50e0dc31fc5e550d93f",
-      "sourceSha256": "b635f782a523e700150fbc7e27384679edbc6ee72b5c21815a85765df349f2dc",
-      "overlaySha256": "b635f782a523e700150fbc7e27384679edbc6ee72b5c21815a85765df349f2dc",
+      "baseSha256": "ac6410305c27c7167c07e043168b3503c410b425101ad31579558137cb8467b4",
+      "sourceSha256": "dc6bd2b89ddd8b8e83b4af8ba50bbf4b1b5d3263f97ea4a1fd9557db8df4c957",
+      "overlaySha256": "dc6bd2b89ddd8b8e83b4af8ba50bbf4b1b5d3263f97ea4a1fd9557db8df4c957",
       "subsystem": "space-runtime"
     },
     "server/src/space/runtime.js": {
-      "baseSha256": "7e6d7d7359a533a3065db08d9ef683ed7407899dcd4efef28a85721edceb6225",
-      "sourceSha256": "1944806c19836256e7019d24cb8ba1d6655ed26377b3fc3a4fc1fe0e59fd41c0",
-      "overlaySha256": "1944806c19836256e7019d24cb8ba1d6655ed26377b3fc3a4fc1fe0e59fd41c0",
+      "baseSha256": "0a2745028488d8573d17d33d479f227275e589981ed7130652592a93c45ccb9f",
+      "sourceSha256": "c9b70104179bcfa4a149eaecef4b25410c04365ebeea06f751e8eece590138dc",
+      "overlaySha256": "c9b70104179bcfa4a149eaecef4b25410c04365ebeea06f751e8eece590138dc",
       "subsystem": "space-runtime"
     },
     "server/src/space/runtime/playerBotThreatDamageHook.js": {
@@ -747,21 +753,21 @@
       "subsystem": "space-runtime"
     },
     "server/src/space/runtime/scene/tick.js": {
-      "baseSha256": "85fa455fad17ed434916fed86d68a48b8fb491e5fd1a7af51c14d61284081242",
-      "sourceSha256": "cb5ccabda7d101506df9e4395fcadf58813b3de42d6000d39308c6cfc87af804",
-      "overlaySha256": "cb5ccabda7d101506df9e4395fcadf58813b3de42d6000d39308c6cfc87af804",
+      "baseSha256": "9636bb250756884e13de43a0c8ee06bf8534ead807a037d1b718fbe6958aa45c",
+      "sourceSha256": "e78e513cdd637c11290e2abd971143fb65cf24d6bae7c616efe3058d303d339a",
+      "overlaySha256": "e78e513cdd637c11290e2abd971143fb65cf24d6bae7c616efe3058d303d339a",
       "subsystem": "space-runtime"
     },
     "server/src/space/runtime/spaceRuntime/tick.js": {
-      "baseSha256": "a421e8e6e0b654df70940f167a2a2f5a98bc140a73c2b7a86c52bc384cf8e2a0",
-      "sourceSha256": "8bc60b58fbf0401d3c9b604d0b41d8700aabf6ed09b2be407e9681a6a7d0704f",
-      "overlaySha256": "8bc60b58fbf0401d3c9b604d0b41d8700aabf6ed09b2be407e9681a6a7d0704f",
+      "baseSha256": "60a36fdc185824de8287c92c2116cb294e7d319abc15b3e9aab0582df00827bd",
+      "sourceSha256": "7d1dc5ead5143c2830e5c29cb1be322d5bf32b98c97da3fb8dcf5d08e774963a",
+      "overlaySha256": "7d1dc5ead5143c2830e5c29cb1be322d5bf32b98c97da3fb8dcf5d08e774963a",
       "subsystem": "space-runtime"
     },
     "server/src/space/runtime/targetDamageApplication.js": {
-      "baseSha256": "729012988e9e66d349f2c9cda8c5d298eea27ac80027a538cffd95c44812ca28",
-      "sourceSha256": "3b0513fd2590516e5723a15426af7dc72aa5e5bd752fae6331c56a548ede38c6",
-      "overlaySha256": "3b0513fd2590516e5723a15426af7dc72aa5e5bd752fae6331c56a548ede38c6",
+      "baseSha256": "5b812dee9215d7b6551d8e6591e552ffbdd742b552dcbae8684d191798e0201e",
+      "sourceSha256": "1599bb5f4c9022fe657e22511be2107bffa2efcb254084677ac476e34e064ffb",
+      "overlaySha256": "1599bb5f4c9022fe657e22511be2107bffa2efcb254084677ac476e34e064ffb",
       "subsystem": "space-runtime"
     },
     "server/src/space/runtimeTickScheduler.js": {
@@ -771,9 +777,9 @@
       "subsystem": "space-runtime"
     },
     "server/src/space/transitions.js": {
-      "baseSha256": "89ae36918b01f9a2ac4c678d9f0354b9cf58ac5d5c4068715052742758824769",
-      "sourceSha256": "448e9719f8989651bcc13838a32eb2b902a2e17a1db46d07b58bfd0534bb4f76",
-      "overlaySha256": "448e9719f8989651bcc13838a32eb2b902a2e17a1db46d07b58bfd0534bb4f76",
+      "baseSha256": "17668b3f9ca8327b9d94a5e8247761a2ce677a2cfcf7f905184cb071c87bd019",
+      "sourceSha256": "53e902bb0bfe27a4a6144f4e8bc7f9f8cb4cefefad076f33e7f908eb1f45bf4c",
+      "overlaySha256": "53e902bb0bfe27a4a6144f4e8bc7f9f8cb4cefefad076f33e7f908eb1f45bf4c",
       "subsystem": "space-runtime"
     },
     "server/src/utils/deploymentHealthcheck.js": {
@@ -785,13 +791,13 @@
   },
   "addonFiles": {
     "addons/playerbots/GUIDE.md": "a580c64a972341953e80656c5d4aa471c8b99203a5de05797f3885db864cf7cc",
-    "addons/playerbots/INSTALLATION.md": "0c511ef55ee5613add63c576164be17b99d0d5388dd8a5eeaf74578353710359",
+    "addons/playerbots/INSTALLATION.md": "a21b3c9ebe6fee6ee4c37e22298fbe393f7b3c0e39cb6bed7bf1421df5913a66",
     "addons/playerbots/LICENSE": "ce3fb82d9ee80a1cb0e548f9b0560ead52378ee2b4e826fd9459b4acf7075d89",
-    "addons/playerbots/LOCAL_DEFENSE.md": "f0e6c59a9338013f24333f2d7a6924940fa524f13f01c0902b95ab2fb5ff74b1",
+    "addons/playerbots/LOCAL_DEFENSE.md": "212bc0e1fe6447aba93b1794327bc1fc3e475445f19809d67a04624e2d3ebd3a",
     "addons/playerbots/OPERATIONS.md": "1d938dcf3c84c7e4ddfbbf5867f73b3cb06f0dcf2b9325988740bc8a63b2fc9c",
-    "addons/playerbots/README.md": "ea95952e7ba2801ba26e60940350873e21dc6678dfeffbdb662080effec51d95",
+    "addons/playerbots/README.md": "f908ca78eb94ec402f54d274f9f6b7bc462c99c2e8fa052f359789e59bc8b3ef",
     "addons/playerbots/THIRD_PARTY_NOTICES.md": "4e53a2b31f3965241b9d182b7764420e4f121213267ebc3936682544204c34dc",
-    "addons/playerbots/TROUBLESHOOTING.md": "8f9480ad36a3760ee830e51ff712a283d8de9e23f2511fe1c229fb1ba9cb46b7",
+    "addons/playerbots/TROUBLESHOOTING.md": "ef762f9fe30903742633449ffdd48c2bc48fe85cab2fd0b695548fea01f71279",
     "addons/playerbots/compose.override.yaml": "e67a22771936e4aec056715056cdbd80215257f964e143f455dabe4d0058cd11",
     "addons/playerbots/dashboard/app.js": "bf1468f85969efb7ec789db4b58e5eeb652ef0d4b6e79a5455ce28479d7e66af",
     "addons/playerbots/dashboard/favicon.svg": "b253bad68ca8a9fbff82054eeb86dc5084ca42c3f3168144b6866a81da7c3159",
@@ -799,6 +805,6 @@
     "addons/playerbots/dashboard/styles.css": "2808cd64990e10deb5527575c50ad282dd4563b40444cfc3c7bbeeadb9019e54",
     "addons/playerbots/dashboard-server.js": "8ccba762642bdc26def8194484144366d712d6e9a96fc0a78b8bd2f2a2c5dde8",
     "addons/playerbots/index.js": "8b73fbf55e1d63bb233cf26362f2e8881066271f4304da4a543e687b35cea893",
-    "addons/playerbots/manifest.json": "d8c3be5466cc7e15c95719b05a674bf3a974943647af4f3cf67c99d6000b5cc3"
+    "addons/playerbots/manifest.json": "d482e20dc9afc59f02a8808f447d76d4825387ecf4faeb6f67c9d8f3d8da85df"
   }
 }

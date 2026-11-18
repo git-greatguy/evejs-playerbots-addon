@@ -1,5 +1,6 @@
 "use strict";
 
+const { cloneValue: walkCloneValue } = require("../../common/clone");
 const path = require("path");
 
 const sessionRegistry = require(path.join(
@@ -121,7 +122,7 @@ function publishPlexBalanceChangedNotice(characterID, balanceInCents, deltaInCen
 }
 
 function cloneValue(value) {
-  return JSON.parse(JSON.stringify(value));
+  return value === undefined ? JSON.parse(JSON.stringify(value)) : walkCloneValue(value);
 }
 
 function normalizeWalletIdempotencyKey(value) {
@@ -165,6 +166,7 @@ function buildPlexAdjustmentFingerprint(charId, amount, options = {}) {
 }
 
 function findWalletOperationReceipt(record, idempotencyKey) {
+  if (idempotencyKey.startsWith("flashpoint-v1:")) return record.observatoryFlashpointWalletReceipts?.[idempotencyKey] || null;
   if (idempotencyKey.startsWith("incursion:")) return record.incursionWalletReceipts?.[idempotencyKey] || null;
   if (idempotencyKey.startsWith("discovery:")) return record.discoveryWalletReceipts?.[idempotencyKey] || null;
   if (idempotencyKey.startsWith("campaign:")) return record.campaignWalletReceipts?.[idempotencyKey] || null;
@@ -179,6 +181,11 @@ function findWalletOperationReceipt(record, idempotencyKey) {
 }
 
 function appendWalletOperationReceipt(record, receipt) {
+  if (receipt.idempotencyKey.startsWith("flashpoint-v1:")) {
+    record.observatoryFlashpointWalletReceipts = { ...(record.observatoryFlashpointWalletReceipts || {}),
+      [receipt.idempotencyKey]: cloneValue(receipt) };
+    return;
+  }
   if (receipt.idempotencyKey.startsWith("incursion:")) {
     record.incursionWalletReceipts = { ...(record.incursionWalletReceipts || {}), [receipt.idempotencyKey]: cloneValue(receipt) };
     return;
@@ -297,11 +304,26 @@ function getCharacterWallet(charId) {
   };
 }
 
-function getCharacterWalletJournal(charId) {
+// A year and month (UTC, as the corporation journal filters) limit the result
+// to that month, as the client's journal browser asks; without them every
+// stored entry is returned.
+function getCharacterWalletJournal(charId, options = {}) {
+  const year = Number(options && options.year);
+  const month = Number(options && options.month);
+  const hasMonthFilter = Number.isFinite(year) && Number.isFinite(month) && year > 0 && month > 0;
+  const inMonth = (entry) => {
+    if (!hasMonthFilter) {
+      return true;
+    }
+    const date = fileTimeStringToDate(entry && entry.transactionDate);
+    return !Number.isNaN(date.valueOf()) &&
+      date.getUTCFullYear() === year &&
+      date.getUTCMonth() + 1 === month;
+  };
   const projected = walletAuthorityProjection.getCharacterProjection(charId);
   if (projected) {
     return Array.isArray(projected.walletJournal)
-      ? projected.walletJournal.map((entry) => cloneValue(entry))
+      ? projected.walletJournal.filter(inMonth).map((entry) => cloneValue(entry))
       : [];
   }
   const record = getCharacterState().getCharacterRecord(charId);
@@ -309,7 +331,7 @@ function getCharacterWalletJournal(charId) {
     return [];
   }
 
-  return record.walletJournal.map((entry) => cloneValue(entry));
+  return record.walletJournal.filter(inMonth).map((entry) => cloneValue(entry));
 }
 
 function getCharacterWalletOperationReceipt(charId, idempotencyKey) {
@@ -793,6 +815,9 @@ function applyAdjustCharacterBalance({ charId, amount, options = {} }) {
         ...cloneValue(receipt.result),
         duplicate: true,
       };
+    }
+    if (idempotencyKey.startsWith("flashpoint-v1:") && Object.keys(currentRecord.observatoryFlashpointWalletReceipts || {}).length >= 8192) {
+      return { success: false, errorMsg: "FLASHPOINT_WALLET_RECEIPT_LIMIT" };
     }
     if (idempotencyKey.startsWith("nodegraph:") && Object.keys(currentRecord.nodeGraphWalletReceipts || {}).length >= 8192) {
       return { success: false, errorMsg: "NODEGRAPH_WALLET_RECEIPT_LIMIT" };

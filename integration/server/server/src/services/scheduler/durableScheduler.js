@@ -2,6 +2,7 @@
 
 const crypto = require("node:crypto");
 const path = require("node:path");
+const { performance } = require("node:perf_hooks");
 const log = require(path.join(__dirname, "../../utils/logger"));
 const { createOrderedProcessClient } = require(path.join(
   __dirname,
@@ -22,6 +23,15 @@ const DEFAULT_RESTART_DELAY_MS = 250;
 const DEFAULT_MAX_STARTUP_RESTART_ATTEMPTS = 3;
 const DEFAULT_MAX_CONCURRENT_DISPATCH = 16;
 const DEFAULT_LEASE_RENEW_INTERVAL_MS = 10_000;
+// A handler starts in the microtask drain after its validateLease reply, and
+// the worker publishes every due job of a pass back to back, so a burst of due
+// jobs used to run all of their handlers' synchronous parts as one block,
+// ahead of timers, I/O and the scene tick. Handlers still start at once while
+// the current event-loop turn has spent less than this on them; later ones
+// wait in due order for the following turns (at least one per turn). A lone
+// job is never delayed. Lease validation, the handler, ack and retry are
+// unchanged; only the turn a validated handler starts in moves.
+const HANDLER_ENTRY_BUDGET_MS = 25;
 
 function positiveInteger(value, fallback) {
   const numeric = Number(value);
@@ -113,6 +123,74 @@ function createDurableScheduler(options = {}) {
           drainDispatchQueue();
         });
     }
+  }
+  // Tests may pass a smaller budget; the server always uses the default.
+  const entryBudgetMs = Number.isFinite(options.handlerEntryBudgetMs) && options.handlerEntryBudgetMs >= 0
+    ? options.handlerEntryBudgetMs
+    : HANDLER_ENTRY_BUDGET_MS;
+  const entryQueue = []; // validated handler entries waiting for a turn, in order
+  let entryPump = null; // the setImmediate that opens the next turn
+  let entryTurnSpentMs = 0; // handler time spent in the current turn
+  let deferredEntries = 0;
+
+  // Runs one handler's synchronous part and returns what it returned. A
+  // synchronous throw reaches the caller, as the inline `await handler()` did.
+  function runEntry(invoke) {
+    const startedAt = performance.now();
+    try {
+      return invoke();
+    } finally {
+      entryTurnSpentMs += performance.now() - startedAt;
+    }
+  }
+
+  function runQueuedEntry() {
+    const entry = entryQueue.shift();
+    try {
+      entry.resolve(runEntry(entry.invoke));
+    } catch (error) {
+      entry.reject(error);
+    }
+  }
+
+  function pumpEntries() {
+    entryPump = null;
+    entryTurnSpentMs = 0;
+    let ran = 0;
+    while (entryQueue.length > 0 && (ran === 0 || entryTurnSpentMs < entryBudgetMs)) {
+      runQueuedEntry();
+      ran += 1;
+    }
+    // Reopen a turn while entries wait, or to forget this turn's spend before
+    // the next inline entry is measured against it.
+    if (entryQueue.length > 0 || entryTurnSpentMs > 0) armEntryPump();
+  }
+
+  function armEntryPump() {
+    if (entryPump === null) entryPump = setImmediate(pumpEntries);
+  }
+
+  // Inline while nothing waits and the turn's budget lasts; otherwise in order
+  // in a following turn.
+  function enterHandler(invoke) {
+    if (entryQueue.length === 0 && entryTurnSpentMs < entryBudgetMs) {
+      try {
+        return runEntry(invoke);
+      } finally {
+        armEntryPump();
+      }
+    }
+    deferredEntries += 1;
+    return new Promise((resolve, reject) => {
+      entryQueue.push({ invoke, reject, resolve });
+      armEntryPump();
+    });
+  }
+
+  // Shutdown starts every waiting handler at once, as inline entry would
+  // already have done, so none starts after the scheduler has closed.
+  function drainEntries() {
+    while (entryQueue.length > 0) runQueuedEntry();
   }
 
   function clearRestartTimer() {
@@ -333,13 +411,13 @@ function createDurableScheduler(options = {}) {
         return;
       }
       try {
-        await handler(Object.freeze({
+        await enterHandler(() => handler(Object.freeze({
           attempt: Number(job.attempt || 0),
           dueAtMs: Number(job.dueAtMs || 0),
           jobID: String(job.jobID),
           payload: job.payload,
           type: String(job.type),
-        }));
+        })));
         await call("ack", {
           jobID: job.jobID,
           leaseToken: job.leaseToken,
@@ -400,6 +478,11 @@ function createDurableScheduler(options = {}) {
     getHealth: snapshotHealth,
     getStats: () => Object.freeze({
       ...client.getStats(),
+      // Handler entries waiting for a turn now, and entries ever deferred.
+      entries: Object.freeze({
+        queued: entryQueue.length,
+        deferred: deferredEntries,
+      }),
       supervisor: snapshotHealth(),
       dispatch: Object.freeze({
         active: activeDispatches.size,
@@ -419,6 +502,7 @@ function createDurableScheduler(options = {}) {
     pauseDispatch() { return call("pauseDispatch", {}); },
     shutdown() {
       if (shutdownPromise) return shutdownPromise;
+      drainEntries();
       closing = true;
       desiredRunning = false;
       state = "closing";

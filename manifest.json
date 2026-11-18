@@ -1,8 +1,8 @@
 {
   "id": "evejs.playerbots",
   "name": "EveJS Playerbots Add-on",
-  "version": "0.2.151",
-  "evejsVersion": "261108.1",
+  "version": "0.2.152",
+  "evejsVersion": "261115.2",
   "apiVersion": 1,
   "runtime": "node >= 24",
   "process": "standalone",

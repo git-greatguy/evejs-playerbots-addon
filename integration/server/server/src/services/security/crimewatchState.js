@@ -1,5 +1,6 @@
 "use strict";
 
+const { cloneValue: walkCloneValue } = require("../../common/clone");
 const { queueDogmaEvent } = require("../../space/runtime/dogmaEvents");
 
 const {
@@ -317,7 +318,7 @@ function distanceSquared(left, right) {
 }
 
 function cloneValue(value) {
-  return JSON.parse(JSON.stringify(value));
+  return value === undefined ? JSON.parse(JSON.stringify(value)) : walkCloneValue(value);
 }
 
 function buildConcordResponseOriginAnchor(scene, offenderEntity) {
@@ -497,14 +498,21 @@ function setNonTheftPenalty(state, kind, expiresAtMs, options = {}) {
     0,
     Math.trunc(toFiniteNumber(expiresAtMs, 0)),
   );
+  const now = Math.max(0, Math.trunc(toFiniteNumber(options.now, Date.now())));
+  // A lesser offense renews an existing criminal penalty without replacing
+  // it. Expired criminal flags and explicit GM/debug assignments are exempt.
+  const resolvedKind = options.exact !== true && normalizedKind === "suspect" &&
+    currentBase.criminal && currentBaseExpiresAtMs > now
+    ? "criminal"
+    : normalizedKind;
   const resolvedExpiresAtMs = options.exact === true
     ? requestedExpiresAtMs
     : Math.max(currentBaseExpiresAtMs, requestedExpiresAtMs);
   state.nonTheftPenalty = {
     criminalTimerExpiresAtMs:
-      normalizedKind === "none" ? 0 : resolvedExpiresAtMs,
-    criminal: normalizedKind === "criminal" && resolvedExpiresAtMs > 0,
-    suspect: normalizedKind === "suspect" && resolvedExpiresAtMs > 0,
+      resolvedKind === "none" ? 0 : resolvedExpiresAtMs,
+    criminal: resolvedKind === "criminal" && resolvedExpiresAtMs > 0,
+    suspect: resolvedKind === "suspect" && resolvedExpiresAtMs > 0,
   };
   return recomputeCharacterPenaltyState(state);
 }
@@ -612,7 +620,29 @@ function hydrateCharacterState(characterID) {
   return storedState;
 }
 
+// Every scene tick hydrates twice (prune and the flag snapshot). Copying and
+// normalizing every stored row each time made the tick grow with every
+// character that ever left green safety. After a full pass every stored state
+// is in memory, so the pass can be skipped until the stored table changes or
+// an in-memory state is dropped.
+let hydratedStoreVersion = null;
+
+function forgetHydratedStoreVersion() {
+  hydratedStoreVersion = null;
+}
+
 function hydrateAllStoredCharacterStates() {
+  const storeVersion = typeof crimewatchRuntimeState.getStoreVersion === "function"
+    ? crimewatchRuntimeState.getStoreVersion()
+    : null;
+  if (
+    storeVersion &&
+    hydratedStoreVersion &&
+    storeVersion.root === hydratedStoreVersion.root &&
+    storeVersion.generation === hydratedStoreVersion.generation
+  ) {
+    return;
+  }
   for (const storedRecord of crimewatchRuntimeState.listCharacterStates()) {
     const normalized = normalizeStoredCharacterState(storedRecord);
     if (
@@ -622,6 +652,7 @@ function hydrateAllStoredCharacterStates() {
       characterCrimewatchState.set(normalized.characterID, normalized);
     }
   }
+  hydratedStoreVersion = storeVersion;
 }
 
 function isLegalCorporationPropertyFriendlyFire(
@@ -1343,6 +1374,7 @@ function pruneCharacterState(characterID, now = Date.now()) {
 
   if (!shouldKeep) {
     characterCrimewatchState.delete(normalizedCharacterID);
+    forgetHydratedStoreVersion();
     // Keep lastBroadcastTimerSnapshots: the client is still showing the timers
     // from the last broadcast, and the scene sync can only send the idle
     // transition by diffing against that baseline. The sync deletes the entry
@@ -2663,6 +2695,21 @@ function applySecurityStatusPenaltyForAggression(
     now,
   );
 
+  // OnSecurityStatusUpdate only refreshes the client's cached value. Retail
+  // sends this separate message to display the aggression/security-loss notice
+  // (CONCORD.zip, low-security drone attack, rows 36553-36555).
+  const session = attackerEntity.session;
+  const targetTypeID = toPositiveInt(targetEntity.typeID, 0);
+  if (targetTypeID > 0 && session && typeof session.sendNotification === "function") {
+    session.sendNotification("OnRemoteMessage", "charid", [
+      "SecurityStatusAggressionChange",
+      buildDict([
+        ["penalty", modification],
+        ["item", targetTypeID],
+      ]),
+    ]);
+  }
+
   // POS statusDrop policy consumes an actual security penalty, never a generic
   // suspect/criminal timer. Keep the receipt for the existing weapon interval.
   persistSecurityStatusDrop(scene, attackerCharacterID, {
@@ -2747,7 +2794,8 @@ function buildCriminalTimerTuple(state, now = Date.now()) {
     Math.trunc(toFiniteNumber(normalizedState.criminalTimerExpiresAtMs, 0)),
   );
   if (normalizedState.criminal &&
-      hasActiveModuleCombatTimer(normalizedState.characterID, "criminal")) {
+      (hasActiveModuleCombatTimer(normalizedState.characterID, "criminal") ||
+       hasActiveModuleCombatTimer(normalizedState.characterID, "suspect"))) {
     return [CRIMINAL_TIMER_STATE_ACTIVE_CRIMINAL, null];
   }
   if (normalizedState.suspect &&
@@ -2777,14 +2825,14 @@ function buildDisapprovalTimerTuple(state, now = Date.now()) {
   );
 }
 
-function buildCombatTimerTuplesFromState(state, now = Date.now()) {
-  return [
-    buildWeaponTimerTuple(state, now),
-    buildPvpTimerTuple(state, now),
-    buildNpcTimerTuple(state, now),
-    buildCriminalTimerTuple(state, now),
-    buildDisapprovalTimerTuple(state, now),
-  ];
+function buildTimerSnapshotFromState(state, now) {
+  return {
+    weapons: buildWeaponTimerTuple(state, now),
+    pvp: buildPvpTimerTuple(state, now),
+    npc: buildNpcTimerTuple(state, now),
+    criminal: buildCriminalTimerTuple(state, now),
+    disapproval: buildDisapprovalTimerTuple(state, now),
+  };
 }
 
 function buildFlaggedCharacterSnapshot(systemID, now = Date.now()) {
@@ -2867,12 +2915,22 @@ function buildClientStatesForSession(session, now = Date.now()) {
       : buildFiletimeFromExpiryMs(engagement.expiresAtMs),
   ]);
 
-  return [
-    buildCombatTimerTuplesFromState(state, now),
+  const snapshot = buildTimerSnapshotFromState(state, now);
+  const { weapons, pvp, npc, criminal, disapproval } = snapshot;
+  const clientStates = [
+    [weapons, pvp, npc, criminal, disapproval],
     buildDict(engagementEntries),
     buildFlaggedCharactersForSession(session, now),
     normalizeSafetyLevel(state.safetyLevel),
   ];
+
+  // A docked client can learn about a timer through this RPC before it is
+  // tracked for notifications, for example when it relogs before expiry.
+  if (characterID && !session._space && !lastBroadcastTimerSnapshots.has(characterID)) {
+    rememberTimerSnapshot(characterID, snapshot);
+  }
+
+  return clientStates;
 }
 
 function buildComparableTupleKey(tuple) {
@@ -3056,13 +3114,7 @@ function createKillRightForCriminalAggression(scene, attackerEntity, targetEntit
 function buildTimerBroadcastSnapshot(characterID, now = Date.now()) {
   const state = getCharacterCrimewatchState(characterID, now) ||
     buildDefaultCharacterState(characterID);
-  return {
-    weapons: buildWeaponTimerTuple(state, now),
-    pvp: buildPvpTimerTuple(state, now),
-    npc: buildNpcTimerTuple(state, now),
-    criminal: buildCriminalTimerTuple(state, now),
-    disapproval: buildDisapprovalTimerTuple(state, now),
-  };
+  return buildTimerSnapshotFromState(state, now);
 }
 
 function sendTimerNotificationIfChanged(
@@ -3131,9 +3183,13 @@ function synchronizeSessionTimerNotifications(scene, session, now = Date.now()) 
     snapshot.disapproval,
   );
 
+  rememberTimerSnapshot(characterID, snapshot);
+}
+
+function rememberTimerSnapshot(characterID, snapshot) {
   // A fully idle snapshot needs no baseline: an absent entry diffs as idle.
-  // Dropping it here is also what lets pruneCharacterState remove a character
-  // without leaking one snapshot per character that ever carried a timer.
+  // Dropping it here also lets pruneCharacterState remove a character without
+  // retaining a snapshot for every character that ever carried a timer.
   if (
     snapshot.weapons[0] === WEAPONS_TIMER_STATE_IDLE &&
     snapshot.pvp[0] === PVP_TIMER_STATE_IDLE &&
@@ -3248,6 +3304,22 @@ function synchronizeUnplacedSessionTimerNotifications(now = Date.now()) {
       synchronizeSessionTimerNotifications(null, session, now);
     }
   }
+}
+
+// The timer baseline only records what a live client was last sent. Once a
+// character's last session ends there is no client to diff against, and its
+// next client loads its timers through GetClientStates. Without this, every
+// pilot who logged off with a running timer kept an entry forever, and each
+// one cost a full session scan on every scene tick.
+function handleCharacterSessionEnded(characterID, session = null) {
+  const normalizedCharacterID = toPositiveInt(characterID, 0);
+  if (!normalizedCharacterID || !lastBroadcastTimerSnapshots.has(normalizedCharacterID)) {
+    return;
+  }
+  if (sessionRegistry.findSessionByCharacterID(normalizedCharacterID, { excludeSession: session })) {
+    return;
+  }
+  lastBroadcastTimerSnapshots.delete(normalizedCharacterID);
 }
 
 function synchronizeSceneClientState(scene, now = Date.now()) {
@@ -3718,6 +3790,7 @@ function triggerHighSecCriminalOffense(scene, attackerEntity, options = {}) {
       state,
       "criminal",
       now + CRIMINAL_TIMER_DURATION_MS,
+      { now },
     );
     state.lastCriminalAtMs = now;
 
@@ -3773,6 +3846,7 @@ function triggerHighSecCriminalOffense(scene, attackerEntity, options = {}) {
     state,
     "criminal",
     now + CRIMINAL_TIMER_DURATION_MS,
+    { now },
   );
   state.lastCriminalAtMs = now;
 
@@ -3889,10 +3963,9 @@ function extendModuleCombatTimers(scene, participants, now, notify = true) {
       if (kinds.has(kind)) state[field] = Math.max(state[field], now + duration);
     }
     if (kinds.has("criminal")) {
-      setNonTheftPenalty(state, "criminal", now + CRIMINAL_TIMER_DURATION_MS);
-    } else if (kinds.has("suspect") &&
-        (!state.criminal || state.criminalTimerExpiresAtMs <= now)) {
-      setNonTheftPenalty(state, "suspect", now + CRIMINAL_TIMER_DURATION_MS);
+      setNonTheftPenalty(state, "criminal", now + CRIMINAL_TIMER_DURATION_MS, { now });
+    } else if (kinds.has("suspect")) {
+      setNonTheftPenalty(state, "suspect", now + CRIMINAL_TIMER_DURATION_MS, { now });
     }
     state.lastKnownSystemID = toPositiveInt(scene && scene.systemID, state.lastKnownSystemID);
     if (JSON.stringify(previous) !== JSON.stringify(state)) {
@@ -4283,9 +4356,8 @@ function recordNpcAuthorityAggression(scene, attackerEntity, targetEntity, now) 
   const consequence = getNpcAuthorityAggressionConsequence(scene, targetEntity);
   state.npcTimerExpiresAtMs = Math.max(state.npcTimerExpiresAtMs, now + NPC_TIMER_DURATION_MS);
   state.lastKnownSystemID = toPositiveInt(scene.systemID, state.lastKnownSystemID);
-  if (consequence === "criminal" ||
-      (consequence === "suspect" && (!state.criminal || state.criminalTimerExpiresAtMs <= now))) {
-    setNonTheftPenalty(state, consequence, now + CRIMINAL_TIMER_DURATION_MS);
+  if (consequence === "criminal" || consequence === "suspect") {
+    setNonTheftPenalty(state, consequence, now + CRIMINAL_TIMER_DURATION_MS, { now });
   }
   if (consequence === "criminal") state.lastCriminalAtMs = now;
   const persistenceResult = finalizeCharacterStateMutation(state, { success: true });
@@ -4447,21 +4519,25 @@ function recordHighSecCriminalAggression(scene, attackerEntity, targetEntity, no
 
   if (!isHighSecuritySystem(scene.system)) {
     if (isLowSecuritySystem(scene.system)) {
-      const legalPropertyWar = targetProtectedPropertyCorporationID > 0
+      const legalWar = targetProtectedPropertyCorporationID > 0
         ? findLegalWarAggressionAgainstCorporation(
           attackerCharacterID,
           targetProtectedPropertyCorporationID,
           now,
         )
-        : null;
-      if (legalPropertyWar) {
+        : findLegalWarAggression(
+          attackerCharacterID,
+          targetCharacterID,
+          now,
+        );
+      if (legalWar) {
         return {
           success: true,
           data: {
             applied: false,
             reason: "LEGAL_WAR_AGGRESSION",
             characterID: attackerCharacterID,
-            warID: Number(legalPropertyWar.warID || 0),
+            warID: Number(legalWar.warID || 0),
             weaponTimerExpiresAtMs: state.weaponTimerExpiresAtMs,
             pvpTimerExpiresAtMs: state.pvpTimerExpiresAtMs,
           },
@@ -4517,6 +4593,7 @@ function recordHighSecCriminalAggression(scene, attackerEntity, targetEntity, no
         state,
         "suspect",
         now + CRIMINAL_TIMER_DURATION_MS,
+        { now },
       );
 
       const persistenceResult = finalizeCharacterStateMutation(state, {
@@ -4635,6 +4712,7 @@ function recordHighSecCriminalAggression(scene, attackerEntity, targetEntity, no
       state,
       "suspect",
       now + CRIMINAL_TIMER_DURATION_MS,
+      { now },
     );
     return finalizeCharacterStateMutation(state, {
       success: true,
@@ -5339,6 +5417,7 @@ function resetCrimewatchRuntimeCacheForTests() {
   moduleCombatActivities.clear();
   characterCombatActivities.clear();
   characterCrimewatchState.clear();
+  forgetHydratedStoreVersion();
   limitedEngagements.clear();
   ongoingLimitedEngagementKeys.clear();
   hydratedLimitedEngagementKeys.clear();
@@ -5427,6 +5506,7 @@ module.exports = {
   setSafetyLevel,
   synchronizeSessionTimerNotifications,
   getSceneTickDeadlineMs,
+  handleCharacterSessionEnded,
   tickScene,
   triggerHighSecCriminalOffense,
 };

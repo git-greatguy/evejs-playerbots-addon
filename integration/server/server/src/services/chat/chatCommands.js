@@ -53,6 +53,17 @@ const {
 // The GM alliance commands change a corporation's alliance outside the normal
 // founding/application flows, which tell everyone through these events. Take
 // the snapshots before the change, then send the same notifications.
+// A refusal message, or null when the caller may run an alliance command for
+// the corporation.
+function checkAllianceCommandAuthority(session, corporationRecord, action) {
+  if (corporationRecord.isNPC) {
+    return `You must be in a player corporation to ${action}.`;
+  }
+  return require("./commands/playerAlliance").isCorporationCeo(session, corporationRecord)
+    ? null
+    : `Only your corporation's CEO can ${action}.`;
+}
+
 function captureAllianceAffiliationBefore(corporationRecord) {
   const corporationID = Number(corporationRecord && corporationRecord.corporationID) || 0;
   const previousAllianceID = Number(corporationRecord && corporationRecord.allianceID) || 0;
@@ -213,7 +224,9 @@ const {
   isConnectedSessionInAbyssalDeadspace,
 } = require(path.join(__dirname, "./commands/commandSessionLocation"));
 const {
+  PLAYER_CHAT_COMMANDS,
   hasStaffDebugRole,
+  mayRunChatCommand,
 } = require(path.join(__dirname, "./commands/commandAccess"));
 const {
   handleSolarTeleport,
@@ -440,6 +453,7 @@ const AVAILABLE_SLASH_COMMANDS = [
   "getshipsetup",
   "repairmodules",
   "reportdesync",
+  "health",
   "fetch",
   "spawn",
   "spawnn",
@@ -698,9 +712,23 @@ const COMMANDS_HELP_TEXT = [
   "/iteminfo <itemID>",
   "/typeinfo <ship name|typeID>",
   "/session",
+  "/health [scenes|history|incidents|captures] | /health watch [minutes|off]",
   "/announce <message>",
   "/teal",
   "/yellow",
+].join("\n");
+
+const PLAYER_COMMANDS_HELP_TEXT = [
+  "Commands:",
+  "/help | /motd | /mailme",
+  "/where | /session | /orbitals [planetID]",
+  "/wallet | /lp [corporation] | /evermarks | /corpevermarks",
+  "/typeinfo <ship name|typeID>",
+  "/skinr (your own SKINR designs)",
+  "/blue | /red | /teal | /yellow (chat name colour)",
+  "/setalliance <alliance name> [TICKER] (CEO; founding fee)",
+  "/joinalliance <alliance name> (CEO; applies to join)",
+  "Other commands require a staff account.",
 ].join("\n");
 
 const ABYSSAL_PLAYER_HELP_TEXT = [
@@ -1156,10 +1184,12 @@ function sendAnnouncement(chatHub, session, message) {
     return;
   }
 
+  // The XMPP chat path passes no chatHub; announce through the shared one
+  // (required here because chatHub requires the XMPP server, which requires
+  // this file).
+  const hub = chatHub || require(path.join(__dirname, "./chatHub"));
   for (const targetSession of sessionRegistry.getSessions()) {
-    if (chatHub) {
-      chatHub.sendSystemMessage(targetSession, message);
-    }
+    hub.sendSystemMessage(targetSession, message);
   }
 }
 
@@ -1168,7 +1198,7 @@ function getCommandsHelpText(session) {
     ? "\n/voidreplay — replay Ruined Electrical from an expired filament in cargo"
     : "";
   if (!hasStaffDebugRole(session)) {
-    return `${COMMANDS_HELP_TEXT}\n\n${ABYSSAL_PLAYER_HELP_TEXT}${voidReplayHelp}`;
+    return `${PLAYER_COMMANDS_HELP_TEXT}\n\n${ABYSSAL_PLAYER_HELP_TEXT}${voidReplayHelp}`;
   }
   return `${COMMANDS_HELP_TEXT}\n\n${ABYSSAL_PLAYER_HELP_TEXT}${voidReplayHelp}\n\n${STAFF_ABYSSAL_HELP_TEXT}\n/fireshow [count|stop] — temporary native festival formation\n/gate <type> <destination> | /gate stop\n/gateshowcase [destination|stop]`;
 }
@@ -1288,9 +1318,53 @@ function formatBotLocalStatus(session, showAllSystems = false) {
   ].join("\n");
 }
 
+// The client sends a line starting with "/emote" (it rewrites "/me" to
+// "/emote" first) and a bare "/" to the channel as chat; every other "/" line
+// goes to the slash service (chat/client/window.py, xmppchatwindow.py).
+const CLIENT_EMOTE_PREFIX = "/emote";
+
+// "." is EveJS's own alias for "/" in chat; retail has no "." prefix. It
+// counts only when a known command name follows, so ordinary lines such as
+// "...anyone here?" or ".5 ISK each" are delivered as chat.
+const DOT_PREFIX_COMMANDS = new Set([...AVAILABLE_SLASH_COMMANDS, ...PLAYER_CHAT_COMMANDS]);
+
+// Whether a chat line is a command rather than text for the channel.
+function isChatCommandText(rawMessage) {
+  const trimmed = String(rawMessage || "").trim();
+  if (trimmed.startsWith("/")) {
+    return trimmed !== "/" && !trimmed.startsWith(CLIENT_EMOTE_PREFIX);
+  }
+  if (!trimmed.startsWith(".")) {
+    return false;
+  }
+  const [commandName] = trimmed.slice(1).split(/\s+/);
+  return DOT_PREFIX_COMMANDS.has(normalizeCommandName(commandName));
+}
+
+// The chat routes a client reaches (slash service, XMPP rooms, LSC) run
+// commands through here. Default deny: a player account runs only the player
+// commands; the rest change other characters, grant items or ISK, or act on
+// the whole server. executeChatCommand below is the dispatcher behind it;
+// client-facing routes must not call it directly.
+function executeClientChatCommand(session, rawMessage, chatHub, options = {}) {
+  if (isChatCommandText(rawMessage)) {
+    const [commandName] = String(rawMessage).trim().slice(1).trim().split(/\s+/);
+    const command = normalizeCommandName(commandName);
+    if (command && !mayRunChatCommand(session, command)) {
+      return handledResult(
+        chatHub,
+        session,
+        options,
+        `/${command} is not a player command; it requires a staff/admin role. Use /help for player commands.`,
+      );
+    }
+  }
+  return executeChatCommand(session, rawMessage, chatHub, options);
+}
+
 function executeChatCommand(session, rawMessage, chatHub, options = {}) {
   const trimmed = String(rawMessage || "").trim();
-  if (!trimmed.startsWith("/") && !trimmed.startsWith(".")) {
+  if (!isChatCommandText(trimmed)) {
     return { handled: false };
   }
 
@@ -2760,6 +2834,19 @@ function executeChatCommand(session, rawMessage, chatHub, options = {}) {
       );
     }
 
+    // Retail: only the CEO founds an alliance for the corporation. A player
+    // CEO goes through the same eligibility and founding fee as the client's
+    // Create Alliance; staff keep this command as a GM shortcut.
+    const allianceAuthority = checkAllianceCommandAuthority(session, corporationRecord, "create an alliance");
+    if (allianceAuthority) {
+      return handledResult(chatHub, session, options, allianceAuthority);
+    }
+    if (!hasStaffDebugRole(session)) {
+      return Promise.resolve(
+        require("./commands/playerAlliance").foundAllianceAsCeo(session, corporationRecord, argumentText),
+      ).then((message) => handledResult(chatHub, session, options, message));
+    }
+
     const affiliationBefore = captureAllianceAffiliationBefore(corporationRecord);
     const result = createCustomAllianceForCorporation(
       session.characterID,
@@ -2813,6 +2900,18 @@ function executeChatCommand(session, rawMessage, chatHub, options = {}) {
         options,
         "Current corporation could not be resolved.",
       );
+    }
+
+    // Retail: only the CEO applies to join an alliance, and the alliance's
+    // executor accepts. A player CEO files that application; staff keep this
+    // command as a GM shortcut that joins at once.
+    const allianceAuthority = checkAllianceCommandAuthority(session, corporationRecord, "apply to join an alliance");
+    if (allianceAuthority) {
+      return handledResult(chatHub, session, options, allianceAuthority);
+    }
+    if (!hasStaffDebugRole(session)) {
+      return handledResult(chatHub, session, options,
+        require("./commands/playerAlliance").applyToAllianceAsCeo(corporationRecord, argumentText));
     }
 
     const affiliationBefore = captureAllianceAffiliationBefore(corporationRecord);
@@ -3477,6 +3576,10 @@ function executeChatCommand(session, rawMessage, chatHub, options = {}) {
     return require("./commands/reportDesync").handleReportDesyncCommand(session, argumentText, chatHub, options);
   }
 
+  if (command === "health") {
+    return require("./commands/serverHealth").handleServerHealthCommand(session, argumentText, chatHub, options);
+  }
+
   if (command === "fetch") {
     return handleFetchCommand(session, argumentText, chatHub, options);
   }
@@ -3561,6 +3664,8 @@ module.exports = {
   DEER_HUNTER_MESSAGE,
   DEFAULT_MOTD_MESSAGE,
   executeChatCommand,
+  executeClientChatCommand,
+  isChatCommandText,
   getContainer1SeedPlan,
   getGmWeaponsSeedPlan,
   getPropulsionCommandItemTypes,

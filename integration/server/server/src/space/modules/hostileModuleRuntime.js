@@ -106,9 +106,12 @@ const ATTRIBUTE_ENERGY_NEUTRALIZER_SIGNATURE_RESOLUTION =
 const ATTRIBUTE_NOS_OVERRIDE = getAttributeIDByNames("nosOverride") || 1945;
 const ATTRIBUTE_ENTITY_TARGET_JAM = getAttributeIDByNames("entityTargetJam") || 928;
 
-const DOGMA_OP_MOD_ADD = 2;
-const DOGMA_OP_POST_MUL = 4;
-const DOGMA_OP_POST_PERCENT = 6;
+const {
+  DOGMA_OPERATION,
+} = require(path.join(__dirname, "../../services/dogma/evaluator/operations"));
+const DOGMA_OP_MOD_ADD = DOGMA_OPERATION.MOD_ADD;
+const DOGMA_OP_POST_MUL = DOGMA_OPERATION.POST_MUL;
+const DOGMA_OP_POST_PERCENT = DOGMA_OPERATION.POST_PERCENT;
 const PERSISTENT_SPECIAL_FX_WINDOW_MS = 12 * 60 * 60 * 1000;
 const EFFECT_SHIP_MODULE_FOCUSED_WARP_SCRAMBLING_SCRIPT = 6848;
 const EFFECT_SHIP_MODULE_FOCUSED_WARP_DISRUPTION_SCRIPT = 6849;
@@ -627,6 +630,8 @@ function readCallbackSurfaceDistanceMeters(callbacks, sourceEntity, targetEntity
 }
 
 function resolveHostileRangeMultiplier(effectState, sourceEntity, targetEntity, callbacks = {}) {
+  // A script's ship whose EWAR lands at any range (the AIR tutorial's battle, as on TQ).
+  if (sourceEntity?.scriptedEffectsAlwaysLand === true) return { success: true, multiplier: 1, surfaceDistance: 0 };
   const surfaceDistance = readCallbackSurfaceDistanceMeters(
     callbacks,
     sourceEntity,
@@ -678,7 +683,8 @@ function resolveHostileRangeMultiplier(effectState, sourceEntity, targetEntity, 
   const normalizedDistance = distanceIntoFalloff / Math.max(falloffMeters, 1);
   return {
     success: true,
-    multiplier: roundNumber(0.5 ** (normalizedDistance ** 2), 6),
+    // Unrounded: the target's attribute chain rounds once, at its end.
+    multiplier: 0.5 ** (normalizedDistance ** 2),
     surfaceDistance,
   };
 }
@@ -730,7 +736,10 @@ function buildHostileTargetRecord(sourceEntity, effectState, targetEntity, nowMs
       toFiniteNumber(nowMs, Date.now()) +
         Math.max(1, toFiniteNumber(effectState && effectState.durationMs, 1000)),
     ),
+    // The rounded multiplier decides whether a refresh changed the record;
+    // the exact one scales the effect, so the target's chain rounds once.
     rangeMultiplier: roundNumber(rangeMultiplier, 6),
+    exactRangeMultiplier: Math.max(0, toFiniteNumber(rangeMultiplier, 0)),
     modifierAttributeID: toInt(effectState && effectState.hostileModifierAttributeID, 0),
     modifierOperation: toInt(effectState && effectState.hostileModifierOperation, -1),
     modifierValue: roundNumber(toFiniteNumber(effectState && effectState.hostileStrengthValue, 0), 6),
@@ -788,7 +797,24 @@ function buildAggregateSignature(
   });
 }
 
-function recomputeTargetAggregateState(targetEntity) {
+function weaponModuleModifiersChanged(previous, next) {
+  return previous.length !== next.length || next.some((entry, index) => {
+    const old = previous[index];
+    return entry.modifiedAttributeID !== old.modifiedAttributeID ||
+      entry.operation !== old.operation || entry.value !== old.value ||
+      entry.stackingPenalized !== old.stackingPenalized ||
+      entry.requiredSkillTypeID !== old.requiredSkillTypeID;
+  });
+}
+
+function resolveRecordRangeMultiplier(record) {
+  return Math.max(
+    0,
+    toFiniteNumber(record && (record.exactRangeMultiplier ?? record.rangeMultiplier), 0),
+  );
+}
+
+function recomputeTargetAggregateState(targetEntity, nowMs = null) {
   const targetState = ensureTargetHostileState(targetEntity, false);
   if (!targetState) {
     return {
@@ -825,12 +851,10 @@ function recomputeTargetAggregateState(targetEntity) {
         targetEntity,
         record.resistanceAttributeID,
       );
-      const value = roundNumber(
+      const value =
         record.modifierValue *
-          Math.max(record.rangeMultiplier, 0) *
-          Math.max(resistanceMultiplier, 0),
-        6,
-      );
+        resolveRecordRangeMultiplier(record) *
+        Math.max(resistanceMultiplier, 0);
       if (Math.abs(value) > 1e-6) {
         modifierEntries.push({
           modifiedAttributeID: record.modifierAttributeID,
@@ -848,13 +872,10 @@ function recomputeTargetAggregateState(targetEntity) {
         record.resistanceAttributeID,
       );
       const scaledMultiplier =
-        Math.max(record.rangeMultiplier, 0) *
+        resolveRecordRangeMultiplier(record) *
         Math.max(resistanceMultiplier, 0);
       for (const entry of record.moduleModifierEntries || []) {
-        const value = roundNumber(
-          toFiniteNumber(entry && entry.value, 0) * scaledMultiplier,
-          6,
-        );
+        const value = toFiniteNumber(entry && entry.value, 0) * scaledMultiplier;
         if (Math.abs(value) <= 1e-6) {
           continue;
         }
@@ -902,10 +923,7 @@ function recomputeTargetAggregateState(targetEntity) {
       record.family === HOSTILE_FAMILY_DISRUPT ||
       record.family === HOSTILE_FAMILY_FIGHTER_TACKLE
     ) {
-      const value = roundNumber(
-        record.scrambleStrength * Math.max(record.rangeMultiplier, 0),
-        6,
-      );
+      const value = record.scrambleStrength * resolveRecordRangeMultiplier(record);
       if (Math.abs(value) > 1e-6) {
         modifierEntries.push({
           modifiedAttributeID: ATTRIBUTE_WARP_SCRAMBLE_STATUS,
@@ -929,13 +947,10 @@ function recomputeTargetAggregateState(targetEntity) {
         record.resistanceAttributeID,
       );
       const scaledMultiplier =
-        Math.max(record.rangeMultiplier, 0) *
+        resolveRecordRangeMultiplier(record) *
         Math.max(resistanceMultiplier, 0);
       for (const entry of record.moduleModifierEntries || []) {
-        const value = roundNumber(
-          toFiniteNumber(entry && entry.value, 0) * scaledMultiplier,
-          6,
-        );
+        const value = toFiniteNumber(entry && entry.value, 0) * scaledMultiplier;
         if (Math.abs(value) <= 1e-6) {
           continue;
         }
@@ -949,10 +964,7 @@ function recomputeTargetAggregateState(targetEntity) {
         });
       }
       for (const entry of record.chargeModifierEntries || []) {
-        const value = roundNumber(
-          toFiniteNumber(entry && entry.value, 0) * scaledMultiplier,
-          6,
-        );
+        const value = toFiniteNumber(entry && entry.value, 0) * scaledMultiplier;
         if (Math.abs(value) <= 1e-6) {
           continue;
         }
@@ -976,6 +988,16 @@ function recomputeTargetAggregateState(targetEntity) {
     targetLockSuppressed,
   );
   const changed = nextSignature !== String(targetState.aggregateSignature || "");
+  const session = targetEntity.session;
+  const turretNotifications = targetEntity.kind === "ship" && session?._space &&
+    !session.socket?.destroyed && weaponModuleModifiersChanged(
+      targetState.weaponModuleModifierEntries || [],
+      weaponModuleModifierEntries,
+    )
+    ? require("../runtime/attributeChangeNotification")
+    : null;
+  // Capture both sides while the combat snapshot can still read each aggregate.
+  const previousTurretAttributes = turretNotifications?.captureFittedTurretRangeAndTracking(targetEntity);
   targetState.modifierEntries = Object.freeze(
     modifierEntries.map((entry) => Object.freeze({ ...entry })),
   );
@@ -990,6 +1012,14 @@ function recomputeTargetAggregateState(targetEntity) {
   targetState.microwarpdriveBlocked = microwarpdriveBlocked;
   targetState.microJumpDriveBlocked = microJumpDriveBlocked;
   targetState.targetLockSuppressed = targetLockSuppressed;
+  if (turretNotifications) {
+    turretNotifications.notifyFittedGenericModuleAttributeDiffToSession(
+      session,
+      previousTurretAttributes,
+      turretNotifications.captureFittedTurretRangeAndTracking(targetEntity),
+      nowMs,
+    );
+  }
   return {
     changed,
     modifierEntries: targetState.modifierEntries,
@@ -1335,7 +1365,7 @@ function applyHostileModuleState({
   const targetState = ensureTargetHostileState(targetEntity, true);
   const previousRecord = targetState.incomingEffects.get(record.key) || null;
   targetState.incomingEffects.set(record.key, record);
-  const aggregateResult = recomputeTargetAggregateState(targetEntity);
+  const aggregateResult = recomputeTargetAggregateState(targetEntity, nowMs);
   return {
     success: true,
     data: {
@@ -1403,7 +1433,7 @@ function refreshHostileModuleState({
         sourceEntity,
         effectState,
       );
-      const aggregateResult = recomputeTargetAggregateState(targetEntity);
+      const aggregateResult = recomputeTargetAggregateState(targetEntity, nowMs);
       return {
         success: true,
         data: {
@@ -1430,7 +1460,7 @@ function refreshHostileModuleState({
     rangeResult.multiplier,
   );
   const upsertResult = upsertTargetHostileRecord(targetEntity, record);
-  const aggregateResult = recomputeTargetAggregateState(targetEntity);
+  const aggregateResult = recomputeTargetAggregateState(targetEntity, nowMs);
   const effectiveMultiplier = Math.max(record.rangeMultiplier, 0) *
     Math.max(resolveTargetResistanceMultiplier(targetEntity, record.resistanceAttributeID), 0);
   const effectiveMagnitude = [HOSTILE_FAMILY_SCRAM, HOSTILE_FAMILY_DISRUPT].includes(record.family)
@@ -1493,7 +1523,7 @@ function removeHostileModuleState({
   }
   delete effectState.careerEwarSpan;
   const removedRecord = removeTargetHostileRecord(targetEntity, sourceEntity, effectState);
-  const aggregateResult = recomputeTargetAggregateState(targetEntity);
+  const aggregateResult = recomputeTargetAggregateState(targetEntity, nowMs);
   return {
     success: true,
     data: {
@@ -1593,6 +1623,10 @@ function executeHostileModuleCycle({
   if (!refreshResult.success) {
     return refreshResult;
   }
+  require("../combat/killmailTracker").noteParticipation(entity, targetEntity, {
+    whenMs: nowMs,
+    weaponTypeID: effectState.typeID,
+  });
 
   if (effectState.hostileFamily === HOSTILE_FAMILY_NEUT) {
     const career = require("../../services/inventory/careerCombatOutcomes");
@@ -1799,6 +1833,7 @@ function executeHostileModuleCycle({
 // +1, so -2 clears exactly one scrambler or two disruptors, while a warp
 // disruption field generator is +100 and stays far out of reach.
 function getEntityWarpScrambleStatus(entity) {
+  if (require("../../services/observatoryFlashpoint/flashpointHooks").isWarpBlocked(entity)) return 1000;
   if (
     entity?.dungeonCurrentInstanceID &&
     require("../../services/homefront/homefrontHooks").runtime.isWarpBlocked(
@@ -1830,6 +1865,7 @@ function isMicrowarpdriveBlocked(entity) {
 }
 
 function isMicroJumpDriveBlocked(entity) {
+  if (require("../../services/observatoryFlashpoint/flashpointHooks").isMicroJumpBlocked(entity)) return true;
   const targetState = ensureTargetHostileState(entity, false);
   return Boolean(targetState && targetState.microJumpDriveBlocked === true);
 }

@@ -1,4 +1,5 @@
 "use strict";
+const { cloneValue: walkCloneValue } = require("../../common/clone");
 const { getSessionCorporationRoleMask } = require("../corporation/corporationRoleChecks");
 const { getPersistedCorporationAuthority, corporationAuthorityHasRole } = require("../corporation/corporationAuthority");
 
@@ -118,7 +119,7 @@ function normalizeDeploymentDunRotation(rotationYaw) {
 }
 
 function cloneValue(value) {
-  return JSON.parse(JSON.stringify(value));
+  return value === undefined ? JSON.parse(JSON.stringify(value)) : walkCloneValue(value);
 }
 
 function normalizeStructureText(value, fallback = "") {

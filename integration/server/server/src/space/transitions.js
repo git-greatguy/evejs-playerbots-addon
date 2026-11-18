@@ -1882,6 +1882,11 @@ function completeStargateJump(
 
   deactivateActiveModulesForSpaceTransition(session, "stargate-jump");
   sendMachoObjectDisconnects(session, SERVICES_LET_GO_AT_A_MOVE);
+  // the source gate's Departure, to the pilots on its grid (the jumping pilot
+  // leaves the scene before the bubble batch goes out, so not to it)
+  if (typeof spaceRuntime.emitStargateControllerEvent === "function") {
+    spaceRuntime.emitStargateControllerEvent(session, sourceGate.itemID, activeShip.itemID, "Departure");
+  }
   spaceRuntime.detachSession(session, {
     broadcast: true,
     lifecycleReason: "stargate-jump",
@@ -1976,6 +1981,10 @@ function completeStargateJump(
     destinationGate.itemID,
     moveResult.data && moveResult.data.itemID,
   );
+  // the destination gate's Arrival, to the pilots on its grid
+  if (typeof spaceRuntime.emitStargateControllerEvent === "function" && moveResult.data) {
+    spaceRuntime.emitStargateControllerEvent(session, destinationGate.itemID, moveResult.data.itemID, "Arrival");
+  }
   if (typeof spaceRuntime.recordSessionJumpTimingTrace === "function") {
     spaceRuntime.recordSessionJumpTimingTrace(session, "stargate-jump-attached", {
       destinationSystemID: destinationGate.solarSystemID,
@@ -2326,6 +2335,21 @@ function undockSession(session, options = {}) {
     };
   }
 
+  // { systemID, position, direction }: where the ship appears instead of the
+  // station's undock point. Only the deferred initial selection may name one,
+  // because everything past that branch works from the station's own system.
+  const destination = options.destination || null;
+  if (destination && options.deferInitialSelection !== true) {
+    return {
+      success: false,
+      errorMsg: "UNDOCK_DESTINATION_REQUIRES_INITIAL_SELECTION",
+    };
+  }
+  if (destination && !require("../services/activity/voidSystems").mayEnter(destination.systemID, session.characterID)) {
+    return { success: false, errorMsg: "VOID_SYSTEM_RESERVED" };
+  }
+  const arrivalSystemID = destination ? destination.systemID : dockable.solarSystemID;
+
   const activeShip = getActiveShipRecord(session.characterID);
   if (!activeShip) {
     return {
@@ -2393,13 +2417,13 @@ function undockSession(session, options = {}) {
       dockable.solarSystemID,
       "undock",
     );
-    const undockState = spaceRuntime.getStationUndockSpawnState(dockable.record, {
+    const undockState = destination || spaceRuntime.getStationUndockSpawnState(dockable.record, {
       shipTypeID: session.shipTypeID || (activeShip && activeShip.typeID),
       selectionStrategy: dockable.kind === "structure" ? "random" : "first",
       selectionKey: activeShip && activeShip.itemID,
     });
 
-    const moveResult = moveShipToSpace(activeShip.itemID, dockable.solarSystemID, {
+    const moveResult = moveShipToSpace(activeShip.itemID, arrivalSystemID, {
       position: undockState.position,
       direction: undockState.direction,
       velocity: { x: 0, y: 0, z: 0 },
@@ -2444,7 +2468,7 @@ function undockSession(session, options = {}) {
     }
 
     const updateResult = updateCharacterRecord(session.characterID, (record) =>
-      buildLocationIdentityPatch(record, dockable.solarSystemID, {
+      buildLocationIdentityPatch(record, arrivalSystemID, {
         homeStationID:
           Number(record.homeStationID || record.cloneStationID || session.homeStationID || 60003760) ||
           60003760,
@@ -3205,6 +3229,8 @@ function ejectSession(session, options = {}) {
       activeShip.itemID,
       capsuleMoveResult.data.itemID,
     );
+    require("../_secondary/express/publicGatewayNotices").getPublicGateway()
+      ?.primeShipSkinStatesForSession?.(session, { scene });
     flushSameSceneShipSwapNotificationPlan(
       session,
       applyResult.notificationPlan,
@@ -3606,6 +3632,8 @@ function boardSpaceShip(session, shipID) {
       currentShip.itemID,
       targetShipID,
     );
+    require("../_secondary/express/publicGatewayNotices").getPublicGateway()
+      ?.primeShipSkinStatesForSession?.(session, { scene });
     flushSameSceneShipSwapNotificationPlan(session, applyResult.notificationPlan);
     repairSameSceneSessionViewState(session);
     if (shouldConsumePreviousCapsule) {
@@ -4706,6 +4734,9 @@ function jumpSessionToSolarSystem(session, solarSystemID, options = {}) {
     )
     : null;
   if (replayTransfer === false) return { success: false, errorMsg: "VOID_REPLAY_DESTINATION_FORBIDDEN" };
+  if (!require("../services/activity/voidSystems").mayEnter(targetSolarSystemID, session.characterID)) {
+    return { success: false, errorMsg: "VOID_SYSTEM_RESERVED" };
+  }
   if (isAbyssalHostLocationID(targetSolarSystemID)) {
     return {
       success: false,
@@ -5315,6 +5346,7 @@ module.exports = {
   jumpSessionToSolarSystem,
   stopPendingTransitionsForShutdown,
   repairSameSceneSessionViewState,
+  sendMachoObjectDisconnects,
 };
 module.exports._testing = {
   schedulePendingTransitionTimer,

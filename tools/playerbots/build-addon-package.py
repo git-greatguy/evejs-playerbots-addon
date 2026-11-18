@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the version-pinned standalone playerbots ZIP for EveJS 261108.1."""
+"""Build the version-pinned standalone playerbots ZIP for EveJS 261115.2."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-VERSION = "0.2.151"
-EVEJS_VERSION = "261108.1"
+VERSION = "0.2.152"
+EVEJS_VERSION = "261115.2"
 PACKAGE_NAME = f"EveJS-Playerbots-Addon-v{VERSION}"
 OUTPUT = ROOT / "dist" / f"evejs-playerbots-addon-v{VERSION}.zip"
 EXTERNAL_OVERLAY_LIST = ROOT / "tools/playerbots/addon-overlay-files.txt"
@@ -70,7 +70,7 @@ def main() -> int:
     parser.add_argument(
         "--compat-root",
         required=True,
-        help="path to the original EveJS 261108.1 source tree used to generate base hashes",
+        help="path to the original EveJS 261115.2 source tree used to generate base hashes",
     )
     parser.add_argument("--output", default=str(OUTPUT), help="output ZIP path")
     args = parser.parse_args()

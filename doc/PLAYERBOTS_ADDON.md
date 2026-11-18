@@ -17,12 +17,12 @@ pause while a qualified escort responds.
 
 ## Source and release artifact
 
-The current public test package is `0.2.151`. The versioned ZIP in `dist/` is
+The current public test package is `0.2.152`. The versioned ZIP in `dist/` is
 the standard artifact to install and redistribute; commit it with matching
 source and documentation. The source checkout alone is not the installation
 artifact.
 
-The ZIP targets EveJS `261108.1` and includes its guarded server integration,
+The ZIP targets EveJS `261115.2` and includes its guarded server integration,
 standalone process, installer, static data, and public FitALL community
 fittings. It is built and validated against the supported original EveJS
 source tree. The documented roadmap lists current implementation status and
@@ -30,7 +30,7 @@ remaining live acceptance gates.
 
 ## Install
 
-The distributable archive is `dist/evejs-playerbots-addon-v0.2.151.zip`. Extract it and run:
+The distributable archive is `dist/evejs-playerbots-addon-v0.2.152.zip`. Extract it and run:
 
 ```sh
 EVEJS_SOURCE="/path/to/your EveJS checkout"
@@ -57,7 +57,7 @@ healthy:
 
 The default `EVEJS_PLAYER_BOTS_ADDON_MODE=auto` uses the add-on when the token is valid. With no token, EveJS retains its built-in periodic loop. To return to that loop, stop `playerbots-addon`, set `EVEJS_PLAYER_BOTS_ADDON_MODE=disabled`, and restart `server`.
 
-For new users, the recommended setup is a clean EveJS `261108.1` checkout with
+For new users, the recommended setup is a clean EveJS `261115.2` checkout with
 no existing GameStore or Market database. Install the add-on before first-run
 initialization, then follow EveJS's normal setup and seed its Jita market with
 the market tools. The add-on seeds player characters, not market stock. A fresh

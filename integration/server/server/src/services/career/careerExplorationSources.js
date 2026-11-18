@@ -30,7 +30,9 @@ function observe(characterID, record, definition, context = {}) {
   for (const [id, visit] of Object.entries(visits)) {
     if (!positive(visit?.visits) || positive(visit?.solarSystemID) !== positive(id)) continue;
     const system = world.getSolarSystemByID(positive(id));
-    if (!system || securityClass(system.solarSystemID) !== source.securityClass || !positive(system.regionID)) continue;
+    // A void system's row reads as null-security space, but no pilot travels there.
+    if (!system || require("../activity/voidReplayAdmission").isVoidSystemID(system.solarSystemID)) continue;
+    if (securityClass(system.solarSystemID) !== source.securityClass || !positive(system.regionID)) continue;
     regions.add(Number(system.regionID));
     updatedAtMs = Math.max(updatedAtMs, positive(visit.lastDateTimeMs));
   }

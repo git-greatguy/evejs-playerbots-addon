@@ -27,7 +27,7 @@ const { getCharacterRecord, toBigInt } = require(path.join(
   __dirname,
   "../character/characterState",
 ));
-const { executeChatCommand, DEFAULT_MOTD_MESSAGE } = require(path.join(
+const { executeClientChatCommand, isChatCommandText, DEFAULT_MOTD_MESSAGE } = require(path.join(
   __dirname,
   "./chatCommands",
 ));
@@ -2976,6 +2976,14 @@ function handleGroupMessage(client, xml) {
 
   if (inviteTargetJid && session && roomRecord) {
     if (roomRecord.allowInvites === false && !chatRuntime.isChannelAdmin(session, roomRecord)) return;
+    if (chatRuntime.getChannelInviteFailure(session, roomRecord)) {
+      sendSystemMessageToClient(
+        client,
+        roomJid,
+        "You are not allowed to invite players to this channel.",
+      );
+      return;
+    }
     const targetCharacterId = parseCharacterId(inviteTargetJid.split("@")[0]);
     if (targetCharacterId) {
       chatRuntime.inviteCharacterToChannel(roomRecord.roomName, targetCharacterId);
@@ -3017,7 +3025,7 @@ function handleGroupMessage(client, xml) {
     : 0;
   if (sharedFittingID && session && require("../playerbots/playerBotRuntime").listBots()
     .some((bot) => Number(bot.characterID) === playerbotPrivateTargetCharacterID)) {
-    const result = executeChatCommand(session, `/fitbot ${sharedFittingID}`, null, {
+    const result = executeClientChatCommand(session, `/fitbot ${sharedFittingID}`, null, {
       emitChatFeedback: false,
       playerbotPrivateTargetCharacterID,
     });
@@ -3034,14 +3042,14 @@ function handleGroupMessage(client, xml) {
     return;
   }
 
-  if (body.startsWith("/") || body.startsWith(".")) {
+  if (isChatCommandText(body)) {
     const playerbotsOpsCommand = /^[/.]playerbots\s+ops(?:\s|$)/i.test(body);
     const playerbotsOpsStartedAt = playerbotsOpsCommand ? Date.now() : 0;
     if (playerbotsOpsCommand) {
       log.info(`[XMPP] Playerbots ops request received from ${client.userName}; activeSession=${session ? "yes" : "no"}.`);
     }
     const result = session
-      ? executeChatCommand(session, body, null, {
+      ? executeClientChatCommand(session, body, null, {
           emitChatFeedback: false,
           ...(descriptor.kind === "fleet" ? { playerbotFleetChat: true } : {}),
           ...(playerbotPrivateTargetCharacterID ? { playerbotPrivateTargetCharacterID } : {}),

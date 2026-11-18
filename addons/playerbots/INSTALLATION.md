@@ -2,14 +2,14 @@
 
 ## Requirements
 
-- An EveJS source checkout at version `261108.1`.
+- An EveJS source checkout at version `261115.2`.
 - Docker Engine and the Docker Compose v2 plugin.
 - Python 3.10 or newer.
 - For an existing deployment, its initialized game database and healthy EveJS
   Market service before starting the playerbot add-on.
 - Linux/macOS shell for `install.sh`, or Python for Windows PowerShell.
 
-The archive supports the original EveJS `261108.1` source tree at any local
+The archive supports the original EveJS `261115.2` source tree at any local
 path. It does not target arbitrary EveJS releases. The installer checks both
 `package.json` version fields and hashes of every server file it manages. Keep
 using the versioned ZIP as the standard installation artifact even though the
@@ -19,7 +19,7 @@ change the roster target.
 
 ## Recommended setup for a new EveJS installation
 
-For a new server, use a clean EveJS `261108.1` checkout with no pre-existing
+For a new server, use a clean EveJS `261115.2` checkout with no pre-existing
 GameStore or Market database. The installer can run before database
 initialization: it prepares source files and `.env` only. Follow EveJS's normal
 first-run setup in `doc/SETUP.md`, including its `init` image build, then build
@@ -43,11 +43,11 @@ installation never resets, moves, or reseeds them.
 
 ## Install from the release ZIP
 
-Extract `evejs-playerbots-addon-v0.2.151.zip`. In a terminal, pass the EveJS
+Extract `evejs-playerbots-addon-v0.2.152.zip`. In a terminal, pass the EveJS
 source directory as the single positional argument:
 
 ```sh
-cd EveJS-Playerbots-Addon-v0.2.151
+cd EveJS-Playerbots-Addon-v0.2.152
 EVEJS_SOURCE="/path/to/your EveJS checkout"
 ./install.sh "$EVEJS_SOURCE"
 ```
@@ -119,7 +119,7 @@ creation caps, including when old saved settings request looser thresholds.
 From the extracted directory, run:
 
 ```powershell
-$EveJsSource = Read-Host 'Enter the path to your EveJS 261108.1 source checkout'
+$EveJsSource = Read-Host 'Enter the path to your EveJS 261115.2 source checkout'
 python .\install.py --dry-run "$EveJsSource"
 python .\install.py "$EveJsSource"
 ```

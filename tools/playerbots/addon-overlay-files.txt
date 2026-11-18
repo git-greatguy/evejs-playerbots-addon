@@ -61,3 +61,4 @@ server/src/utils/deploymentHealthcheck.js
 server/src/services/mining/miningNpcOperations.js
 server/src/services/security/crimewatchState.js
 server/src/space/modules/hostileModuleRuntime.js
+server/src/services/chat/commands/commandAccess.js

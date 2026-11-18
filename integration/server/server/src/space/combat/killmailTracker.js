@@ -31,6 +31,7 @@ const {
 } = require("../../abyssal").engineSupport.hostLocation;
 
 const CATEGORY_SHIP = 6;
+const TYPE_CARGO_CONTAINER = 23;
 const GROUP_CAPSULE = 29;
 const GROUP_SHUTTLE = 31;
 const GROUP_CORVETTE = 237;
@@ -111,6 +112,18 @@ function resolveCharacterRecord(characterID) {
     : null;
 }
 
+// The per-hit reader below takes a few scalar fields of the shooter's
+// character record, and getCharacterRecord deep-copies the whole record on
+// every call. It takes the same normalized record by reference
+// (readSharedCharacterRecord, deep-frozen, read-only).
+function resolveCombatCharacterRecord(characterID) {
+  const characterState = getCharacterStateService();
+  if (characterState && typeof characterState.readSharedCharacterRecord === "function") {
+    return characterState.readSharedCharacterRecord(characterID);
+  }
+  return resolveCharacterRecord(characterID);
+}
+
 function toInteger(value, fallback = 0) {
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) {
@@ -129,12 +142,32 @@ function formatKillmailFiletime(whenMs = Date.now()) {
   return (BigInt(numericWhenMs) * FILETIME_TICKS_PER_MS + FILETIME_EPOCH_OFFSET).toString();
 }
 
+// cleanupExpiredLedgers runs on every hit and copied every victim ledger to
+// test each for the 30-minute expiry. ledgerUpdatedLowerBoundMs is kept at or
+// below every stored ledger's lastUpdatedAtMs (each write takes the min,
+// deletes leave it lower, a sweep recomputes it). When now minus the bound is
+// within the TTL no ledger can have expired, so the sweep is skipped; otherwise
+// it runs in full. The same ledgers expire at the same calls.
+let ledgerUpdatedLowerBoundMs = Infinity;
+
+function noteLedgerUpdatedAt(whenMs) {
+  const updatedAtMs = toFiniteNumber(whenMs, 0);
+  if (updatedAtMs < ledgerUpdatedLowerBoundMs) ledgerUpdatedLowerBoundMs = updatedAtMs;
+}
+
 function cleanupExpiredLedgers(nowMs = Date.now()) {
+  if (!(nowMs - ledgerUpdatedLowerBoundMs > LEDGER_TTL_MS)) {
+    return;
+  }
+  let lowerBoundMs = Infinity;
   for (const [ledgerKey, ledger] of [...ledgersByVictim.entries()]) {
     if (!ledger || nowMs - toFiniteNumber(ledger.lastUpdatedAtMs, 0) > LEDGER_TTL_MS) {
       ledgersByVictim.delete(ledgerKey);
+    } else {
+      lowerBoundMs = Math.min(lowerBoundMs, toFiniteNumber(ledger.lastUpdatedAtMs, 0));
     }
   }
+  ledgerUpdatedLowerBoundMs = lowerBoundMs;
 }
 
 function getVictimLedgerKey(entity) {
@@ -205,7 +238,7 @@ function resolveAttackerIdentity(attackerEntity, options = {}) {
   const characterID = nativeNpc
     ? null
     : toPositiveInt(attackerEntity.pilotCharacterID ?? attackerEntity.characterID, null);
-  const characterRecord = characterID ? resolveCharacterRecord(characterID) || {} : {};
+  const characterRecord = characterID ? resolveCombatCharacterRecord(characterID) || {} : {};
   return {
     characterID,
     corporationID: toPositiveInt(
@@ -484,6 +517,7 @@ function getOrCreateLedger(targetEntity, whenMs = Date.now()) {
       attackers: {},
       lastUpdatedAtMs: whenMs,
     });
+    noteLedgerUpdatedAt(whenMs);
   }
   return ledgersByVictim.get(ledgerKey);
 }
@@ -508,10 +542,27 @@ function noteDamage(attackerEntity, targetEntity, appliedDamage, options = {}) {
 
   const whenMs = Number.isFinite(Number(options.whenMs)) ? Number(options.whenMs) : Date.now();
   const ledger = getOrCreateLedger(targetEntity, whenMs);
-  if (targetEntity.airEncounterSlot?.startsWith("hostile:") && attackerEntity?.session) require("../../services/nodegraph/nodeGraphEvents").publish(attackerEntity.session, "air.weapon-damage", { target: targetEntity, damage: damageAmount });
-  // An AIR lesson hostile hit the pilot: Balin repairs it (airCombatRuntime).
-  if (attackerEntity?.airEncounterSlot?.startsWith("hostile:") && targetEntity.session) require("../../services/nodegraph/nodeGraphEvents").publish(targetEntity.session, "air.pilot-damaged", { source: attackerEntity, damage: damageAmount });
+  if (targetEntity.airEncounterSlot && attackerEntity?.session) require("../../services/nodegraph/nodeGraphEvents").publish(attackerEntity.session, "air.weapon-damage", { target: targetEntity, damage: damageAmount });
   return addDamageToLedger(ledger, attackerEntity, targetEntity, damageAmount, { ...options, whenMs });
+}
+
+// Tackle, webs, ECM, neuts and damps deal no damage, but retail killmails still
+// list those pilots as attackers with 0 damage. Record a zero-damage row under
+// the same identity key a damage row would use.
+function noteParticipation(attackerEntity, targetEntity, options = {}) {
+  if (!attackerEntity || !targetEntity) {
+    return null;
+  }
+  if (require("../FireShow/showIdentity").isFireShowShip(targetEntity)) return null;
+  const whenMs = Number.isFinite(Number(options.whenMs)) ? Number(options.whenMs) : Date.now();
+  const attackerKind = String(attackerEntity.kind || "").toLowerCase();
+  const weaponTypeID =
+    toPositiveInt(options.weaponTypeID, null) ||
+    (attackerKind === "drone" || attackerKind === "fighter"
+      ? toPositiveInt(attackerEntity.typeID, null)
+      : null);
+  const ledger = getOrCreateLedger(targetEntity, whenMs);
+  return addDamageToLedger(ledger, attackerEntity, targetEntity, 0, { ...options, weaponTypeID, whenMs });
 }
 
 function addDamageToLedger(ledger, attackerEntity, targetEntity, damageAmount, options) {
@@ -526,6 +577,7 @@ function addDamageToLedger(ledger, attackerEntity, targetEntity, damageAmount, o
   ledger.attackers[attackerKey] = currentEntry;
   ledger.damageTaken = toFiniteNumber(ledger.damageTaken, 0) + damageAmount;
   ledger.lastUpdatedAtMs = whenMs;
+  noteLedgerUpdatedAt(whenMs);
   ledger.solarSystemID = toPositiveInt(
     targetEntity.systemID,
     toPositiveInt(ledger.solarSystemID, null),
@@ -544,7 +596,7 @@ function snapshotDamageLedger(targetEntity, attackerEntity, appliedDamage, optio
 
 // NPC wreck ownership follows damage contribution, while the killmail still
 // records the pilot who landed the final blow separately.  Ledger rows are
-// keyed by the full ship/weapon identity for killmail fidelity, so collapse
+// keyed by the full ship/weapon identity, so collapse
 // them by character here before comparing totals.  The lethal hit is supplied
 // as a non-mutating candidate because destruction currently happens before
 // the normal post-damage ledger write.
@@ -617,6 +669,44 @@ function resolveHighestDamageAttacker(targetEntity, options = {}) {
       toPositiveInt(right && right.characterID, 0)
   ));
   return ranked.length > 0 ? cloneValue(ranked[0]) : null;
+}
+
+// Ledger rows are keyed per ship and weapon so damage can be attributed as it
+// lands, but a retail killmail lists each character once with their total
+// damage. Merge a character's rows: the final-blow pilot keeps the final
+// blow's ship and weapon, everyone else keeps the ship and weapon of their
+// highest-damage row. Rows with no character (NPCs) stay as they are.
+function mergeKillmailAttackerRows(ledgerAttackers, finalAttackerKey) {
+  const finalRow = ledgerAttackers[finalAttackerKey] || null;
+  const finalCharacterID = toPositiveInt(finalRow && finalRow.characterID, 0);
+  let finalDamageDone = Math.max(0, toFiniteNumber(finalRow && finalRow.damageDone, 0));
+  const merged = new Map();
+  for (const [attackerKey, row] of Object.entries(ledgerAttackers)) {
+    if (attackerKey === finalAttackerKey) continue;
+    const characterID = toPositiveInt(row && row.characterID, 0);
+    const damageDone = Math.max(0, toFiniteNumber(row && row.damageDone, 0));
+    if (characterID > 0 && characterID === finalCharacterID) {
+      finalDamageDone += damageDone;
+      continue;
+    }
+    const groupKey = characterID > 0 ? `character:${characterID}` : attackerKey;
+    const current = merged.get(groupKey);
+    if (!current) {
+      merged.set(groupKey, { row: { ...row, damageDone }, bestDamage: damageDone });
+      continue;
+    }
+    if (damageDone > current.bestDamage) {
+      current.row = { ...row, damageDone: current.row.damageDone };
+      current.bestDamage = damageDone;
+    }
+    current.row.damageDone += damageDone;
+  }
+  return {
+    finalDamageDone,
+    attackers: [...merged.values()]
+      .map((entry) => entry.row)
+      .sort((left, right) => toFiniteNumber(right && right.damageDone, 0) - toFiniteNumber(left && left.damageDone, 0)),
+  };
 }
 
 function resolveKillmailItems(destroyResult = {}, lootLocationIDs = []) {
@@ -939,6 +1029,11 @@ function recordKillmailFromDestruction(targetEntity, destroyResult, options = {}
     ledgersByVictim.delete(ledgerKey);
     return null;
   }
+  if (toPositiveInt(targetEntity.typeID, 0) === TYPE_CARGO_CONTAINER) {
+    // Temporary cargo containers (jetcans) do not produce killmails.
+    ledgersByVictim.delete(ledgerKey);
+    return null;
+  }
   const abyssalNpcContext = resolveExactAbyssalNpcOutcomeContext(targetEntity);
   if (shouldSuppressResolvedAbyssalNpcOutcome(abyssalNpcContext)) {
     // NPC-victim killmails expose the reused host location, encounter hull mix,
@@ -958,6 +1053,7 @@ function recordKillmailFromDestruction(targetEntity, destroyResult, options = {}
   };
   ledger.attackers[finalAttackerKey] = finalAttacker;
   ledger.lastUpdatedAtMs = whenMs;
+  noteLedgerUpdatedAt(whenMs);
 
   const victimIdentity = options.victimIdentity || resolveVictimIdentity(targetEntity, options);
   const lootLocationIDs = resolveLootLocationIDs(targetEntity, destroyResult);
@@ -997,6 +1093,7 @@ function recordKillmailFromDestruction(targetEntity, destroyResult, options = {}
     targetEntity.systemID,
     toPositiveInt(ledger.solarSystemID, null),
   );
+  const mergedAttackers = mergeKillmailAttackerRows(ledger.attackers, finalAttackerKey);
   const killRecordInput = {
     killTime: formatKillmailFiletime(whenMs),
     // Reserved Abyssal hosts are reusable implementation details, not public
@@ -1013,17 +1110,14 @@ function recordKillmailFromDestruction(targetEntity, destroyResult, options = {}
     finalShipTypeID: finalAttacker.shipTypeID,
     finalWeaponTypeID: finalAttacker.weaponTypeID,
     finalSecurityStatus: finalAttacker.securityStatus,
-    finalDamageDone: Math.max(0, toFiniteNumber(finalAttacker.damageDone, 0)),
+    finalDamageDone: mergedAttackers.finalDamageDone,
     iskLost,
     bountyClaimed,
     loyaltyPoints: null,
     killRightSupplied: killRightActivation
       ? toPositiveInt(killRightActivation.fromID, null)
       : null,
-    attackers: Object.entries(ledger.attackers)
-      .filter(([attackerKey]) => attackerKey !== finalAttackerKey)
-      .map(([, attacker]) => attacker)
-      .sort((left, right) => toFiniteNumber(right && right.damageDone, 0) - toFiniteNumber(left && left.damageDone, 0)),
+    attackers: mergedAttackers.attackers,
     items,
   };
   killRecordInput.warID = resolveKillmailWarID(killRecordInput);
@@ -1138,6 +1232,7 @@ function enqueueKillmailFromDestruction(targetEntity, destroyResult, options = {
 module.exports = {
   enqueueKillmailFromDestruction,
   noteDamage,
+  noteParticipation,
   snapshotDamageLedger,
   resolveAttackerIdentity,
   resolveVictimIdentity,
@@ -1146,6 +1241,8 @@ module.exports = {
   recordKillmailFromDestruction,
 };
 module.exports._testing = {
+  cleanupExpiredLedgers,
+  ledgerKeys: () => [...ledgersByVictim.keys()],
   notifyVictimKillmailAvailable,
   notifyFinalBlowKillmailAvailable,
   resolveKillmailItems,

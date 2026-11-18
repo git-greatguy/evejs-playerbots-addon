@@ -75,16 +75,21 @@ tick(wallclockNowMs) {
       // the per-scene projection read must not run that global tick again.
       scene.syncStructureEntitiesFromState({ refresh: false });
       scene.destroyExpiredInventoryBackedEntities(sceneActivity.sceneNowMs);
+      tickProfiler.beginScene(scene);
       const gameplayTickStartMs = getMonotonicTimeMs();
       const sceneTickResult = scene.tick(now);
-      if (sceneTickResult?.blocked) { hazardRecoveryBlocked = true; continue; }
+      if (sceneTickResult?.blocked) {
+        tickProfiler.endScene(scene, getMonotonicTimeMs() - gameplayTickStartMs);
+        hazardRecoveryBlocked = true;
+        continue;
+      }
       // Its per-scene features, after its tick, each in its own try (Scene
       // feature hooks): a docking approach that flew into range docks here,
       // as Tranquility docks it, without asking the client again.
       sceneFeatureHooks.tickSceneFeatures(scene, now);
       const gameplayTickWorkMs = Math.max(0, getMonotonicTimeMs() - gameplayTickStartMs);
       scene._lastTickWorkMs = gameplayTickWorkMs;
-      tickProfiler.recordSceneTotal(gameplayTickWorkMs);
+      tickProfiler.endScene(scene, gameplayTickWorkMs);
       scene._lastTickAtWallclockMs = now;
       if (!Array.isArray(scene._recentTickWorkMs)) scene._recentTickWorkMs = [];
       scene._recentTickWorkMs.push(gameplayTickWorkMs);
@@ -120,15 +125,22 @@ tick(wallclockNowMs) {
       }
     }
     const finishedAtMonotonicMs = getMonotonicTimeMs();
+    const tickDurationMs = Math.max(0, finishedAtMonotonicMs - startedAtMonotonicMs);
+    // Where this tick's time went, for the server health monitor.
+    const breakdown = tickProfiler.takeTickBreakdown(tickDurationMs);
     const tickSummary = {
       startedAtMonotonicMs,
       actualIntervalMs,
       targetTickIntervalMs: this._tickIntervalMs,
-      tickDurationMs: Math.max(0, finishedAtMonotonicMs - startedAtMonotonicMs),
+      tickDurationMs,
       latenessMs: Math.max(0, actualIntervalMs - this._tickIntervalMs),
       sceneCount: this.scenes.size,
       tickedSceneCount,
       collectedSceneCount: collectionSummary.collectedSystemIDs.length,
+      subsystemMs: breakdown.subsystemMs,
+      worstScene: breakdown.worstScene,
+      perfStartMs: breakdown.perfStartMs,
+      perfEndMs: breakdown.perfEndMs,
     };
     this._lastTickSummary = tickSummary;
     try {

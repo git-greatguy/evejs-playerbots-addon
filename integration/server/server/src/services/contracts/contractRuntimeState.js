@@ -1,5 +1,6 @@
 "use strict";
 
+const { cloneValue: walkCloneValue } = require("../../common/clone");
 const path = require("path");
 
 const {
@@ -214,7 +215,7 @@ function getAuctionPorts() {
 }
 
 function cloneValue(value) {
-  return JSON.parse(JSON.stringify(value));
+  return value === undefined ? JSON.parse(JSON.stringify(value)) : walkCloneValue(value);
 }
 
 function toInteger(value, fallback = 0) {
@@ -402,11 +403,28 @@ function ensureRuntimeTable() {
   return table;
 }
 
-function listContractRecords() {
+// The stored records themselves, not copies. Callers only read them; anything
+// that keeps or changes a record copies it first.
+function* iterateContractRecords() {
   const table = ensureRuntimeTable();
-  return Object.entries(table)
-    .filter(([key, value]) => key !== "_meta" && value && typeof value === "object")
-    .map(([, value]) => cloneValue(value));
+  for (const key of Object.keys(table)) {
+    const value = table[key];
+    if (key !== "_meta" && value && typeof value === "object") {
+      yield value;
+    }
+  }
+}
+
+// Copies of the records that pass the read-only predicate. Only matches are
+// cloned: the table holds every contract ever created, item rows included.
+function listContractRecords(predicate = null) {
+  const records = [];
+  for (const record of iterateContractRecords()) {
+    if (!predicate || predicate(record)) {
+      records.push(cloneValue(record));
+    }
+  }
+  return records;
 }
 
 function getContractRecord(contractID) {
@@ -429,22 +447,33 @@ function putContractRecord(record) {
   return repo.write(TABLE, `/${String(contractID)}`, cloneValue(record));
 }
 
+// _meta.nextContractID is the allocator. The stored records are scanned once
+// per process, in case the counter trails a record written without it; after
+// that every new ID comes from the counter alone.
+let contractIDCounterChecked = false;
+
 function allocateContractID() {
   const table = ensureRuntimeTable();
-  const existingMax = listContractRecords()
-    .reduce(
-      (maxValue, record) => Math.max(maxValue, toPositiveInteger(record.contractID, 0)),
-      CONTRACT_ID_START - 1,
-    );
+  let existingMax = CONTRACT_ID_START - 1;
+  if (!contractIDCounterChecked) {
+    for (const record of iterateContractRecords()) {
+      existingMax = Math.max(existingMax, toPositiveInteger(record.contractID, 0));
+    }
+  }
   const nextContractID = Math.max(
     toPositiveInteger(table._meta && table._meta.nextContractID, CONTRACT_ID_START),
     existingMax + 1,
   );
-  repo.write(TABLE, "/_meta/nextContractID", nextContractID + 1);
-  return nextContractID;
+  const updated = repo.write(TABLE, "/_meta/nextContractID", nextContractID + 1);
+  if (!updated || updated.success !== true) {
+    return updated || { success: false, errorMsg: "CONTRACT_ID_WRITE_FAILED" };
+  }
+  contractIDCounterChecked = true;
+  return { success: true, contractID: nextContractID };
 }
 
 function resetForTests() {
+  contractIDCounterChecked = false;
   repo.write(TABLE, "/", {
     _meta: {
       version: 1,
@@ -763,18 +792,53 @@ async function adjustWalletAsync(
       );
 }
 
-function getOwnerDeliveryFlag(forCorp, divisionFlagID = 0) {
-  if (!forCorp) {
-    return ITEM_FLAGS.HANGAR;
-  }
-  const normalizedFlagID = toPositiveInteger(divisionFlagID, 0);
-  return CORP_CONTRACT_ITEM_FLAGS.has(normalizedFlagID)
-    ? normalizedFlagID
-    : ITEM_FLAGS.CORP_DELIVERIES;
+// Goods a contract returns or delivers to its issuer. For a corporation they go
+// to Corp Deliveries at the station, whichever division they came from: the
+// client's delete confirmation (message 258408) says a corporation contract's
+// items "will be returned to the deliveries hangar".
+function getOwnerDeliveryFlag(forCorp) {
+  return forCorp ? ITEM_FLAGS.CORP_DELIVERIES : ITEM_FLAGS.HANGAR;
 }
 
 function getAcceptorDeliveryFlag(forCorp) {
   return forCorp ? ITEM_FLAGS.CORP_DELIVERIES : ITEM_FLAGS.HANGAR;
+}
+
+// A corporation's hangar divisions at an NPC station are the inventory of its
+// office there: their items carry the office's inventory ID as locationID,
+// not the station's (the client's invCache.GetStationIDandOfficeIDOfItem maps
+// them back through the office; industry resolves them the same way, see
+// getCorporationOfficeInventoryLocationIDs). Corp Deliveries stays at the
+// station itself.
+function getCorporationOfficeLocationIDsAtStation(ownerID, stationID) {
+  const { getCorporationOffices } = require("../corporation/corporationRuntimeState");
+  const normalizedStationID = toPositiveInteger(stationID, 0);
+  const locationIDs = [];
+  if (!normalizedStationID) {
+    return locationIDs;
+  }
+  for (const office of getCorporationOffices(toPositiveInteger(ownerID, 0))) {
+    if (
+      toPositiveInteger(office && office.stationID, 0) !== normalizedStationID ||
+      office.impounded === true
+    ) {
+      continue;
+    }
+    for (const value of [office.officeID, office.officeFolderID, office.itemID]) {
+      const locationID = toPositiveInteger(value, 0);
+      if (locationID > 0 && !locationIDs.includes(locationID)) {
+        locationIDs.push(locationID);
+      }
+    }
+  }
+  return locationIDs;
+}
+
+function getContractItemLocationIDsAtStation(ownerID, stationID, forCorp) {
+  const normalizedStationID = toPositiveInteger(stationID, 0);
+  return forCorp
+    ? [normalizedStationID, ...getCorporationOfficeLocationIDsAtStation(ownerID, stationID)]
+    : [normalizedStationID];
 }
 
 function getItemContractQuantity(item, requestedQuantity) {
@@ -793,7 +857,8 @@ function validateSelectedItem(itemID, quantity, ownerID, locationID, forCorp, se
   if (toPositiveInteger(item.ownerID, 0) !== ownerID) {
     throwContractError(`Item ${itemID} is not owned by the contract issuer.`);
   }
-  if (toPositiveInteger(item.locationID, 0) !== locationID) {
+  if (!getContractItemLocationIDsAtStation(ownerID, locationID, forCorp)
+    .includes(toPositiveInteger(item.locationID, 0))) {
     throwContractError(`Item ${itemID} is not at the contract start location.`);
   }
   if (!isAllowedContractSourceFlag(item.flagID, forCorp, selectedFlagID)) {
@@ -1013,8 +1078,23 @@ function buildStructureHangarLocationContext(locationID) {
 }
 
 function syncInventoryChangesToSession(session, changes = [], options = {}) {
+  const { isSecureCargoContainerType, stripLegacySecureContainerStateFromCustomInfo } =
+    require("../ship/cargoContainerRuntime");
   const normalizedChanges = (Array.isArray(changes) ? changes : [])
-    .filter((change) => change && change.item);
+    .filter((change) => change && change.item)
+    .map((change) => {
+      if (!isSecureCargoContainerType(change.item)) return change;
+      const item = change.item;
+      return {
+        ...change,
+        item: {
+          ...item,
+          clientCustomInfo: stripLegacySecureContainerStateFromCustomInfo(
+            item.clientCustomInfo ?? item.customInfo,
+          ) ?? "",
+        },
+      };
+    });
   // Before the session guard: a contract settles against locations, not
   // logins. An item staged out of a corporation division by an issuer who has
   // since logged off still emptied a hangar somebody else is looking at.
@@ -1024,18 +1104,59 @@ function syncInventoryChangesToSession(session, changes = [], options = {}) {
       emitItemsChangedBatch: true,
     });
   }
+  // The same holds for a personal hangar: a courier delivered by the hauler
+  // lands in the issuer's hangar, and the issuer's client only learns of it
+  // from its own session. Each other character whose items changed gets the
+  // rows that are theirs.
+  syncInventoryChangesToOwnerSessions(session, normalizedChanges, options);
   if (!session || typeof session.sendNotification !== "function") {
     return;
   }
+  if (normalizedChanges.length <= 0) {
+    return;
+  }
+  emitContractInventoryChanges(session, normalizedChanges, options);
+}
+
+function syncInventoryChangesToOwnerSessions(actorSession, changes, options = {}) {
+  const actorCharacterID = actorSession ? getSessionCharacterID(actorSession) : 0;
+  const changesByOwnerID = new Map();
+  for (const change of changes) {
+    const ownerIDs = new Set([
+      toPositiveInteger(change.item.ownerID, 0),
+      toPositiveInteger(change.previousData?.ownerID, 0),
+    ]);
+    for (const ownerID of ownerIDs) {
+      if (!ownerID || ownerID === actorCharacterID) {
+        continue;
+      }
+      const ownerChanges = changesByOwnerID.get(ownerID) || [];
+      ownerChanges.push(change);
+      changesByOwnerID.set(ownerID, ownerChanges);
+    }
+  }
+  for (const [ownerID, ownerChanges] of changesByOwnerID) {
+    // Corporation owners resolve to no session; their office hangars are
+    // covered by the observer fan-out above.
+    const ownerSession = sessionRegistry.findSessionByCharacterID(ownerID);
+    if (
+      !ownerSession ||
+      ownerSession === actorSession ||
+      typeof ownerSession.sendNotification !== "function"
+    ) {
+      continue;
+    }
+    emitContractInventoryChanges(ownerSession, ownerChanges, options);
+  }
+}
+
+function emitContractInventoryChanges(session, changes, options = {}) {
   const { emitItemsChangedBatchForSession } = require(path.join(
     __dirname,
     "../character/characterState",
   ));
-  if (normalizedChanges.length <= 0) {
-    return;
-  }
   try {
-    emitItemsChangedBatchForSession(session, normalizedChanges, {
+    emitItemsChangedBatchForSession(session, changes, {
       locationContext: options.locationContext || null,
     });
   } catch (error) {
@@ -1147,17 +1268,28 @@ function ensureSupportedCreateInfo(info) {
   return true;
 }
 
-// Fee amounts follow the native creation preview. Debit/refund timing is the
-// EveJS settlement policy: broker and deposit at create, deposit only returned
-// from a funded sale. No-bid expiry/cancellation forfeits the deposit.
-function getAuctionCreationTerms(info, session) {
+function getContractSkillLevels(session) {
   const { getCharacterSkillMap } = require("../skills/skillState");
   const skills = getCharacterSkillMap(getSessionCharacterID(session), { skipBootstrap: true });
-  const level = typeID => Math.max(0, Math.min(5, Number(skills.get(typeID)?.effectiveSkillLevel ?? skills.get(typeID)?.trainedSkillLevel ?? skills.get(typeID)?.skillLevel) || 0));
-  const accountingLevel = level(16622);
-  const brokerLevel = level(3446);
-  const limit = info.forCorp ? [5,26,27,28,29,30][level(25233)]
-    : [7,16,17,18,19,20][level(25235)] + [21,22,23,24,25,26][level(73912)];
+  return typeID => Math.max(0, Math.min(5, Number(skills.get(typeID)?.effectiveSkillLevel ?? skills.get(typeID)?.trainedSkillLevel ?? skills.get(typeID)?.skillLevel) || 0));
+}
+
+// The outstanding-contract limit (Contracting, Advanced Contracting and
+// Corporation Contracting, with a 500 hard cap) applies to every contract type
+// the issuer creates. The count already covers all types: outstanding and
+// in-progress contracts for the same personal/corporation side, plus creates
+// still settling. Private contracts to the issuer's own corporation or a
+// corp-mate count only against the 500 cap.
+// The client's own tables (eve/common/script/util/contractscommon.py, build 3396210):
+// its contracts window and creation wizard show these limits.
+const NUM_CONTRACTS_BY_SKILL = Object.freeze([1, 5, 9, 13, 17, 21]);
+const NUM_CONTRACTS_BY_ADVSKILL = Object.freeze([0, 4, 8, 12, 16, 20]);
+const NUM_CONTRACTS_BY_SKILL_CORP = Object.freeze([10, 20, 30, 40, 50, 60]);
+
+function assertOutstandingContractLimit(info, session) {
+  const level = getContractSkillLevels(session);
+  const limit = info.forCorp ? NUM_CONTRACTS_BY_SKILL_CORP[level(25233)]
+    : NUM_CONTRACTS_BY_SKILL[level(25235)] + NUM_CONTRACTS_BY_ADVSKILL[level(73912)];
   const corporationID = getSessionCorporationID(session);
   const { getCorporationRecord, isNpcCorporationID } = require("../corporation/corporationState");
   const { peekCharacterRecord } = require("../character/characterState");
@@ -1167,7 +1299,7 @@ function getAuctionCreationTerms(info, session) {
     (!isNpcCorporationID(corporationID) && ownCorp?.isNPC === false &&
       Number(peekCharacterRecord(Number(assigneeID))?.corporationID) === corporationID)
   );
-  const outstanding = listContractRecords().filter(record =>
+  const outstanding = listContractRecords(record =>
     record.issuerID === getSessionCharacterID(session) &&
     Boolean(record.forCorp) === info.forCorp &&
     [CONTRACT_STATUS.OUTSTANDING, CONTRACT_STATUS.IN_PROGRESS].includes(record.status));
@@ -1181,6 +1313,15 @@ function getAuctionCreationTerms(info, session) {
   if (all.length >= 500 || count >= effectiveLimit) {
     throwContractUserError("ConTooManyContractsMax", { max: all.length >= 500 ? 500 : effectiveLimit });
   }
+}
+
+// Fee amounts follow the native creation preview. Debit/refund timing is the
+// EveJS settlement policy: broker and deposit at create, deposit only returned
+// from a funded sale. No-bid expiry/cancellation forfeits the deposit.
+function getAuctionCreationTerms(info, session) {
+  const level = getContractSkillLevels(session);
+  const accountingLevel = level(16622);
+  const brokerLevel = level(3446);
   const privateContract = info.isPrivate && info.assignedToID > 0;
   const extraDays = Math.max(0, info.minutesExpire / 1440 - 1);
   return {
@@ -1338,7 +1479,9 @@ function prepareContractCreationSettlement(
     return { success: true, duplicate: true, data: existing };
   }
 
-  const contractID = allocateContractID();
+  const allocation = allocateContractID();
+  if (!allocation.success) return allocation;
+  const { contractID } = allocation;
   const metaFlush = repo.flushTableSync(TABLE);
   if (!metaFlush || metaFlush.success !== true) {
     return metaFlush || { success: false, errorMsg: "CONTRACT_ID_FLUSH_FAILED" };
@@ -1958,6 +2101,7 @@ function prepareContractCreationRequest(rawInfo, session) {
     return { success: true, duplicate: true, data: existing };
   }
 
+  assertOutstandingContractLimit(info, session);
   validateCreationItems(info, ownerID, session);
   const isPrivate = resolveAvailability(info, session) !== CONTRACT_AVAILABILITY.PUBLIC;
   const privateBrokerFee = isPrivate && info.contractType !== CONTRACT_TYPE.AUCTION
@@ -2143,25 +2287,27 @@ function canAcceptContract(contract, session) {
   return isAssignedToSession(contract, session);
 }
 
-function findRequestedItems(ownerID, locationID, forCorp, typeID, session = null) {
-  return listContainerItems(ownerID, locationID, null)
+// Requested goods always come from the accepting character's own hangar, also
+// when accepting for the corporation: the client tells a corporate acceptor
+// "These items must be in your personal hangar." (contracts.py:383-384,
+// ConfirmAcceptCorpItems, message 232700). The corporation still pays any
+// price from its wallet and receives the offered goods in Corp Deliveries.
+function findRequestedItems(characterID, locationID, typeID) {
+  return listContainerItems(characterID, locationID, null)
     .filter((item) => (
       toPositiveInteger(item && item.typeID, 0) === toPositiveInteger(typeID, 0) &&
-      isAllowedContractSourceFlag(item.flagID, forCorp, 0) &&
-      (!forCorp || canAccessCorporationContractItem(session, ownerID, locationID, item.flagID, true))
+      isAllowedContractSourceFlag(item.flagID, false, 0)
     ))
     .sort((left, right) => toPositiveInteger(left.itemID, 0) - toPositiveInteger(right.itemID, 0));
 }
 
-function ensureRequestedItemsAvailable(contract, acceptorOwnerID, acceptForCorp, session) {
+function ensureRequestedItemsAvailable(contract, session) {
   for (const requested of (contract.items || []).filter((row) => !row.inCrate)) {
     let remaining = toPositiveInteger(requested.quantity, 0);
     for (const item of findRequestedItems(
-      acceptorOwnerID,
+      getSessionCharacterID(session),
       contract.startStationID,
-      acceptForCorp,
       requested.itemTypeID,
-      session,
     )) {
       remaining -= getItemQuantity(item);
       if (remaining <= 0) {
@@ -2172,63 +2318,6 @@ function ensureRequestedItemsAvailable(contract, acceptorOwnerID, acceptForCorp,
       throwContractError(`The acceptor does not have enough item type ${requested.itemTypeID} at the contract location.`);
     }
   }
-}
-
-function transferRequestedItemsToIssuer(contract, acceptorOwnerID, acceptForCorp) {
-  const changes = [];
-  const issuerFlagID = getOwnerDeliveryFlag(
-    normalizeBoolean(contract.forCorp, false),
-    contract.startStationDivision,
-  );
-
-  for (const requested of (contract.items || []).filter((row) => !row.inCrate)) {
-    let remaining = toPositiveInteger(requested.quantity, 0);
-    const candidates = findRequestedItems(
-      acceptorOwnerID,
-      contract.startStationID,
-      acceptForCorp,
-      requested.itemTypeID,
-    );
-    for (const item of candidates) {
-      if (remaining <= 0) {
-        break;
-      }
-      const moveQuantity = Math.min(remaining, getItemQuantity(item));
-      const transferResult = contractItemCustody.transferItem({
-        contractID: contract.contractID,
-        item,
-        ownerID: contract.issuerOwnerID,
-        locationID: contract.startStationID,
-        flagID: issuerFlagID,
-        quantity: toInteger(item.singleton, 0) === 1 ? null : moveQuantity,
-        reason: CUSTODY_REASON.CONTRACT_REQUEST_DELIVER,
-        actor: acceptorOwnerID,
-      });
-      if (!transferResult.success) {
-        throwContractError(`Failed to transfer requested item ${item.itemID}.`);
-      }
-      changes.push(...((transferResult.data && transferResult.data.changes) || []));
-      const movedItem = findMovedItem(
-        transferResult.data && transferResult.data.changes,
-        contract.startStationID,
-        item.itemID,
-        item.typeID,
-      );
-      if (movedItem) {
-        changes.push(...transferContainedItemsToOwner(
-          contract.contractID,
-          movedItem.itemID,
-          contract.issuerOwnerID,
-        ));
-      }
-      remaining -= moveQuantity;
-    }
-    if (remaining > 0) {
-      throwContractError(`The acceptor does not have enough item type ${requested.itemTypeID} at the contract location.`);
-    }
-  }
-
-  return changes;
 }
 
 function transferEscrowRowsToOwner(contract, targetOwnerID, locationID, flagID) {
@@ -2319,22 +2408,15 @@ function buildContractContentLegs(contractID, operationKind, parentLegID, rootIt
   }));
 }
 
-function buildRequestedAcceptanceLegs(
-  contract,
-  acceptorOwnerID,
-  acceptForCorp,
-  session,
-) {
+function buildRequestedAcceptanceLegs(contract, session) {
   const availableByItemID = new Map();
   const legs = [];
   for (const requested of (contract.items || []).filter((row) => !row.inCrate)) {
     let remaining = toPositiveInteger(requested.quantity, 0);
     const candidates = findRequestedItems(
-      acceptorOwnerID,
+      getSessionCharacterID(session),
       contract.startStationID,
-      acceptForCorp,
       requested.itemTypeID,
-      session,
     );
     for (const item of candidates) {
       if (remaining <= 0) {
@@ -2494,15 +2576,10 @@ function prepareContractAcceptanceRequest(contractID, session, rawAcceptForCorp 
   let kind = null;
   if (contract.type === CONTRACT_TYPE.ITEM_EXCHANGE) {
     if (contract.price > 0) assertAuctionWalletAccess(session, acceptorWalletRef);
-    ensureRequestedItemsAvailable(contract, acceptorOwnerID, acceptForCorp, session);
+    ensureRequestedItemsAvailable(contract, session);
     ensureWalletFunds(acceptorWalletRef, contract.price, "Contract price");
     kind = "accept-item-exchange";
-    commonPayload.requestedLegs = buildRequestedAcceptanceLegs(
-      contract,
-      acceptorOwnerID,
-      acceptForCorp,
-      session,
-    );
+    commonPayload.requestedLegs = buildRequestedAcceptanceLegs(contract, session);
     commonPayload.offeredLegs = buildOfferedAcceptanceLegs(contract);
     commonPayload.walletLegs = [
       buildContractWalletLeg({
@@ -2921,10 +2998,7 @@ async function deliverItemExchangeAcceptance(contractID) {
   let settlement = contractSettlementState.getPendingContractSettlement(contractID);
   const payload = settlement.payload;
   const contract = payload.contract;
-  const issuerFlagID = getOwnerDeliveryFlag(
-    normalizeBoolean(contract.forCorp, false),
-    contract.startStationDivision,
-  );
+  const issuerFlagID = getOwnerDeliveryFlag(normalizeBoolean(contract.forCorp, false));
   for (const candidate of payload.requestedLegs) {
     settlement = contractSettlementState.getPendingContractSettlement(contractID);
     const leg = settlement.payload.requestedLegs.find(
@@ -3504,7 +3578,7 @@ function prepareContractTerminalRequest(contractID, operation, session) {
       normalizedOperation,
       contract.issuerOwnerID,
       contract.endStationID,
-      getOwnerDeliveryFlag(normalizeBoolean(contract.forCorp, false), contract.startStationDivision),
+      getOwnerDeliveryFlag(normalizeBoolean(contract.forCorp, false)),
       CUSTODY_REASON.CONTRACT_CONTENT_DELIVER,
     );
     payload.wrapLeg = {
@@ -3539,6 +3613,11 @@ function prepareContractTerminalRequest(contractID, operation, session) {
       0,
     );
     const wrap = getPackageWrap(contract);
+    // The contents stay in contract escrow while the package travels. A
+    // package that no longer exists (destroyed with its carrier) took its
+    // contents with it: the issuer still gets the collateral and the reward
+    // back, but nothing is delivered and the escrowed contents are destroyed.
+    const packageDestroyed = !wrap;
     const destinationLocationID = toPositiveInteger(
       wrap && wrap.locationID,
       contract.startStationID,
@@ -3565,7 +3644,8 @@ function prepareContractTerminalRequest(contractID, operation, session) {
         counterpartyID: acceptorOwnerID,
       }),
     ];
-    payload.itemLegs = buildTerminalEscrowItemLegs(
+    payload.packageDestroyed = packageDestroyed;
+    payload.itemLegs = packageDestroyed ? [] : buildTerminalEscrowItemLegs(
       contract,
       normalizedOperation,
       acceptorOwnerID,
@@ -3573,6 +3653,9 @@ function prepareContractTerminalRequest(contractID, operation, session) {
       destinationFlagID,
       CUSTODY_REASON.CONTRACT_CONTENT_DELIVER,
     );
+    payload.destroyLegs = packageDestroyed
+      ? buildPackageDestroyLegs(contract, normalizedOperation)
+      : [];
     payload.wrapLeg = wrap
       ? {
           item: cloneValue(wrap),
@@ -3602,10 +3685,7 @@ function prepareContractTerminalRequest(contractID, operation, session) {
       description: `Contract ${contractID} reward escrow refunded`,
       contractID,
     })];
-    const destinationFlagID = getOwnerDeliveryFlag(
-      normalizeBoolean(contract.forCorp, false),
-      contract.startStationDivision,
-    );
+    const destinationFlagID = getOwnerDeliveryFlag(normalizeBoolean(contract.forCorp, false));
     if (contract.type === CONTRACT_TYPE.ITEM_EXCHANGE || contract.type === CONTRACT_TYPE.AUCTION) {
       payload.itemLegs = buildTerminalEscrowItemLegs(
         contract,
@@ -3718,6 +3798,75 @@ async function transferContractTerminalItems(contractID) {
   return { success: true };
 }
 
+// Every escrowed item of a destroyed package, each container's contents
+// before the container, each removal with its own idempotency key.
+function buildPackageDestroyLegs(contract, operation) {
+  const legs = [];
+  for (const topItem of listPackageContentItems(contract)) {
+    const rootItemID = toPositiveInteger(topItem && topItem.itemID, 0);
+    for (const item of [...collectContainedItems(rootItemID).reverse(), topItem]) {
+      const legID = `destroy:${legs.length + 1}`;
+      legs.push({
+        legID,
+        item: cloneValue(item),
+        escrowRootItemID: rootItemID,
+        destroyKey: `contract:${contract.contractID}:${operation}:${legID}`,
+        destroyed: false,
+        changes: [],
+      });
+    }
+  }
+  return legs;
+}
+
+function destroyContractPackageContents(contractID) {
+  let settlement = contractSettlementState.getPendingContractSettlement(contractID);
+  for (const candidate of settlement.payload.destroyLegs || []) {
+    settlement = contractSettlementState.getPendingContractSettlement(contractID);
+    const leg = settlement.payload.destroyLegs.find(
+      (entry) => entry.legID === candidate.legID,
+    );
+    if (!leg || leg.destroyed) {
+      continue;
+    }
+    const result = contractItemCustody.destroyEscrowContent({
+      contractID,
+      item: leg.item,
+      escrowRootItemID: leg.escrowRootItemID,
+      actor: settlement.payload.actorCharacterID,
+      idempotencyKey: leg.destroyKey,
+    });
+    const failure = durableContractCustodyFailure(
+      result,
+      "CONTRACT_PACKAGE_DESTROY_FAILED",
+    );
+    if (failure) {
+      return failure;
+    }
+    const checkpoint = contractSettlementState.updateContractSettlement(
+      contractID,
+      (current) => ({
+        ...current,
+        payload: {
+          ...current.payload,
+          destroyLegs: current.payload.destroyLegs.map((entry) =>
+            entry.legID === leg.legID
+              ? {
+                  ...entry,
+                  destroyed: true,
+                  changes: cloneValue(result.data && result.data.changes || []),
+                }
+              : entry),
+        },
+      }),
+    );
+    if (!checkpoint.success) {
+      return checkpoint;
+    }
+  }
+  return { success: true };
+}
+
 function removeContractTerminalWrap(contractID) {
   const settlement = contractSettlementState.getPendingContractSettlement(contractID);
   const wrapLeg = settlement.payload.wrapLeg;
@@ -3785,6 +3934,7 @@ function buildTerminalContractRecord(settlement) {
       collateralEscrow: 0,
       rewardEscrow: 0,
       collateralCredited: true,
+      ...(payload.packageDestroyed === true ? { packageDestroyed: true } : {}),
       updatedAtMs: Date.now(),
     };
   }
@@ -3841,6 +3991,10 @@ async function settleContractTerminalOperation(contractID, options = {}) {
   const itemResult = await transferContractTerminalItems(contractID);
   if (!itemResult.success) {
     return itemResult;
+  }
+  const destroyResult = destroyContractPackageContents(contractID);
+  if (!destroyResult.success) {
+    return destroyResult;
   }
   const wrapResult = removeContractTerminalWrap(contractID);
   if (!wrapResult.success) {
@@ -3954,11 +4108,17 @@ function getCourierContractFromItemID(itemID, session = null) {
   if (!normalizedItemID) {
     return null;
   }
-  const contract = listContractRecords().find((record) => (
-    record.type === CONTRACT_TYPE.COURIER &&
-    record.status === CONTRACT_STATUS.IN_PROGRESS &&
-    toPositiveInteger(record.plasticWrapItemID, 0) === normalizedItemID
-  ));
+  let contract = null;
+  for (const record of iterateContractRecords()) {
+    if (
+      record.type === CONTRACT_TYPE.COURIER &&
+      record.status === CONTRACT_STATUS.IN_PROGRESS &&
+      toPositiveInteger(record.plasticWrapItemID, 0) === normalizedItemID
+    ) {
+      contract = record;
+      break;
+    }
+  }
   if (!contract) {
     return null;
   }
@@ -3991,9 +4151,10 @@ function filterContractsForOwner(ownerID, options = {}) {
   const contractType = toInteger(options.contractType, 0);
   const includeCombinedItemSearch = contractType === 10 || contractType === 11 || contractType === 0;
 
-  return listContractRecords()
-    .filter((contract) => !options.session || canViewContract(contract, options.session))
-    .filter((contract) => contractMatchesOwner(contract, ownerID))
+  return listContractRecords((contract) => (
+    (!options.session || canViewContract(contract, options.session)) &&
+    contractMatchesOwner(contract, ownerID)
+  ))
     .filter((contract) => {
       if (status === null) {
         return true;
@@ -4025,8 +4186,7 @@ function filterContractsForOwner(ownerID, options = {}) {
 
 function filterMyCurrentContracts(session, isAccepted = false, forCorp = false) {
   const ownerID = forCorp ? getSessionCorporationID(session) : getSessionCharacterID(session);
-  return listContractRecords()
-    .filter((contract) => canViewContract(contract, session))
+  return listContractRecords((contract) => canViewContract(contract, session))
     .filter((contract) => {
       if (isAccepted) {
         return toPositiveInteger(contract.acceptorID, 0) === ownerID;
@@ -4043,8 +4203,7 @@ function filterMyCurrentContracts(session, isAccepted = false, forCorp = false) 
 }
 
 function filterExpiredContracts(session, forCorp = false) {
-  return listContractRecords()
-    .filter((contract) => contractNeedsAttention(contract))
+  return listContractRecords((contract) => contractNeedsAttention(contract))
     .filter((contract) => getContractAttentionScopes(contract, session).includes(Boolean(forCorp)))
     .sort((left, right) => toPositiveInteger(right.contractID, 0) - toPositiveInteger(left.contractID, 0));
 }
@@ -4399,8 +4558,9 @@ function searchContracts(session, filters = {}) {
   const securityClasses = normalizeNumericSet(filters.securityClasses, { allowZero: true });
   const startNum = Math.max(0, toInteger(filters.startNum, 0));
 
-  let contracts = listContractRecords()
-    .filter((contract) => isContractVisibleInSearch(contract, session, filters.availability))
+  let contracts = listContractRecords((contract) => (
+    isContractVisibleInSearch(contract, session, filters.availability)
+  ))
     .filter((contract) => contractMatchesType(contract, contractType))
     .filter((contract) => contractMatchesLocation(contract, filters.locationID, "start"))
     .filter((contract) => contractMatchesLocation(contract, filters.endLocationID, "end"))
@@ -4490,7 +4650,7 @@ function collectMyPageInfo(session) {
   let requiresAttention = 0;
   let requiresAttentionCorp = 0;
 
-  for (const contract of listContractRecords()) {
+  for (const contract of iterateContractRecords()) {
     const isCorpContract = normalizeBoolean(contract.forCorp, false);
     const isPersonalIssuer = contract.issuerID === characterID && !isCorpContract;
     const isCorpIssuer = isCorpContract && contract.issuerCorpID === corporationID;
@@ -4563,7 +4723,7 @@ function getMyContractEscrow(session) {
   const corporationVisible = sessionHasCorpContractManagerRole(session);
   let iskEscrow = 0;
   let itemsEscrow = 0;
-  for (const contract of listContractRecords()) {
+  for (const contract of iterateContractRecords()) {
     const issuedByMe = (!normalizeBoolean(contract.forCorp, false) && contract.issuerID === characterID) ||
       (
         normalizeBoolean(contract.forCorp, false) &&
@@ -4603,7 +4763,7 @@ function buildLoginInfoRows(session) {
   const inProgress = [];
   const assignedToMe = [];
 
-  for (const contract of listContractRecords()) {
+  for (const contract of iterateContractRecords()) {
     const isAcceptor = contract.acceptorID === characterID || contract.acceptorID === corporationID;
     const isAssigned = contract.assigneeID === characterID ||
       contract.assigneeID === corporationID ||
@@ -4652,6 +4812,7 @@ module.exports = {
   CORP_ROLE_CONTRACT_MANAGER,
   sessionHasCorpContractManagerRole,
   canAccessCorporationContractItem,
+  getContractItemLocationIDsAtStation,
   canViewContract,
   canAcceptContract,
   isContractExpired,

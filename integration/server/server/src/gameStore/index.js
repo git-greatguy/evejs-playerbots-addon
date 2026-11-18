@@ -183,6 +183,9 @@ if (
   throw error;
 }
 const FLUSH_DELAY_MS = 2000; // debounce: flush 2s after last write
+// A failed flush is retried after twice the previous wait (4 s, 8 s, ...), up
+// to this cap, until a flush of that table succeeds.
+const FLUSH_RETRY_MAX_DELAY_MS = 60_000;
 const RECOVERABLE_EMPTY_TABLES = new Set([
   "crimewatchRuntime",
   "npcRuntimeState",
@@ -284,6 +287,7 @@ const SQLITE_TABLES = new Set([
   "freelanceProjects",
   "dailyGoals",
   "homefrontReplay",
+  "observatoryFlashpointReplay",
   "incursionReplay",
   "incursionLifecycle",
   "evermarkEntitlements",
@@ -361,6 +365,7 @@ const SQLITE_TABLES = new Set([
   "abyssalRecoveryTombstones",
   "playerBots",
   "playerBotOperationHistory",
+  "voidSystemLeases",
   "jumpCloneInstallSettlements",
   // Moon ore fields left by fractured moon chunks, one row per field.
   "moonMiningFields",
@@ -745,10 +750,30 @@ function isSqliteTable(table) {
 
 // ── Cache state ─────────────────────────────────────────────────────
 const cache = {};            // table name → parsed JS object
+// table name → count of write()/remove() calls that changed it. A reader that
+// keeps a derived copy compares this (and the cached object's identity, which
+// a reload replaces) to know when its copy is stale.
+const tableWriteGenerations = new Map();
+let totalWriteGeneration = 0;
+function noteTableWrite(table) {
+  tableWriteGenerations.set(table, (tableWriteGenerations.get(table) || 0) + 1);
+  totalWriteGeneration += 1;
+}
+function getTableWriteGeneration(table) {
+  return tableWriteGenerations.get(table) || 0;
+}
+// Changes when any table is written: "has anything durable changed since".
+function getTotalWriteGeneration() {
+  return totalWriteGeneration;
+}
 const dirty = new Set();     // tables that need flushing
 const flushTimers = {};      // table name → pending setTimeout id
+const flushRetryDelays = {}; // table name → wait before the last failed flush's retry
 const tableFlushHolds = new Map();
 const transientPaths = {};   // table name → Set of cache paths excluded from disk flush
+// table name → { pathSet, index }: indexTransientRows' last result, dropped
+// whenever that table's marker set changes.
+const transientRowIndexes = new Map();
 const flushBaselines = {};   // sqlite table → Map(key → last-persisted JSON string)
 const inFlightFlushes = new Map(); // sqlite table → exact unacknowledged operation
 const lastCompletedPersistenceOperationId = new Map(); // table → durable monotonic ID
@@ -873,6 +898,7 @@ function clearTransientPathsForPrefixes(table, pathKeys) {
   if (normalizedPaths.has("/")) {
     const clearedPaths = [...pathSet];
     pathSet.clear();
+    transientRowIndexes.delete(table);
     return clearedPaths;
   }
 
@@ -887,6 +913,7 @@ function clearTransientPathsForPrefixes(table, pathKeys) {
       if (normalizedPaths.has(candidateAncestor)) {
         pathSet.delete(candidatePath);
         clearedPaths.push(candidatePath);
+        transientRowIndexes.delete(table);
         break;
       }
       const separatorIndex = candidateAncestor.lastIndexOf("/");
@@ -938,7 +965,10 @@ function setTransientPaths(table, pathKeys, enabled = true) {
   const pathSet = getTransientPathSet(table);
   if (enabled) {
     for (const normalizedPath of normalizedPaths) {
-      pathSet.add(normalizedPath);
+      if (!pathSet.has(normalizedPath)) {
+        pathSet.add(normalizedPath);
+        transientRowIndexes.delete(table);
+      }
       // A row that was already on disk must leave it. The full diff found it
       // by rescanning the table; the partial flush only sees dirty rows.
       if (!passiveReaderMarker) {
@@ -1009,13 +1039,25 @@ function buildFlushSnapshot(table) {
 // flush can leave those rows out without cloning the whole table the way
 // buildFlushSnapshot does. Returns null when a marker spans several rows (the
 // table root, or a whole row group), which only the full diff handles.
+//
+// Markers change far less often than flushes happen, so the result is kept per
+// table and reused until a marker is added or cleared. Callers only read it.
 function indexTransientRows(table) {
-  const index = new Map(); // rowKey -> { whole, subPaths }
   const pathSet = transientPaths[table];
+  const cached = transientRowIndexes.get(table);
+  if (cached && cached.pathSet === pathSet) {
+    return cached.index;
+  }
+  const index = buildTransientRowIndex(pathSet, sqliteStore.rowGroupsFor(table));
+  transientRowIndexes.set(table, { pathSet, index });
+  return index;
+}
+
+function buildTransientRowIndex(pathSet, groups) {
+  const index = new Map(); // rowKey -> { whole, subPaths }
   if (!pathSet || pathSet.size === 0) {
     return index;
   }
-  const groups = sqliteStore.rowGroupsFor(table);
   for (const transientPath of pathSet) {
     const segments = getSegments(transientPath);
     if (segments.length === 0) {
@@ -1253,6 +1295,14 @@ function loadSqliteTable(table) {
   const parsedRows = {};
   const baseline = new Map();
   const rowGroups = sqliteStore.rowGroupsFor(table);
+  // A row's flush baseline is SQLite's own text instead of a second
+  // JSON.stringify of the value just parsed from it (that second pass is about
+  // a quarter of the load CPU, for the whole store at every boot). Raw text
+  // differs from the normalized form only when a row was not written by
+  // JSON.stringify, so matchesFlushBaseline normalizes a loaded row on its
+  // first mismatch and compares exactly what the eager baseline held (see
+  // canonicalLoadedBaseline).
+  const rawKeys = new Set();
   let bytes = 0;
   for (const { key, json } of rawRows) {
     const value = JSON.parse(json);
@@ -1267,10 +1317,19 @@ function loadSqliteTable(table) {
     ) {
       fullDirty.add(table);
     }
+    if (typeof json === "string") {
+      baseline.set(key, json); // normalized on first mismatch (canonicalLoadedBaseline)
+      rawKeys.add(key);
+      bytes += json.length;
+      continue;
+    }
     const serialized = JSON.stringify(value); // re-stringify for a stable diff
     baseline.set(key, serialized);
     bytes += serialized.length;
   }
+  // Scoped to this baseline object: a reload or a recovery rebuild publishes a
+  // new, eagerly normalized baseline without it.
+  if (rawKeys.size > 0) baseline.rawLoadedKeys = rawKeys;
   cache[table] = sqliteStore.assembleFromRows(table, parsedRows);
   flushBaselines[table] = baseline;
   return bytes;
@@ -1320,6 +1379,33 @@ function loadTable(table) {
 
   throw parsedMain.error;
 }
+
+// SQLite tables this process loaded before preloadAll (table -> { ms, bytes }).
+// Module loading already reads some of the largest: the space runtime
+// singleton prunes expired space items when it is constructed, which loads
+// items (and characters) before the preload.
+const earlyLoadedSqliteTables = new Map();
+
+function loadTableForAccess(table) {
+  if (preloaded) return loadTable(table);
+  const t0 = Date.now();
+  const bytes = loadTable(table);
+  if (isSqliteTable(table)) {
+    earlyLoadedSqliteTables.set(table, { ms: Date.now() - t0, bytes });
+  }
+  return bytes;
+}
+
+// preloadAll keeps an owned SQLite table that is already cached.
+// Its cache is this process's continuation of that load: this process is the
+// table's only writer, every in-process write goes through the cache and is
+// tracked dirty against the baseline of that same load, and nothing between
+// module loading and the preload writes SQLite directly (static-table sync and
+// content packs touch JSON files only; JSON tables are always reloaded).
+// Reloading instead read the table a second time, replaced the cache object
+// while itemStore kept its reference to the first one (readers split between
+// two copies until itemStore's next root write), and dropped the unflushed
+// removals of the expired space items pruned during module loading.
 
 /**
  * Preload every table directory under data/ into memory.
@@ -1375,8 +1461,15 @@ function preloadAll() {
 
   let totalBytes = 0;
   const timings = [];
+  const reused = [];
 
   for (const table of tables) {
+    const early = isSqliteTable(table) && (table in cache)
+      ? earlyLoadedSqliteTables.get(table) : undefined;
+    if (early) {
+      reused.push({ table, ...early });
+      continue;
+    }
     renewPersistenceOwnerLeaseAtBoundary();
     const t0 = Date.now();
     const bytes = loadTable(table);
@@ -1397,11 +1490,16 @@ function preloadAll() {
     const size = `(${sizeMB} MB)`.padStart(11);
     dbLog(`  ${pc.cyan(name)} ${pc.white(time)}  ${pc.dim(size)}`);
   }
+  for (const { table, ms, bytes } of reused.sort((a, b) => b.ms - a.ms)) {
+    dbLog(`  ${pc.cyan(table.padEnd(25))} reused: loaded before the preload in ${ms}ms ` +
+      pc.dim(`(${(bytes / 1024 / 1024).toFixed(1)} MB)`));
+  }
 
   const totalMB = (totalBytes / 1024 / 1024).toFixed(1);
   dbLog(
     `${pc.green("cache ready")} — ${tables.length} tables, ` +
-    `${totalMB} MB loaded in ${pc.bold(totalElapsed + "ms")}`,
+    `${totalMB} MB loaded in ${pc.bold(totalElapsed + "ms")}` +
+    (reused.length ? `; ${reused.length} already loaded table(s) kept` : ""),
   );
   preloaded = true;
 }
@@ -1414,12 +1512,38 @@ function advanceFlushBaseline(table, upserts = [], deletes = []) {
     baseline = new Map();
     flushBaselines[table] = baseline;
   }
+  const rawKeys = baseline.rawLoadedKeys; // acknowledged rows are normalized
   for (const [rowKey, serialized] of upserts) {
     baseline.set(rowKey, serialized);
+    if (rawKeys !== undefined) rawKeys.delete(rowKey);
   }
   for (const rowKey of deletes) {
     baseline.delete(rowKey);
+    if (rawKeys !== undefined) rawKeys.delete(rowKey);
   }
+  if (rawKeys !== undefined && rawKeys.size === 0) baseline.rawLoadedKeys = undefined;
+}
+
+// The baseline loadSqliteTable would have stored eagerly,
+// JSON.stringify(JSON.parse(raw)), computed once for a row still holding its
+// loaded SQLite text and kept. A JSON.stringify output is a fixed point of
+// that round trip, so when the raw text already equals a row's current
+// serialization the eager baseline did too; only a mismatch can differ, and
+// it compares the exact eager value. Acknowledged rows leave the set in
+// advanceFlushBaseline, so a row pays this at most once per load.
+function canonicalLoadedBaseline(baseline, rowKey) {
+  const previous = baseline.get(rowKey);
+  const rawKeys = baseline.rawLoadedKeys;
+  if (typeof previous !== "string" || !rawKeys.delete(rowKey)) return previous;
+  if (rawKeys.size === 0) baseline.rawLoadedKeys = undefined;
+  const canonical = JSON.stringify(JSON.parse(previous));
+  if (canonical !== previous) baseline.set(rowKey, canonical);
+  return canonical;
+}
+
+function matchesFlushBaseline(baseline, rowKey, serialized) {
+  return baseline.get(rowKey) === serialized ||
+    (baseline.rawLoadedKeys !== undefined && canonicalLoadedBaseline(baseline, rowKey) === serialized);
 }
 
 function rebuildFlushBaselineFromDisk(table) {
@@ -1530,8 +1654,8 @@ function flushSqliteTable(table, options = {}) {
     inFlightFlushes.size > 0
   ) {
     // A replacement controller/worker must reconcile the prior durable journal
-    // before a new batch is created. This is triggered by the next real flush,
-    // not by a broad autonomous retry scheduler (PST-002 remains separate).
+    // before a new batch is created. This is triggered by the next real flush
+    // of a dirty table: a write's debounce or a failed flush's retry.
     persistenceWorker.recover(SQLITE_DB_PATH);
   }
   if (inFlightFlushes.has(table)) {
@@ -1575,7 +1699,7 @@ function flushSqliteTable(table, options = {}) {
         continue;
       }
       const serialized = JSON.stringify(value);
-      if (baseline.get(rowKey) !== serialized) {
+      if (!matchesFlushBaseline(baseline, rowKey, serialized)) {
         upserts.push([rowKey, serialized]);
       }
     }
@@ -1592,7 +1716,7 @@ function flushSqliteTable(table, options = {}) {
     for (const rowKey of Object.keys(rows)) {
       present.add(rowKey);
       const serialized = JSON.stringify(rows[rowKey]);
-      if (baseline.get(rowKey) !== serialized) {
+      if (!matchesFlushBaseline(baseline, rowKey, serialized)) {
         upserts.push([rowKey, serialized]);
       }
     }
@@ -1808,15 +1932,45 @@ function flushTable(table) {
     assertPersistenceOwnerHealthy();
     if (isSqliteTable(table)) {
       flushSqliteTable(table);
-      return;
+    } else {
+      const data = buildFlushSnapshot(table);
+      const json = JSON.stringify(data, null, 2);
+      safeWriteFileSync(dataFilePath(table), json);
     }
-    const data = buildFlushSnapshot(table);
-    const json = JSON.stringify(data, null, 2);
-    safeWriteFileSync(dataFilePath(table), json);
+    delete flushRetryDelays[table];
   } catch (err) {
     dbErr(`flush FAILED for ${table}: ${err.message}`);
     dirty.add(table);
+    scheduleFlushRetry(table);
   }
+}
+
+// Without a retry a failed table stayed dirty with no timer, so nothing saved
+// it until some later write touched the same table. One timer per table: a
+// write in the meantime replaces it with its ordinary debounce, and a hold,
+// shutdown or test-store cleanup leaves the table to its own flush. The timer
+// does not keep a process alive on its own.
+function scheduleFlushRetry(table) {
+  if (
+    flushTimers[table] ||
+    tableFlushHolds.has(table) ||
+    shutdownInProgress ||
+    process[TEST_STORE_CLEANUP_IN_PROGRESS_SYMBOL] === true
+  ) {
+    return;
+  }
+  const delayMs = Math.min(
+    (flushRetryDelays[table] || FLUSH_DELAY_MS) * 2,
+    FLUSH_RETRY_MAX_DELAY_MS,
+  );
+  flushRetryDelays[table] = delayMs;
+  const timer = setTimeout(() => {
+    flushTable(table);
+  }, delayMs);
+  if (typeof timer.unref === "function") {
+    timer.unref();
+  }
+  flushTimers[table] = timer;
 }
 
 function reconcileInFlightFlush(table) {
@@ -2150,14 +2304,14 @@ function getShutdownNeeds() {
 function ensureCached(table) {
   if (!(table in cache)) {
     if (isSqliteTable(table)) {
-      loadTable(table);
+      loadTableForAccess(table);
       return true;
     }
     const tableDir = path.join(DATA_DIR, table);
     if (!fs.existsSync(tableDir)) {
       return false;
     }
-    loadTable(table);
+    loadTableForAccess(table);
   }
   return true;
 }
@@ -2182,7 +2336,7 @@ function ensureTable(table) {
     throw new Error("gameStore shutdown is in progress");
   }
   if (!(table in cache)) {
-    loadTable(table);
+    loadTableForAccess(table);
   }
   return true;
 }
@@ -2321,6 +2475,7 @@ function write(table, pth, data, options = {}) {
       if (!sameReference) {
         cache[table] = data;
       }
+      noteTableWrite(table);
       if (!(options.transient === true && options.force !== true)) {
         markRootWriteDirty(table, changedSegments);
         scheduleFlush(table);
@@ -2345,16 +2500,21 @@ function write(table, pth, data, options = {}) {
       setTransientPath(table, pth, true);
     }
     const finalKey = segments[segments.length - 1];
-    // A forced nested write is used by callers that have already established
-    // that this path changed (or must be durably restored). Skip a recursive
-    // equality walk over large queue/state objects, matching the root-write
-    // force semantics above.
-    if (options.force !== true &&
-        Object.prototype.hasOwnProperty.call(current, finalKey) &&
-        isSameValue(current[finalKey], data)) {
+    // As on the root path, writing back the cached object itself (read()
+    // returns it, and the caller edited it in place) or a forced write is a
+    // change: comparing the object with itself always finds it unchanged.
+    const sameReference =
+      data !== null && typeof data === "object" && current[finalKey] === data;
+    if (
+      !sameReference &&
+      options.force !== true &&
+      Object.prototype.hasOwnProperty.call(current, finalKey) &&
+      isSameValue(current[finalKey], data)
+    ) {
       return { success: true, errorMsg: null };
     }
     current[finalKey] = data;
+    noteTableWrite(table);
     if (!(options.transient === true && options.force !== true)) {
       markRowDirty(table, segments);
       scheduleFlush(table);
@@ -2408,6 +2568,7 @@ function remove(table, pth) {
     }
 
     delete current[finalKey];
+    noteTableWrite(table);
     clearTransientPathsForPrefixes(table, [pth]);
     markRowDirty(table, segments);
     scheduleFlush(table);
@@ -2421,6 +2582,8 @@ function remove(table, pth) {
 
 module.exports = {
   read,
+  getTableWriteGeneration,
+  getTotalWriteGeneration,
   readPersisted,
   readPersistedAbyssalInstances,
   readPersistedIncursionPending,

@@ -1,5 +1,6 @@
 "use strict";
 
+const crypto = require("crypto");
 const path = require("path");
 
 const BaseService = require(path.join(__dirname, "../baseService"));
@@ -1358,10 +1359,6 @@ function getEscrowState(record) {
 function upsertBuyEscrowRecord(orderLike, overrides = {}, options = {}) {
   const orderRow = getOwnerOrderResponseOrder(orderLike);
   const orderID = normalizeOrderId(overrides.order_id ?? orderRow.order_id ?? orderLike.order_id);
-  const ownerId = normalizePositiveInteger(
-    overrides.owner_id ?? orderLike.owner_id ?? orderLike.ownerId,
-    0,
-  );
   const stationId = normalizePositiveInteger(
     overrides.station_id ?? orderRow.station_id ?? orderRow.stationID,
     0,
@@ -1384,10 +1381,6 @@ function upsertBuyEscrowRecord(orderLike, overrides = {}, options = {}) {
     0,
   );
 
-  if (!ownerId || !stationId || !typeId || remainingQuantity <= 0) {
-    return removeEscrowRecord(orderID);
-  }
-
   // `ownerId` always stays the acting character (a buy order has no item
   // custody, but keeping the meaning consistent with the sell-escrow record
   // below matters for the shared refund path in applyTerminalOrderEvent).
@@ -1397,17 +1390,27 @@ function upsertBuyEscrowRecord(orderLike, overrides = {}, options = {}) {
   const isCorp = normalizeBoolean(
     overrides.is_corp ?? orderLike.is_corp ?? orderLike.isCorp,
   );
+  const orderOwnerID = orderLike.owner_id ?? orderLike.ownerId;
+  const ownerId = normalizePositiveInteger(
+    overrides.owner_id ?? (isCorp ? existingRecord?.ownerId : null) ?? orderOwnerID,
+    0,
+  );
   const walletOwnerId = isCorp
     ? normalizePositiveInteger(
-        overrides.wallet_owner_id ?? orderLike.wallet_owner_id ?? orderLike.walletOwnerId,
+        overrides.wallet_owner_id ?? existingRecord?.walletOwnerId ??
+          orderLike.wallet_owner_id ?? orderLike.walletOwnerId ?? orderOwnerID,
         ownerId,
       )
     : ownerId;
   const accountKey = isCorp
     ? normalizeCorporationWalletKey(
-        overrides.account_key ?? orderLike.account_key ?? orderLike.accountKey,
+        overrides.account_key ?? existingRecord?.accountKey ?? orderLike.account_key ?? orderLike.accountKey,
       )
     : null;
+
+  if (!ownerId || !stationId || !typeId || remainingQuantity <= 0) {
+    return removeEscrowRecord(orderID);
+  }
 
   const record = {
     orderId: orderID,
@@ -1431,6 +1434,11 @@ function upsertBuyEscrowRecord(orderLike, overrides = {}, options = {}) {
       (existingRecord && existingRecord.createdAt) || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
+  // A fill saga keeps its state on this same record. Rewriting the record
+  // without it would make recovery treat a half-done fill as settled.
+  if (existingRecord && existingRecord.pendingFill) {
+    record.pendingFill = existingRecord.pendingFill;
+  }
   return options.durable === true
     ? putEscrowRecordDurable(record)
     : putEscrowRecord(record);
@@ -1535,8 +1543,25 @@ function ensureOpenOrderLimit(context, openOrders = []) {
   }
 }
 
+// The solar system of a market location: an NPC station's from the static
+// station table, otherwise a player structure's own. The static table has no
+// structures, so without this a structure resolved to system 0, which made
+// every structure region-distant for range checks and order matching.
+function getMarketLocationSolarSystemID(stationID) {
+  const staticSolarSystemID = getStationSolarSystemID(stationID);
+  if (staticSolarSystemID > 0) {
+    return staticSolarSystemID;
+  }
+  const structure = getStructureMarketLocation(stationID);
+  return normalizePositiveInteger(structure && structure.solarSystemID, 0);
+}
+
 function ensureRemoteBuyOrderPlacementAllowed(session, stationID, context) {
-  const jumps = getStationDistanceFromSession(session, stationID);
+  const jumps = getStationDistanceFromSession(
+    session,
+    stationID,
+    getMarketLocationSolarSystemID(stationID),
+  );
   if (jumps > normalizeInteger(context && context.limits && context.limits.bid, RANGE_STATION)) {
     throwWrappedUserError("CustomInfo", {
       info: "The current Procurement skill level does not allow placing a buy order at that location.",
@@ -1545,7 +1570,11 @@ function ensureRemoteBuyOrderPlacementAllowed(session, stationID, context) {
 }
 
 function ensureRemoteSellOrderPlacementAllowed(session, stationID, context) {
-  const jumps = getStationDistanceFromSession(session, stationID);
+  const jumps = getStationDistanceFromSession(
+    session,
+    stationID,
+    getMarketLocationSolarSystemID(stationID),
+  );
   if (jumps > normalizeInteger(context && context.limits && context.limits.ask, RANGE_STATION)) {
     throwWrappedUserError("CustomInfo", {
       info: "The current Marketing skill level does not allow selling from that location.",
@@ -1554,7 +1583,11 @@ function ensureRemoteSellOrderPlacementAllowed(session, stationID, context) {
 }
 
 function ensureRemoteOrderModificationAllowed(session, stationID, context) {
-  const jumps = getStationDistanceFromSession(session, stationID);
+  const jumps = getStationDistanceFromSession(
+    session,
+    stationID,
+    getMarketLocationSolarSystemID(stationID),
+  );
   if (jumps > normalizeInteger(context && context.limits && context.limits.mod, RANGE_STATION)) {
     throwWrappedUserError("CustomInfo", {
       info: "The current Daytrading skill level does not allow modifying that order from the current location.",
@@ -1672,6 +1705,9 @@ async function debitCharacterWallet(
         ownerID2: options.ownerID2 ?? ownerID2,
         referenceID: options.referenceID ?? ownerID2,
         entryTypeID: options.entryTypeID ?? JOURNAL_ENTRY_TYPE.ADMIN_ADJUSTMENT,
+        // A replayed fill, refund or tax leg must dedupe here exactly as the
+        // personal wallet branch below does.
+        idempotencyKey: options.idempotencyKey,
       },
     );
     if (!result.success) {
@@ -1723,7 +1759,11 @@ async function creditCharacterWallet(
         ownerID2: options.ownerID2 ?? characterID,
         referenceID: options.referenceID ?? ownerID2,
         entryTypeID: options.entryTypeID ?? JOURNAL_ENTRY_TYPE.ADMIN_ADJUSTMENT,
+        // A replayed fill, refund or tax leg must dedupe here exactly as the
+        // personal wallet branch below does.
+        idempotencyKey: options.idempotencyKey,
       },
+      { source: options.walletSource },
     );
     if (!result.success) {
       throwWrappedUserError("CustomInfo", {
@@ -2023,13 +2063,57 @@ function listEscrowItemsForOrder(orderId, ownerId) {
   );
 }
 
+// A request that reached the daemon but got no answer (timed out, or the
+// connection dropped after it was sent) may still have run. The daemon client
+// marks these marketDaemonOutcomeUnknown = true, and = false when it knows the
+// request never left or was refused outright.
+function isMarketDaemonOutcomeUnknownError(error) {
+  if (error && error.marketDaemonOutcomeUnknown === true) {
+    return true;
+  }
+  if (error && error.marketDaemonOutcomeUnknown === false) {
+    return false;
+  }
+  const message = String(error && error.message ? error.message : error || "")
+    .toLowerCase();
+  return (
+    message.includes("market daemon rpc request timed out") ||
+    message.includes("market daemon rpc connection closed") ||
+    message.includes("econnreset")
+  );
+}
+
+// What the player is told when a market call fails. "Offline" only when the
+// daemon could not be reached. A request that may have gone through tells the
+// player to check before retrying, so a buy is not repeated by mistake. Any
+// other failure (a refused order, a custody or receipt error) names a
+// reference that is in the server log next to the stack. Internal error text
+// never reaches the client.
+function describeMarketFailureForPlayer(error, reference) {
+  if (isMarketDaemonOutcomeUnknownError(error)) {
+    return "The market did not confirm this request in time. " +
+      "Check your wallet and market orders before trying again.";
+  }
+  if (isMarketDaemonUnavailableError(error)) {
+    return "Market is currently offline, elysian says sorry!";
+  }
+  return `The market could not complete this request (reference ${reference}; ` +
+    "the server log has the details).";
+}
+
+function buildMarketFailureReference() {
+  return `MKT-${Date.now().toString(36).toUpperCase()}-` +
+    crypto.randomBytes(2).toString("hex").toUpperCase();
+}
+
 function throwMarketUnavailable(method, error) {
   const errorDetails = error && error.stack
     ? error.stack
     : String(error && error.message || error || "unknown market failure");
-  log.error(`[MarketProxy] ${method} failed: ${errorDetails}`);
+  const reference = buildMarketFailureReference();
+  log.error(`[MarketProxy] ${method} failed ref=${reference}: ${errorDetails}`);
   throwWrappedUserError("CustomInfo", {
-    info: "Market is currently offline, elysian says sorry!",
+    info: describeMarketFailureForPlayer(error, reference),
   });
 }
 
@@ -2122,6 +2206,9 @@ async function applyTerminalOrderEvent(event) {
   const stationID = normalizePositiveInteger(orderRow && orderRow.station_id, 0);
   const terminalLabel = eventType === "expired" ? "expired" : "cancelled";
 
+  if (escrowRecord.pendingFill) {
+    throw new Error("The order's pending fill must settle before its terminal event.");
+  }
   let returnedChanges = [];
   if (isBuyOrder) {
     await creditCharacterWallet(
@@ -2130,7 +2217,11 @@ async function applyTerminalOrderEvent(event) {
       `Market escrow refund for ${terminalLabel} buy order ${orderID}`,
       stationID,
       {
-        ...(isCorp ? { isCorp: true, accountKey: escrowRecord.accountKey } : {}),
+        ...(isCorp ? {
+          isCorp: true,
+          accountKey: escrowRecord.accountKey,
+          walletSource: "market-terminal-refund",
+        } : {}),
         entryTypeID: JOURNAL_ENTRY_TYPE.MARKET_ESCROW,
         ownerID1: getMarketCounterpartyOwnerID(stationID) || stationID,
         ownerID2: ownerID,
@@ -2138,9 +2229,11 @@ async function applyTerminalOrderEvent(event) {
         idempotencyKey: `market:terminal:${eventType}:${orderID}:buy-refund`,
       },
     );
-    flushCharacterWalletSagaBoundary(
-      `Persisting ${terminalLabel} market escrow refund`,
-    );
+    if (!isCorp) {
+      flushCharacterWalletSagaBoundary(
+        `Persisting ${terminalLabel} market escrow refund`,
+      );
+    }
   } else {
     returnedChanges = moveEscrowItemsBackToSeller(
       orderID,
@@ -2158,10 +2251,17 @@ async function applyTerminalOrderEvent(event) {
       );
     }
   }
-  requireDurableMarketSagaWrite(
-    removeEscrowRecordDurable(orderID),
-    `Completing ${terminalLabel} market escrow recovery for order ${orderID}`,
-  );
+  try {
+    requireDurableMarketSagaWrite(
+      removeEscrowRecordDurable(orderID),
+      `Completing ${terminalLabel} market escrow recovery for order ${orderID}`,
+    );
+  } catch (error) {
+    // Removal changes the live cache before flushing. Preserve the record so
+    // the event poll can persist a retry if the flush failed.
+    putEscrowRecord(escrowRecord);
+    throw error;
+  }
   if (returnedChanges.length > 0) {
     notifyInventoryChangesToCharacter(characterID, returnedChanges);
     // A corporation sell order returns its goods to the division they were
@@ -2279,7 +2379,18 @@ async function processPendingExpiryEvents({
       }
 
       for (const event of events) {
-        await applyTerminalOrderEvent(event);
+        try {
+          await applyTerminalOrderEvent(event);
+        } catch (error) {
+          // A daemon outage affects every event alike: stop and retry later.
+          // Anything else belongs to this one order. Hold it on its escrow
+          // record and move on, so one order that cannot settle does not
+          // block every market write on the server.
+          if (isMarketDaemonUnavailableError(error)) {
+            throw error;
+          }
+          await holdTerminalOrderEvent(event, error);
+        }
         afterEventId = normalizeBigInt(event && event.event_id, afterEventId);
         setLastProcessedOrderEventId(afterEventId);
       }
@@ -2293,6 +2404,46 @@ async function processPendingExpiryEvents({
   });
 
   return marketExpiryPollPromise;
+}
+
+async function holdTerminalOrderEvent(event, error) {
+  const orderID = normalizeOrderId(event && event.order && event.order.order_id);
+  const eventType = String(event && event.event_type || "").trim().toLowerCase();
+  const message = String(error && error.message ? error.message : error || "unknown failure");
+  log.error(
+    `[MarketProxy] ${eventType || "terminal"} settlement for order ${orderID} failed and is held ` +
+      `on its escrow record for retry: ${error && error.stack ? error.stack : message}`,
+  );
+  const escrowRecord = getEscrowRecord(orderID);
+  if (!escrowRecord) {
+    return;
+  }
+  // If the hold cannot be written, throw: the cursor then stays on this event
+  // rather than skipping a settlement that nothing records.
+  requireDurableMarketSagaWrite(
+    putEscrowRecordDurable({
+      ...escrowRecord,
+      terminalSettlementHold: {
+        event: JSON.parse(JSON.stringify(event)),
+        error: message,
+        heldAt: new Date().toISOString(),
+      },
+    }),
+    `Holding ${eventType || "terminal"} settlement for market order ${orderID}`,
+  );
+  if (durableMarketScheduler) {
+    await durableMarketScheduler.schedule(buildDurableMarketTerminalJob(orderID));
+  }
+}
+
+function buildDurableMarketTerminalJob(orderID) {
+  const normalizedID = normalizeOrderId(orderID);
+  return {
+    jobID: `market-order:${normalizedID}:terminal`,
+    type: DURABLE_EXPIRY_JOB_TYPE,
+    dueAtMs: Date.now() + MARKET_EXPIRY_GRACE_MS,
+    payload: { orderID: normalizedID, retryTerminal: true },
+  };
 }
 
 // Read handlers must never join an in-flight fill saga: processPendingExpiryEvents()
@@ -2801,6 +2952,14 @@ async function reconcileDurableMarketOrders() {
   }
 
   for (const escrowRecord of listEscrowRecords()) {
+    if (escrowRecord?.terminalSettlementHold?.event) {
+      const job = buildDurableMarketTerminalJob(escrowRecord.orderId);
+      if (!existingJobsByID.has(job.jobID)) {
+        await durableMarketScheduler.schedule(job);
+        scheduled += 1;
+      }
+      continue;
+    }
     if (escrowRecord && escrowRecord.pendingFill) {
       continue;
     }
@@ -2846,6 +3005,20 @@ async function reconcileDurableMarketOrders() {
 async function handleDurableMarketOrderExpiry(job) {
   const scheduledJobID = String(job && job.jobID || "");
   const orderID = normalizeOrderId(job && job.payload && job.payload.orderID);
+  if (job?.payload?.retryTerminal === true) {
+    if (orderID === "0" || scheduledJobID !== buildDurableMarketTerminalJob(orderID).jobID) {
+      throw new Error("market terminal settlement job is invalid");
+    }
+    // Avoid running beside an in-flight daemon event poll for this order.
+    if (marketExpiryPollPromise) {
+      await marketExpiryPollPromise;
+    }
+    const event = getEscrowRecord(orderID)?.terminalSettlementHold?.event;
+    if (event && !await applyTerminalOrderEvent(event)) {
+      throw new Error("The held market event could not be applied.");
+    }
+    return { orderID, state: "terminal" };
+  }
   const expectedExpiryAtMs = Math.trunc(
     Number(job && job.payload && job.payload.expiryAtMs) || 0,
   );
@@ -2943,6 +3116,34 @@ async function fetchCharacterOrders(characterID) {
   return Array.isArray(result) ? result : [];
 }
 
+// Retail counts orders a character placed for the corporation against that
+// character's own order limit. The daemon stores those under the corporation,
+// so they are matched back to the character through the escrow record, which
+// keeps the placing character as ownerId.
+async function fetchCorporationOrdersIssuedBy(session, characterID) {
+  const issuedOrderIDs = new Set(
+    listEscrowRecords()
+      .filter((record) => (
+        normalizeBoolean(record && record.isCorp) &&
+        normalizePositiveInteger(record && record.ownerId, 0) === characterID &&
+        ["buy", "sell"].includes(getEscrowType(record))
+      ))
+      .map((record) => normalizeOrderId(record.orderId)),
+  );
+  const corporationID = getNumericSessionValue(session, ["corpid", "corporationID"]);
+  if (issuedOrderIDs.size === 0 || !corporationID) {
+    return [];
+  }
+  const result = await marketDaemonClient.call("GetCorporationOrders", {
+    owner_id: corporationID,
+    is_corp: true,
+  });
+  return ensureArray(result).filter((order) => {
+    const orderRow = getOwnerOrderResponseOrder(order);
+    return issuedOrderIDs.has(normalizeOrderId(orderRow.order_id ?? order.order_id));
+  });
+}
+
 function syncOpenBuyEscrowRecords(ownerOrders = []) {
   for (const ownerOrder of ensureArray(ownerOrders)) {
     const state = String(ownerOrder && ownerOrder.state ? ownerOrder.state : "open").toLowerCase();
@@ -2951,7 +3152,14 @@ function syncOpenBuyEscrowRecords(ownerOrders = []) {
       continue;
     }
     if (normalizeBoolean(orderRow && orderRow.bid)) {
-      upsertBuyEscrowRecord(ownerOrder);
+      // An in-flight or dead-lettered fill saga owns this record until its
+      // recovery settles it; a read-side refresh must not rewrite it.
+      const existingRecord = getEscrowRecord(
+        normalizeOrderId(orderRow.order_id ?? ownerOrder.order_id),
+      );
+      if (!(existingRecord && existingRecord.pendingFill)) {
+        upsertBuyEscrowRecord(ownerOrder);
+      }
     }
     queueDurableMarketOrderExpiry(ownerOrder);
   }
@@ -5587,7 +5795,10 @@ async function executeBuyRequest({
     : [];
   if (normalizedDuration > 0) {
     syncOpenBuyEscrowRecords(openOrders);
-    ensureOpenOrderLimit(marketContext, openOrders);
+    ensureOpenOrderLimit(marketContext, [
+      ...openOrders,
+      ...await fetchCorporationOrdersIssuedBy(session, characterID),
+    ]);
   }
 
   const reserveUpperBound = roundIsk(normalizedPrice * normalizedQuantity);
@@ -5615,7 +5826,7 @@ async function executeBuyRequest({
     requestedQuantity: normalizedQuantity,
     orderRange: normalizeInteger(orderRange, RANGE_STATION),
     currentStationID: stationID,
-    currentSolarSystemID: getStationSolarSystemID(stationID),
+    currentSolarSystemID: getMarketLocationSolarSystemID(stationID),
   });
 
   let createdOrder = null;
@@ -5902,7 +6113,10 @@ async function executeSellEntryUnlocked({
   if (normalizedDuration > 0) {
     const openOrders = await fetchCharacterOrders(characterID);
     syncOpenBuyEscrowRecords(openOrders);
-    ensureOpenOrderLimit(marketContext, openOrders);
+    ensureOpenOrderLimit(marketContext, [
+      ...openOrders,
+      ...await fetchCorporationOrdersIssuedBy(session, characterID),
+    ]);
   }
 
   const sellResult = await matchBuyOrdersForSeller({
@@ -5911,7 +6125,7 @@ async function executeSellEntryUnlocked({
     sellerOwner: payer,
     regionID,
     stationID,
-    solarSystemID: getStationSolarSystemID(stationID),
+    solarSystemID: getMarketLocationSolarSystemID(stationID),
     typeID,
     minimumPrice: price,
     requestedQuantity,
@@ -7561,6 +7775,7 @@ module.exports.__testHooks = {
   normalizeInteger,
   normalizeNumericValue,
   normalizePositiveInteger,
+  processPendingExpiryEvents,
   reconcilePlacingSellEscrowRecords,
   recordCompletedMarketFillAchievements,
   recoverPendingMarketFillSagas,
@@ -7570,5 +7785,6 @@ module.exports.__testHooks = {
   scheduleDurableMarketOrderExpiry,
   sweepStrandedMarketEscrowItems,
   stopMarketExpiryPollerForTests,
+  throwMarketUnavailable,
   waitForMarketExpiryPollerIdleForTests,
 };

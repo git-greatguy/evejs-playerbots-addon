@@ -274,8 +274,6 @@ const {
   resolveDogmaSkillMapForHost,
   appendDirectModifierEntries,
   buildEffectiveItemAttributeMap,
-  indexOverloadEffectRecordsByModuleID,
-  buildProjectedModuleSourceAttributeMap,
 } = require(path.join(__dirname, "../services/fitting/liveFittingState"));
 const {
   buildLiveModuleAttributeMap,
@@ -1134,6 +1132,18 @@ const runtimeExports = module.exports;
 Object.setPrototypeOf(runtimeExports, Object.getPrototypeOf(runtimeSingleton));
 Object.assign(runtimeExports, runtimeSingleton);
 runtimeExports.applySiteExplosionDamageToTarget = applySiteExplosionDamageToTarget;
+// Shutdown stops the scene tick before GameStore flushes (gameRuntimeLifecycle
+// "space-runtime-tick"). Without it a tick after the flush wrote crimewatch
+// state into a closed store: "Crimewatch tick failed ... gameStore shutdown is
+// in progress" on clean stops (client check run, 2026-11-10).
+// Playerbots add-on: the tick may run on the deadline scheduler
+// (runtimeTickScheduler), whose handle stops with .stop() rather than
+// clearInterval, so the singleton's own stopTicking ends it either way.
+runtimeExports.stopTicking = function stopTicking() {
+  const result = SpaceRuntime.prototype.stopTicking.call(runtimeSingleton);
+  runtimeExports._tickHandle = null;
+  return result;
+};
 // Object.assign is a one-time copy, and the tick loop writes to the singleton:
 // the `setInterval(() => this.tick(), ...)` in the constructor captured `this`
 // before this object existed. So every field the tick assigns fresh each pass

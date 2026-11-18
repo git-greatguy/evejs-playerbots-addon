@@ -112,6 +112,7 @@ module.exports = function (serviceManager) {
   const gameRuntimeLifecycle = createGameRuntimeLifecycle({
     dungeonRuntime,
     dungeonUniverseSiteService,
+    spaceRuntime,
     tidiAutoscaler,
     wormholeRuntime,
   });
@@ -179,6 +180,16 @@ module.exports = function (serviceManager) {
       `missingTemplate=${orphanSweep.byReason.missing_template}) ` +
       `systems=${orphanSweep.affectedSystemIDs.length}`,
   );
+
+  try {
+    const lootWarm = require("../../space/npc/npcLoot").warmNpcLootCaches();
+    log.info(
+      `[Startup] NPC loot pools built in ${lootWarm.elapsedMs}ms ` +
+        `(items=${lootWarm.poolSize} tables=${lootWarm.tableCount} selectors=${lootWarm.selectorCount})`,
+    );
+  } catch (error) {
+    log.warn(`[Startup] NPC loot pool warm-up failed: ${error && error.message || "UNKNOWN"}`);
+  }
 
   const awakeDungeonSystemIDs = () => spaceRuntime.listAwakeSolarSystemIDs();
   try {

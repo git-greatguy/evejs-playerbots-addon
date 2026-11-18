@@ -279,6 +279,10 @@ function applyWeaponDamageToTarget(
   whenMs,
   options = {},
 ) {
+  const flashpoint = require("../../services/observatoryFlashpoint/flashpointHooks");
+  if (!flashpoint.canDamage(targetEntity)) {
+    return { damageResult: null, destroyResult: null, errorMsg: "OBSERVATORY_FLASHPOINT_INVULNERABLE" };
+  }
   if ((targetEntity?.incursionControlKey || targetEntity?.incursionLogisticsStation) &&
       !require("../../services/incursion/incursionLogistics").canDamage(targetEntity)) {
     return { damageResult: null, destroyResult: null, errorMsg: "INCURSION_CONTROL_INVULNERABLE" };
@@ -303,6 +307,10 @@ function applyWeaponDamageToTarget(
       ? shotDamage
       : {};
   if (resolvedShotDamage === null) return { damageResult: null, destroyResult: null };
+  const flashpointMultiplier = Number.isFinite(options.flashpointDamageMultiplier) && options.flashpointDamageMultiplier >= 0
+    ? options.flashpointDamageMultiplier : flashpoint.damageMultiplier(attackerEntity, options.incursionWeaponKind);
+  if (flashpointMultiplier !== 1) resolvedShotDamage = Object.fromEntries(
+    Object.entries(resolvedShotDamage).map(([kind, amount]) => [kind, amount * flashpointMultiplier]));
   const incursionMultiplier = Number.isFinite(options.incursionDamageMultiplier) &&
     options.incursionDamageMultiplier >= 0 && options.incursionDamageMultiplier <= 1
     ? options.incursionDamageMultiplier
@@ -310,15 +318,13 @@ function applyWeaponDamageToTarget(
       attackerEntity, options.incursionWeaponKind, scene?.systemID);
   if (incursionMultiplier !== 1) resolvedShotDamage = Object.fromEntries(
     Object.entries(resolvedShotDamage).map(([kind, amount]) => [kind, amount * incursionMultiplier]));
-  const airMultiplier = require("../combat/airCombatPolicy").damageMultiplier(scene, attackerEntity, targetEntity);
-  if (airMultiplier !== 1) resolvedShotDamage = Object.fromEntries(Object.entries(resolvedShotDamage).map(([kind, amount]) => [kind, amount * airMultiplier]));
+  // A script's own rule for this shooter and target (scriptedTimelines): how much lands.
+  const scriptedDamage = require("./scriptedTimelines").resolveScriptedDamage(scene, attackerEntity, targetEntity);
+  if (scriptedDamage && !(scriptedDamage.multiplier > 0)) return { damageResult: null, destroyResult: null };
+  if (scriptedDamage && scriptedDamage.multiplier !== 1) resolvedShotDamage = Object.fromEntries(Object.entries(resolvedShotDamage).map(([kind, amount]) => [kind, amount * scriptedDamage.multiplier]));
   const fabricatorMultiplier = require("../../services/seasons/eventHooks").fabricator.damageMultiplier(scene,attackerEntity,targetEntity,options,whenMs);
   if (fabricatorMultiplier === 0) return {damageResult:null,destroyResult:null};
   if (fabricatorMultiplier !== 1) resolvedShotDamage = Object.fromEntries(Object.entries(resolvedShotDamage).map(([k,v])=>[k,v*fabricatorMultiplier]));
-  // The AIR fleet battle never wears a ship below its floor (airCombatPolicy).
-  const airBattleScale = require("../combat/airCombatPolicy").battleShotScale(attackerEntity, targetEntity, resolvedShotDamage);
-  if (airBattleScale <= 0) return { damageResult: null, destroyResult: null };
-  if (airBattleScale < 1) resolvedShotDamage = Object.fromEntries(Object.entries(resolvedShotDamage).map(([kind, amount]) => [kind, amount * airBattleScale]));
   if (
     targetEntity &&
     targetEntity.evejsAbyssalEnvironmentalObject === true &&
@@ -408,6 +414,7 @@ function applyWeaponDamageToTarget(
   const damageOptions = structureDamageWindow
     ? { layerDamageLimits: structureDamageWindow.remaining }
     : targetEntity.evejsSkyhookReagentSilo ? { layerDamageLimits: { armor: 0, structure: 0 } } : {};
+  if (scriptedDamage?.layerDamageLimits) damageOptions.layerDamageLimits = { ...scriptedDamage.layerDamageLimits };
   const layerResonanceOverrides = !breacherTick && !fighterDamageContext?.damageResult
     ? resolveLayerResonanceOverrides(scene, attackerEntity, targetEntity) : null;
   if (layerResonanceOverrides) damageOptions.layerResonanceOverrides = layerResonanceOverrides;
@@ -486,6 +493,7 @@ function applyWeaponDamageToTarget(
       );
     }
     noteReactiveArmorHardenerDamage(targetEntity, damageResult);
+    flashpoint.noteDamage(scene, attackerEntity, targetEntity, getAppliedDamageAmount(damageResult), whenMs);
     if (targetEntity.homefrontKey) {
       const homefront =
         require("../../services/homefront/homefrontHooks").runtime;
@@ -622,6 +630,9 @@ function applyWeaponDamageToTarget(
     }
     try {
       const npcService = lazyRequire("./npc");
+      if (npcService && typeof npcService.noteDrifterShieldDepleted === "function") {
+        npcService.noteDrifterShieldDepleted(scene, targetEntity, damageResult, whenMs);
+      }
       if (npcService && typeof npcService.noteNpcIncomingAggression === "function") {
         npcService.noteNpcIncomingAggression(
           targetEntity,

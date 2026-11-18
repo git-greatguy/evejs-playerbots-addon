@@ -13,6 +13,7 @@ const log = require(path.join(__dirname, "../../utils/logger"));
 const config = require(path.join(__dirname, "../../config"));
 const { random } = require(path.join(__dirname, "../../common/random"));
 const worldData = require(path.join(__dirname, "../../space/worldData"));
+const { isVoidSystemID } = require("../../space/voidSystemRange");
 const dungeonAuthority = require(path.join(__dirname, "./dungeonAuthority"));
 const homefrontPopulationPolicy = require("./homefrontPopulationPolicy");
 const dungeonRuntime = require(path.join(__dirname, "./dungeonRuntime"));
@@ -860,10 +861,13 @@ function listCompiledSpawnFamilies() {
  * from the system's own record, and every family contributes a fixed count if its
  * band eligibility and scope predicate admit this system. Cost is proportional to
  * the number of configured families, not to the size of the universe.
+ *
+ * A void system plans nothing: it is private space a feature claims whole, and its
+ * security of -0.99 would otherwise read as null-sec.
  */
 function resolveSystemSitePlan(systemID, options = {}) {
   const numericSystemID = Math.max(0, toInt(systemID, 0));
-  if (numericSystemID <= 0) {
+  if (numericSystemID <= 0 || isVoidSystemID(numericSystemID)) {
     return [];
   }
   const familyFilter = new Set((Array.isArray(options.families) ? options.families : [])
@@ -873,7 +877,7 @@ function resolveSystemSitePlan(systemID, options = {}) {
   const plan = [];
   for (const entry of listCompiledSpawnFamilies()) {
     if (["gallente_fw_open","caldari_fw_open"].includes(entry.family) && !require("../seasons/campaignTrailCatalog").isEnabled()) continue;
-    if (entry.family === "gallente_fabricator" && (!require("../seasons/campaignTrailCatalog").isEnabled() || !require("../seasons/eventHooks").fabricator.eligibleSystem(numericSystemID))) continue;
+    if (entry.family === "gallente_fabricator" && !require("../seasons/eventHooks").fabricator.isAvailable(numericSystemID)) continue;
     if (entry.family === "gallente_iteration_depot" &&
         (!require("../seasons/campaignTrailCatalog").isEnabled() ||
          require("../../space/npc/pirateFactionPolicy").isSpecialSpaceSystem(numericSystemID, worldData.getSolarSystemByID(numericSystemID)))) continue;
@@ -1802,7 +1806,14 @@ function resetStartupOrphanedUniverseSites(options = {}) {
       scannedCount += 1;
       const spawnFamilyKey = getInstanceSpawnFamilyKey(instance);
       let reason = null;
-      if (spawnFamilyKey && !dungeonAuthority.getSpawnProfile(spawnFamilyKey)) {
+      // Sov Hub families are guaranteed by sovereignty upgrades, not rolled
+      // from a spawn profile, so they never have one; only their template
+      // can go missing.
+      if (
+        spawnFamilyKey &&
+        !isSovereigntyGuaranteedSpawnFamily(spawnFamilyKey) &&
+        !dungeonAuthority.getSpawnProfile(spawnFamilyKey)
+      ) {
         reason = "missing_spawn_profile";
       } else if (!dungeonAuthority.getTemplateByID(normalizeText(instance.templateID, ""))) {
         reason = "missing_template";
@@ -2298,7 +2309,7 @@ function listPolicyEligibleTemplateDescriptorsForBand(
       .map((templateID) => dungeonAuthority.getTemplateSelectionDescriptorByID(templateID))
       .filter(Boolean)
     : listFamilyTemplatesForBand(family, band, bandProfile);
-  const eligible = Object.freeze(candidates
+  const allowed = candidates
     .map((descriptor) => ({
       descriptor,
       evaluation: evaluateTemplateSpawnPolicy(
@@ -2310,7 +2321,13 @@ function listPolicyEligibleTemplateDescriptorsForBand(
         policyOptions,
       ),
     }))
-    .filter((entry) => entry.evaluation && entry.evaluation.allowed !== false));
+    .filter((entry) => entry.evaluation && entry.evaluation.allowed !== false);
+  // Prefer the client's own dungeons, as listCombatAnomalyTemplatesForLabel does. An eve-university
+  // template has no client dungeon ID, so a site built from one cannot be tracked: no
+  // OnEnteringDungeonRoom on the way in, keeper.GetCurrentDungeonForCharacter None inside it (a data
+  // site in Perimeter, 2026-11-14). Keep them only where no client dungeon qualifies.
+  const clientDungeons = allowed.filter((entry) => toInt(entry.descriptor && entry.descriptor.sourceDungeonID, 0) > 0);
+  const eligible = Object.freeze(clientDungeons.length > 0 ? clientDungeons : allowed);
   policyEligibleTemplateCandidatesCache.set(cacheKey, eligible);
   return eligible;
 }
@@ -2562,6 +2579,82 @@ function pickUniverseTemplateForSlot(family, systemID, slotIndex, rotationIndex,
     bandProfile,
   );
   return selection && selection.template || null;
+}
+
+function computeTemplateContentHash(template) {
+  return hashText(JSON.stringify({
+    contentPack: cloneValue(template && template._contentPack || null),
+    populationHints: cloneValue(template && template.populationHints || null),
+    environmentTemplates: cloneValue(template && template.environmentTemplates || null),
+    objectiveMetadata: cloneValue(template && template.objectiveMetadata || null),
+    siteSceneProfile: cloneValue(template && template.siteSceneProfile || null),
+  }));
+}
+
+// Every universe site definition hashed its template's content (five deep
+// copies plus a stringify), though the template is the same for every system
+// and slot. The hash is kept per template object in a WeakMap (after the
+// template hash cache in kroryan/evejs-playerbots-addon v0.2.137), but only for
+// a template that can never change: frozen, with each hashed field deep-frozen
+// plain data (own data properties, plain object/array prototypes). That is
+// dungeonAuthority's shared read-only view (getTemplateByIDReadOnly); a rebuilt
+// authority serves new objects, which hash afresh. A mutable copy is never cached.
+const TEMPLATE_CONTENT_HASH_FIELDS = Object.freeze([
+  "_contentPack", "populationHints", "environmentTemplates", "objectiveMetadata", "siteSceneProfile",
+]);
+const templateContentHashMemo = new WeakMap();
+
+// Templates are acyclic JSON trees; a depth cap (instead of a visited set)
+// makes a cyclic or absurdly deep value simply uncacheable.
+const TEMPLATE_CONTENT_MAX_DEPTH = 256;
+
+function isDeepFrozenPlainData(value, depth = 0) {
+  if (value === null || typeof value !== "object") {
+    return typeof value !== "function";
+  }
+  if (depth > TEMPLATE_CONTENT_MAX_DEPTH) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (!Object.isFrozen(value) ||
+    (prototype !== Object.prototype && prototype !== Array.prototype && prototype !== null)) {
+    return false;
+  }
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!("value" in descriptor) || !isDeepFrozenPlainData(descriptor.value, depth + 1)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isImmutableTemplateContent(template) {
+  if (!Object.isFrozen(template)) {
+    return false;
+  }
+  return TEMPLATE_CONTENT_HASH_FIELDS.every((field) => {
+    const descriptor = Object.getOwnPropertyDescriptor(template, field);
+    if (!descriptor) {
+      return !(field in template);
+    }
+    return "value" in descriptor && isDeepFrozenPlainData(descriptor.value);
+  });
+}
+
+function getTemplateContentHash(template) {
+  if (!template || typeof template !== "object" || !Object.isFrozen(template)) {
+    return computeTemplateContentHash(template);
+  }
+  const cached = templateContentHashMemo.get(template);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const hash = computeTemplateContentHash(template);
+  if (isImmutableTemplateContent(template)) {
+    templateContentHashMemo.set(template, hash);
+  }
+  return hash;
 }
 
 function buildUniverseSiteDefinition(template, family, systemID, slotIndex, options = {}) {
@@ -4011,6 +4104,9 @@ function terminalInstanceStillHoldsItsGrid(instance) {
 }
 
 function shouldRotateUniversePersistentTerminalInstance(instance, nowMs) {
+  // Flashpoints replace their regional slot at completion. Their old instance
+  // remains the authority for the physical cache until its independent expiry.
+  if (instance?.siteFamily === "observatory_flashpoint") return false;
   if (!instance) {
     return false;
   }
@@ -5472,6 +5568,8 @@ function scheduleSystemUniversePersistentSitesReconcile(systemID, options = {}) 
 }
 
 function prepareSystemForPlayerEntry(systemID, options = {}) {
+  const flashpoints = require("../observatoryFlashpoint/flashpointUniverse");
+  if (flashpoints.isPochven(systemID)) flashpoints.reconcile(options);
   const numericSystemID = Math.max(0, toInt(systemID, 0));
   if (numericSystemID <= 0) {
     return {
@@ -5690,6 +5788,9 @@ module.exports = {
   scheduleSystemUniversePersistentSitesReconcile,
   stopTicker,
   _testing: {
+    getTemplateContentHash,
+    computeTemplateContentHash,
+    isImmutableTemplateContent,
     summarizeActiveUniverseSeededCounts,
     buildUniverseSpawnCountMap,
     buildGeneratedMiningDefinitionHash,

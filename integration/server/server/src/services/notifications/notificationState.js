@@ -1,5 +1,6 @@
 "use strict";
 
+const { cloneValue: walkCloneValue } = require("../../common/clone");
 const path = require("path");
 const { isDeepStrictEqual } = require("node:util");
 
@@ -29,6 +30,15 @@ const { notificationDataYaml } = require(path.join(__dirname, "./notificationYam
 
 const NOTIFICATIONS_TABLE = "notifications";
 
+// Boxes already brought into shape since they were loaded. Every read and write
+// used to re-shape every character's box (and stringify each one twice), then
+// write the table root, so the next flush diffed every box. This module is the
+// table's only in-place writer, so a box it has shaped stays shaped until an
+// operation touches it; ensureNotificationBox() takes a touched box off this set
+// and the next call shapes that one box again. A box replaced from outside (an
+// import) is a new object and is shaped on the next call.
+const shapedBoxes = new WeakSet();
+
 function currentFileTimeString() {
   return (BigInt(Date.now()) * 10000n + 116444736000000000n).toString();
 }
@@ -39,7 +49,7 @@ function toPositiveInteger(value, fallback = 0) {
 }
 
 function cloneValue(value) {
-  return JSON.parse(JSON.stringify(value));
+  return value === undefined ? JSON.parse(JSON.stringify(value)) : walkCloneValue(value);
 }
 
 function createDefaultState() {
@@ -172,6 +182,8 @@ function ensureNotificationBox(state, characterID) {
 
   dedupedOrder.sort((left, right) => right - left);
   box.order = dedupedOrder;
+  // The caller may change this box after this point.
+  shapedBoxes.delete(box);
   return box;
 }
 
@@ -203,19 +215,34 @@ function getMutableState() {
     mutated = true;
   }
 
-  // Notification boxes are normalized lazily by listNotifications and each
-  // mutator for the character it actually serves. Walking, stringifying and
-  // rebuilding every character's history on each notification request made
-  // this path O(all pilots × notifications per pilot), which stalled the main
-  // game loop as the connected roster grew.
+  // Playerbots add-on: notification boxes are normalized lazily by
+  // listNotifications and each mutator for the character it actually serves.
+  // Walking and stringifying every character's box on a read made the first
+  // request O(all pilots x notifications per pilot), which stalls the game
+  // loop on a large roster.
+  const changedBoxKeys = [];
+
   if (mutated) {
     repo.write(NOTIFICATIONS_TABLE, "/", state);
+  } else if (changedBoxKeys.length > 0) {
+    repo.write(NOTIFICATIONS_TABLE, "/", state, {
+      knownChangedPaths: changedBoxKeys.map((key) => `/boxes/${key}`),
+    });
   }
   return state;
 }
 
-function persistState(state) {
-  return repo.write(NOTIFICATIONS_TABLE, "/", state);
+// characterID names the one box the caller changed; _meta holds the ID counter.
+// The cache already holds the changed objects, so the root write keeps its
+// same-reference meaning and the paths only keep the flush to those rows.
+function persistState(state, characterID = 0) {
+  const key = toPositiveInteger(characterID, 0);
+  if (key <= 0) {
+    return repo.write(NOTIFICATIONS_TABLE, "/", state);
+  }
+  return repo.write(NOTIFICATIONS_TABLE, "/", state, {
+    knownChangedPaths: [`/boxes/${key}`, "/_meta"],
+  });
 }
 
 function allocateNotificationID(state) {
@@ -382,7 +409,12 @@ function listNotifications(characterID, options = {}) {
   }
 
   const state = getMutableState();
-  const box = ensureNotificationBox(state, numericCharacterID);
+  // A read for a character with no box returns nothing rather than creating
+  // an empty box that no write would name.
+  const box = state.boxes[String(numericCharacterID)];
+  if (!box || !Array.isArray(box.order) || !box.byID) {
+    return [];
+  }
   const fromID = toPositiveInteger(options.fromID, 0);
   const groupID =
     options.groupID == null ? null : toPositiveInteger(options.groupID, 0) || null;
@@ -516,7 +548,7 @@ function sendNotificationDeletedEvent(characterID, notificationIDs, options = {}
 function persistDurableNotification(state, record) {
   // Reused keys must write too: a previous rejected write can leave the
   // cache containing a row which has never reached storage.
-  if (persistState(state)?.success !== true ||
+  if (persistState(state, record.receiverID)?.success !== true ||
       repo.flushTableSync(NOTIFICATIONS_TABLE)?.success !== true) {
     return { success: false, errorMsg: "NOTIFICATION_PERSISTENCE_PENDING" };
   }
@@ -578,7 +610,7 @@ function createNotification(characterID, options = {}) {
           extraSessions: options.extraSessions || [],
         });
         existing.liveEmitted = true;
-        persistState(state);
+        persistState(state, numericCharacterID);
       }
       return {
         success: true,
@@ -614,7 +646,7 @@ function createNotification(characterID, options = {}) {
     box.order.unshift(notificationID);
   }
 
-  const writeResult = persistState(state);
+  const writeResult = persistState(state, numericCharacterID);
   if (!writeResult || !writeResult.success) {
     return { success: false, errorMsg: "WRITE_ERROR" };
   }
@@ -666,7 +698,7 @@ function mutateProcessed(characterID, notificationIDs, processed) {
     return { success: true, changedNotificationIDs: [] };
   }
 
-  const writeResult = persistState(state);
+  const writeResult = persistState(state, numericCharacterID);
   if (!writeResult || !writeResult.success) {
     return { success: false, errorMsg: "WRITE_ERROR" };
   }
@@ -728,7 +760,7 @@ function deleteNotificationIDs(characterID, notificationIDs, options = {}) {
     (notificationID) => !changedNotificationIDs.includes(notificationID),
   );
 
-  const writeResult = persistState(state);
+  const writeResult = persistState(state, numericCharacterID);
   if (!writeResult || !writeResult.success) {
     return { success: false, errorMsg: "WRITE_ERROR" };
   }

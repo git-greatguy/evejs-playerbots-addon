@@ -254,7 +254,10 @@ const {
 const {
   advanceEntityRackHeat,
   applyOverloadHeatDamageToModule,
+  applyOverloadHeatDamageToWeaponBank,
+  isModuleCycling,
   settlePendingOverloadModuleTransition,
+  settlePendingOverloadWeaponBankTransitions,
 } = require("../moduleHeat");
 const {
   buildAssistanceModuleRuntimeCallbacks,
@@ -321,6 +324,9 @@ const {
 const {
   isSnapshotWeaponFamily,
 } = require("../weaponSnapshot");
+const {
+  refreshWeaponCycleRuntimeState,
+} = require("../weaponCycleBoundary");
 
 module.exports = {
 
@@ -335,10 +341,10 @@ tick(wallclockNow) {
     // Playerbots add-on: a system with no human pilot in space refreshes
     // incursion system effects on a slower cadence.
     if (require("../../../services/playerbots/playerBotUnobservedScenePolicy").shouldRefreshSystemEffects(this)) {
-      require("../../../services/incursion/incursionSystemEffects").refreshScene(this);
+      lazyRequire("../services/incursion/incursionSystemEffects").refreshScene(this);
     }
     try {
-      require("../../../services/dungeon/siteHazardOutcomes").recoverForScene(this);
+      lazyRequire("../services/dungeon/siteHazardOutcomes").recoverForScene(this);
     } catch (error) {
       log.warn(`[SpaceRuntime] Holding scene ${this.sceneKey} for hazard health recovery: ${error.message}`);
       return { blocked: true, errorMsg: "SITE_HAZARD_HEALTH_PENDING" };
@@ -557,7 +563,7 @@ tick(wallclockNow) {
     // sim time, through the normal health and
     // destruction owners.
     try {
-      tickProfiler.section("breacherPods", () => require("../../combat/breacherPods").tickScene(this, now));
+      tickProfiler.section("breacherPods", () => lazyRequire("./combat/breacherPods").tickScene(this, now));
     } catch (error) {
       log.warn(`[SpaceRuntime] Breacher pod tick failed for system=${this.systemID}: ${error.message}`);
     }
@@ -569,15 +575,16 @@ tick(wallclockNow) {
     const controlledStaticStructureDogmaHosts = new Set(
       getControlledStaticStructureDogmaHosts(this),
     );
-    const activeTickDynamicEntities = new Set(this.dynamicEntities.values());
-    const activeTickDogmaHosts = [
-      ...activeTickDynamicEntities,
-      ...controlledStaticStructureDogmaHosts,
-    ];
+    // A snapshot: entities added or removed by this loop are handled next tick.
+    // dynamicEntities holds each entity once, under its itemID.
+    const activeTickDogmaHosts = Array.from(this.dynamicEntities.values());
+    for (const host of controlledStaticStructureDogmaHosts) {
+      activeTickDogmaHosts.push(host);
+    }
     for (const entity of activeTickDogmaHosts) {
       // Apply ESS restrictions before a pending MJD can deliver its jump at
       // this cycle boundary, including a ship that just flew into the field.
-      require("../../../services/dynamic/essFieldRuntime").enforceEntity(this, entity, now);
+      lazyRequire("../services/dynamic/essFieldRuntime").enforceEntity(this, entity, now);
       if (Array.isArray(entity.pendingModuleStopNotifications) && entity.pendingModuleStopNotifications.length > 0) {
         const flushSession = entity.session || getOwningSessionForEntity(this, entity);
         if (flushSession && isReadyForDestiny(flushSession)) {
@@ -601,8 +608,7 @@ tick(wallclockNow) {
       ) {
         for (const pendingModuleID of [...entity.pendingOverloadModuleEffects.keys()]) {
           if (
-            entity.activeModuleEffects instanceof Map &&
-            entity.activeModuleEffects.has(toInt(pendingModuleID, 0))
+            isModuleCycling(entity, pendingModuleID)
           ) {
             continue;
           }
@@ -762,7 +768,10 @@ tick(wallclockNow) {
             // heat, but do not enter reload, consume next-cycle resources, or
             // execute another consequence. Unknown families stay here until
             // lifecycle evidence establishes a different delivery class.
-            const heatDamageResult = applyOverloadHeatDamageToModule(
+            const applyCompletedCycleHeat = isTurretCycleWeaponFamily(effectState.weaponFamily)
+              ? applyOverloadHeatDamageToWeaponBank
+              : applyOverloadHeatDamageToModule;
+            const heatDamageResult = applyCompletedCycleHeat(
               this,
               entity,
               moduleItem,
@@ -848,12 +857,9 @@ tick(wallclockNow) {
             effectState.localCycleEffect === true
               ? effectState.localCycleResolvedState || null
               : null;
-          const overloadTransition = settlePendingOverloadModuleTransition(
-            this,
-            entity,
-            effectState.moduleID,
-            cycleBoundaryMs,
-          );
+          const overloadTransition = isTurretCycleWeaponFamily(effectState.weaponFamily)
+            ? settlePendingOverloadWeaponBankTransitions(this, entity, effectState, cycleBoundaryMs)
+            : settlePendingOverloadModuleTransition(this, entity, effectState.moduleID, cycleBoundaryMs);
 
           const localCycleCallbacks = effectState.localCycleEffect === true
             ? buildLocalCycleRuntimeCallbacks(
@@ -935,20 +941,6 @@ tick(wallclockNow) {
             }
             if (reloadResult.waiting) {
               continue;
-            }
-            // CCP parity: reload completed — re-notify the client that the
-            // module is active again so the HUD cycle ring resumes.
-            if (
-              effectState.pendingReloadReactivation &&
-              ownerSession &&
-              isReadyForDestiny(ownerSession)
-            ) {
-              effectState.pendingReloadReactivation = false;
-              notifyEffect(ownerSession, entity, effectState, true, {
-                whenMs: cycleBoundaryMs,
-                startTimeMs: cycleBoundaryMs,
-                repeatNotification: true,
-              });
             }
           }
           if (
@@ -1334,6 +1326,37 @@ tick(wallclockNow) {
               }
               continue;
             }
+          }
+
+          if (isSnapshotWeaponFamily(effectState.weaponFamily)) {
+            const snapshotResult = refreshWeaponCycleRuntimeState(entity, moduleItem, effectState);
+            if (!snapshotResult.success) {
+              const options = { reason: snapshotResult.stopReason || "weapon", nowMs: cycleBoundaryMs };
+              if (ownerSession && isReadyForDestiny(ownerSession)) {
+                finalizeDeactivation(ownerSession, effectState.moduleID, options);
+              } else if (isGenericEffect) {
+                finalizeGenericModuleDeactivationWithoutSession(this, entity, effectState, options);
+              } else {
+                entity.activeModuleEffects.delete(toInt(effectState.moduleID, 0));
+              }
+              continue;
+            }
+          }
+
+          // Resume the launcher's HUD ring after refreshing the next cycle's
+          // timing: heat or a hull mode may have changed during the reload.
+          if (
+            isMissileWeaponFamily(effectState.weaponFamily) &&
+            effectState.pendingReloadReactivation &&
+            ownerSession &&
+            isReadyForDestiny(ownerSession)
+          ) {
+            effectState.pendingReloadReactivation = false;
+            notifyEffect(ownerSession, entity, effectState, true, {
+              whenMs: cycleBoundaryMs,
+              startTimeMs: cycleBoundaryMs,
+              repeatNotification: true,
+            });
           }
 
           const cycleCapNeed = preparedMiningCycle && preparedMiningCycle.snapshot
@@ -2043,7 +2066,10 @@ tick(wallclockNow) {
             }
           }
           if (cycleExecutedForHeat) {
-            const heatDamageResult = applyOverloadHeatDamageToModule(
+            const applyCompletedCycleHeat = isTurretCycleWeaponFamily(effectState.weaponFamily)
+              ? applyOverloadHeatDamageToWeaponBank
+              : applyOverloadHeatDamageToModule;
+            const heatDamageResult = applyCompletedCycleHeat(
               this,
               entity,
               moduleItem,
@@ -2053,6 +2079,7 @@ tick(wallclockNow) {
                 overloadedForCompletedCycle: overloadTransition.applied
                   ? overloadTransition.active !== true
                   : undefined,
+                completedOverloadModuleIDs: overloadTransition.completedOverloadModuleIDs,
               },
             );
             if (!heatDamageResult.success) {
@@ -2430,18 +2457,18 @@ tick(wallclockNow) {
 
     this.validateAllTargetLocks(now);
     try {
-      require("../../../services/spaceComponents/towGameObjectiveRuntime").tickScene(this);
+      lazyRequire("../services/spaceComponents/towGameObjectiveRuntime").tickScene(this);
     } catch (error) {
       log.warn(`[Tow] Scene cleanup failed for system=${this.systemID}: ${error.message}`);
     }
     try {
-      require("../../../services/activity/pvpFilamentQueueRuntime").tickScene(this);
+      lazyRequire("../services/activity/pvpFilamentQueueRuntime").tickScene(this);
     } catch (error) {
       log.warn(`[PvpFilaments] Scene queue cleanup failed for system=${this.systemID}: ${error.message}`);
     }
     if (this._voidReplay) {
       try {
-        require("../../../services/activity/voidReplayRuntime").tickScene(this);
+        lazyRequire("../services/activity/voidReplayRuntime").tickScene(this);
       } catch (error) {
         log.warn(`[VoidReplay] Scene update failed for system=${this.systemID}: ${error.message}`);
       }
@@ -2485,7 +2512,7 @@ tick(wallclockNow) {
     // off; one whose conditions broke is aborted. Its deadline is wall-clock
     // time.
     try {
-      require("../../../services/ship/safeLogoffRuntime")
+      lazyRequire("../services/ship/safeLogoffRuntime")
         .processScene(this, clockState.wallclockNowMs);
     } catch (error) {
       log.warn(`[SpaceRuntime] Safe logoff tick failed for system=${this.systemID}: ${error.message}`);

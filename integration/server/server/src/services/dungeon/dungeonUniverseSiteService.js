@@ -3,6 +3,7 @@
 const {
   cloneValue,
 } = require("../../common/clone");
+const { isDeepFrozen } = require("../../common/frozenIntern");
 const {
   toFiniteNumber,
 } = require("../../common/numbers");
@@ -21,6 +22,8 @@ const { buildNativeWeatherEntities } = require("./securityMissionWeather");
 const visionsSceneRuntime = require("./visionsSceneRuntime");
 const careerLessonRuntime = require("./careerLessonRuntime");
 const fracturedLegacyRuntime = require("./fracturedLegacyRuntime");
+const bloodStainedStarsRuntime = require("./bloodStainedStarsRuntime");
+const bloodStainedStarsRemainingRuntime = require("./bloodStainedStarsRemainingRuntime");
 const requiredActorPolicy = require("./requiredActorPolicy");
 const loadedMissionRuntime = require(path.join(__dirname, "../agent/loadedMissionRuntime"));
 const {
@@ -152,6 +155,29 @@ const cachedContainerTypeRecordByName = new Map();
 const cachedGenericTypeRecordByName = new Map();
 const cachedLootTypeRecordByName = new Map();
 let cachedBlueprintLootTypeRecords = null;
+
+// A content entry's exactWire: the object exactly as Tranquility puts it on the wire (the AIR
+// mining site, content pack 1.0.14). slim is its slim after itemID, damageState its AddBalls
+// damage state (null: none); the rest are its ball's fields. omit: Tranquility never sends the
+// object's ball.
+function exactWireFields(wire) {
+  if (!wire || typeof wire !== "object") return {};
+  const has = (key) => Object.prototype.hasOwnProperty.call(wire, key);
+  return {
+    ...(Array.isArray(wire.slim) ? { exactSlimFields: cloneValue(wire.slim) } : {}),
+    ...(has("damageState") ? { exactDamageState: cloneValue(wire.damageState) } : {}),
+    ...(Number.isFinite(wire.radius) ? { radius: wire.radius } : {}),
+    ...(Number.isFinite(wire.mass) ? { mass: wire.mass, staticBallMass: wire.mass } : {}),
+    ...(Number.isInteger(wire.flags) ? { destinyBallFlags: wire.flags } : {}),
+    ...(typeof wire.free === "boolean" ? { destinyForceFree: wire.free } : {}),
+    ...(wire.mode ? { destinyBallMode: wire.mode } : {}),
+    ...(Number.isInteger(wire.corporationID) ? { destinyCorporationID: wire.corporationID } : {}),
+    ...(Number.isInteger(wire.allianceID) ? { destinyAllianceID: wire.allianceID } : {}),
+    ...(Number.isFinite(wire.speedFraction) ? { speedFraction: wire.speedFraction } : {}),
+    ...(wire.fixedRadius === true ? { miningFixedRadius: true } : {}),
+    ...(wire.omit === true ? { omitDestinyBall: true } : {}),
+  };
+}
 
 function buildSafeSitePropSlimOverrides(typeRecord = null) {
   const rawCategoryID = Math.max(0, toInt(typeRecord && typeRecord.categoryID, 0));
@@ -2546,6 +2572,15 @@ function mergeDerivedMissionPopulationHints(baseHints, derivedHints) {
   return merged;
 }
 
+// The caller's own hints object. Interned instance hints and read-only template
+// views are frozen all the way down, so a shallow copy is enough: callers add or
+// replace top-level fields, and nothing writes inside the shared parts (a write
+// there throws). Mutable hints are still copied in full. A full copy of these
+// 60-120 KB trees on every lookup was most of the site pass.
+function ownHintsCopy(hints) {
+  return isDeepFrozen(hints) ? { ...hints } : cloneValue(hints);
+}
+
 function resolvePopulationHints(instance, template) {
   const incursionHints = hints => require("../incursion/incursionFriendlyActors").projectPopulationHints(instance,
     require("../incursion/incursionReinforcements").projectPopulationHints(instance,
@@ -2553,7 +2588,7 @@ function resolvePopulationHints(instance, template) {
       require("../incursion/incursionCargo").projectPopulationHints(instance,
         require("../incursion/incursionMining").projectPopulationHints(instance, hints))))));
   const layout = instance?.spawnState?.hackingContainerLayout;
-  if (layout?.version === 1 && layout.populationHints) return incursionHints(cloneValue(layout.populationHints));
+  if (layout?.version === 1 && layout.populationHints) return incursionHints(ownHintsCopy(layout.populationHints));
   const legacyLayout = !layout &&
     (Object.keys(normalizeObject(instance?.spawnState?.contentEntityRefsByKey)).some(key => key.startsWith("container:")) ||
       Object.keys(normalizeObject(instance?.spawnState?.hackingContainers)).length > 0);
@@ -2566,7 +2601,7 @@ function resolvePopulationHints(instance, template) {
       ? instance.spawnState.populationHints
       : null;
   if (spawnHints) {
-    return incursionHints({ ...cloneValue(spawnHints), ...(legacyLayout ? { hackingLayoutVersion: 0 } : {}) });
+    return incursionHints({ ...ownHintsCopy(spawnHints), ...(legacyLayout ? { hackingLayoutVersion: 0 } : {}) });
   }
   const templateHints =
     template &&
@@ -2575,7 +2610,7 @@ function resolvePopulationHints(instance, template) {
       ? template.populationHints
       : null;
   const originalHints = templateHints?.curatedHackableContent?.originalPopulationHints;
-  const baseHints = templateHints ? cloneValue(legacyLayout && originalHints ? originalHints : templateHints) : null;
+  const baseHints = templateHints ? ownHintsCopy(legacyLayout && originalHints ? originalHints : templateHints) : null;
     // Old mission instances predate population snapshots. An upgraded catalog
     // may supply their captured layout, but cannot add a new protection cohort
     // or silently opt an already accepted attempt into the 1.0.1 policy.
@@ -3367,7 +3402,7 @@ function rematerializeStoredDungeonEncounterEntities(
   // A fatal native-health checkpoint can precede its terminal dungeon journal.
   // Drain the purgesafe outbox before validating/rematerializing live bundles.
   require("../incursion/incursionHooks").tick(scene, instance);
-  instance = dungeonRuntime.getInstance(instanceID) || instance;
+  instance = dungeonRuntime.getInstanceReadOnly(instanceID) || instance;
   const nativeNpcStore = getNativeNpcStore();
   const nativeNpcService = getNativeNpcService();
   const nativeNpcWreckService = getNativeNpcWreckService();
@@ -3380,7 +3415,7 @@ function rematerializeStoredDungeonEncounterEntities(
       ...normalizeIDList(state && state.remainingEntityIDs),
     ]),
   );
-  const template = dungeonAuthority.getTemplateByID(instance.templateID);
+  const template = dungeonAuthority.getTemplateByIDReadOnly(instance.templateID);
   const recoveryPlanKey = normalizeText(options.requiredRecoveryPlanKey, "");
   const required = options.requiredRecoveryDeclarations ??
     requiredActorPolicy.declarations(instance, template, resolvePopulationHints(instance, template))
@@ -3521,16 +3556,15 @@ function rematerializeStoredDungeonEncounterEntities(
   if (recoveryPlanKey) return { npcCount, wreckCount: 0 };
   const nowMs = Math.max(0, toInt(options.nowMs, Date.now()));
   let wreckCount = 0;
-  for (const wreckRecord of nativeNpcStore.listNativeWrecks()) {
-    if (
-      !wreckRecord ||
-      wreckRecord.dungeonMaterializedSiteContent !== true ||
-      toInt(wreckRecord.systemID, 0) !== systemID ||
-      toInt(wreckRecord.dungeonSiteInstanceID, 0) !== instanceID ||
-      toInt(wreckRecord.dungeonSiteID, 0) !== siteID
-    ) {
-      continue;
-    }
+  // Select this site's wrecks on the live rows and copy only those, in the
+  // same wreckID order, before the loop (as before), instead of copying and
+  // sorting every stored wreck in the universe for each restored site.
+  for (const wreckRecord of nativeNpcStore.listNativeWrecksMatching((row) => (
+    row.dungeonMaterializedSiteContent === true &&
+    toInt(row.systemID, 0) === systemID &&
+    toInt(row.dungeonSiteInstanceID, 0) === instanceID &&
+    toInt(row.dungeonSiteID, 0) === siteID
+  ))) {
     if (
       toInt(wreckRecord.expiresAtMs, 0) > 0 &&
       toInt(wreckRecord.expiresAtMs, 0) <= nowMs
@@ -3920,6 +3954,11 @@ function buildSiteEntity(instance) {
   const encounterPlans = resolveEncounterPlans(populationHints);
   const publicEncounterPlanCount = populationHints?.incursionPolicy?.version === 2
     ? normalizeArray(instance.spawnState?.populationHints?.encounters).length : encounterPlans.length;
+  // The AIR opening's private site entity anchors the server's scope and spawns; it is no
+  // captured dungeon object, so the client gets the site's 26 objects without it.
+  const serverOnlyAirAnchor = /^evejs\.air-tutorial:(9103|9105)$/.test(String(instance.templateID || "")) &&
+    Boolean(template?.airEncounter) && instance.instanceScope === "private" &&
+    toInt(instance.ownership?.characterID, 0) > 0;
 
   if (isManagedMissionSiteInstance(instance) || require("../activity/voidReplayRoom").isVoidReplayInstance(instance)) {
     return {
@@ -3938,6 +3977,7 @@ function buildSiteEntity(instance) {
       direction: { x: 1, y: 0, z: 0 },
       radius: Math.max(1_000, toFiniteNumber(typeRecord && typeRecord.radius, 2_000)),
       staticVisibilityScope: "bubble",
+      ...(serverOnlyAirAnchor ? { dungeonServerOnlyAnchor: true } : {}),
       dungeonMaterializedSiteContent: true,
       dungeonSiteInstanceID:
         Math.max(0, toInt(instance && instance.instanceID, 0)) || null,
@@ -3952,11 +3992,14 @@ function buildSiteEntity(instance) {
       entryObjectTypeID,
       dungeonEncounterPlanCount: encounterPlans.length,
       dungeonLootProfiles: normalizeArray(populationHints && populationHints.lootProfiles),
+      // The AIR mining site's own ball is not global: Tranquility's client never gets it.
+      ...exactWireFields(template && template.siteEntityExactWire),
     };
   }
 
   const entity = {
     kind: siteKind === "anomaly" ? "universeAnomalySite" : "universeSignatureSite",
+    ...(serverOnlyAirAnchor ? { dungeonServerOnlyAnchor: true } : {}),
     signalTrackerUniverseSeededSite: true,
     signalTrackerSiteKind: siteKind,
     signalTrackerSiteFamily: family,
@@ -4052,6 +4095,7 @@ function buildStableUniverseSiteEntitySignature(entity) {
     direction: clonePosition(entity.direction),
     radius: Math.max(0, toFiniteNumber(entity.radius, 0)),
     staticVisibilityScope: normalizeLowerText(entity.staticVisibilityScope, ""),
+    dungeonServerOnlyAnchor: entity.dungeonServerOnlyAnchor === true,
     dungeonMaterializedSiteContent:
       entity.dungeonMaterializedSiteContent === true,
     dungeonSiteInstanceID:
@@ -4288,6 +4332,10 @@ function annotateMaterializedContainerEntity(entity, containerEntity) {
   entity.dungeonSiteContentHackingBoard = containerEntity?.dungeonSiteContentHackingBoard && typeof containerEntity?.dungeonSiteContentHackingBoard === "object" && !Array.isArray(containerEntity?.dungeonSiteContentHackingBoard) ? cloneValue(containerEntity?.dungeonSiteContentHackingBoard) : null;
   entity.dungeonSourceObjectID = toInt(containerEntity && containerEntity.dungeonSourceObjectID, 0) || null;
   entity.dunObjectID = entity.dungeonSourceObjectID || undefined;
+  // The captured object's facing and dungeon position, which its slim item carries.
+  if (Array.isArray(containerEntity.dunRotation)) entity.dunRotation = cloneValue(containerEntity.dunRotation);
+  if (Array.isArray(containerEntity.dunPosition)) entity.dunPosition = cloneValue(containerEntity.dunPosition);
+  if (containerEntity.exactWire) Object.assign(entity, exactWireFields(containerEntity.exactWire));
   entity.dungeonLootEntryCount = listContainerItems(null, entity.itemID).length;
   if (containerEntity.generatedMiningSite === true) {
     entity.generatedMiningSite = true;
@@ -4394,6 +4442,7 @@ function removeMaterializedContentEntity(scene, entity, options = {}) {
   const removed = scene.removeStaticEntity(toInt(entity && entity.itemID, 0), {
     broadcast: options.broadcast === true,
     excludedSession: options.excludedSession || null,
+    terminalDestructionEffectID: options.terminalDestructionEffectID,
     nowMs: options.nowMs,
   });
   if (removed === true || removed?.success === true) clearGateDefenseDbuffs(scene, entity, options);
@@ -4544,6 +4593,10 @@ function buildMiningRockEntities(instance, siteEntity, populationHints, template
   const siteID = Math.max(0, toInt(siteEntity && siteEntity.itemID, 0));
   const instanceID = Math.max(0, toInt(instance && instance.instanceID, 0));
   template ||= instance && instance.templateID ? dungeonAuthority.getTemplateByID(instance.templateID) : null;
+  // Native Security compilation keeps ore offsets relative to the site entry.
+  // Captured and authored ore offsets are room-relative, like their scenery.
+  const siteRelativeOffsets = Boolean(template && template.securityMission) &&
+    /^client_static_\d+$/.test(normalizeText(populationHints.source, ""));
   const exactClientContent = populationHints.exactClientContent === true;
   const exactGeneratedIce = exactClientContent &&
     isExactClientGeneratedMiningInstance(instance);
@@ -4616,6 +4669,7 @@ function buildMiningRockEntities(instance, siteEntity, populationHints, template
         objectiveTargetGroup: Object.prototype.hasOwnProperty.call(rock, "objectiveTargetGroup")
           ? normalizeSlimNullableValue(rock.objectiveTargetGroup)
           : null,
+        exactWire: index === 0 ? rock.exactWire : null,
       }));
     })
     .filter((rock) => rock.oreTypeID > 0);
@@ -4659,8 +4713,24 @@ function buildMiningRockEntities(instance, siteEntity, populationHints, template
         baseDistanceMeters: SITE_CONTENT_CONTAINER_RING_METERS,
         jitterMeters: 6_000,
       });
-    const roomAnchor = resolveRoomWorldPositionForTemplate(siteEntity && siteEntity.position, template, rock.roomKey) ||
-      clonePosition(siteEntity && siteEntity.position);
+    // The slim item's dunPosition is the object's coordinate in the dungeon file, which the
+    // compiled client content keeps as sourcePosition; the content's own position is the
+    // placement relative to the site entry. Without client content the placement stands.
+    const nativeRockObject = rock.sourceObjectID > 0 && template &&
+      template.clientDungeonContent && Array.isArray(template.clientDungeonContent.objects)
+      ? template.clientDungeonContent.objects.find(
+        (object) => object && toInt(object.objectID, 0) === rock.sourceObjectID,
+      )
+      : null;
+    const nativeRockPosition = nativeRockObject && Array.isArray(nativeRockObject.sourcePosition) &&
+      nativeRockObject.sourcePosition.length === 3 &&
+      nativeRockObject.sourcePosition.every((value) => Number.isFinite(value))
+      ? nativeRockObject.sourcePosition
+      : null;
+    const roomAnchor = siteRelativeOffsets
+      ? clonePosition(siteEntity && siteEntity.position)
+      : resolveRoomWorldPositionForTemplate(siteEntity && siteEntity.position, template, rock.roomKey) ||
+        clonePosition(siteEntity && siteEntity.position);
     return decorateGeneratedMiningSiteEntity({
       kind: gasCloud ? "gasCloud" : "asteroid",
       dungeonMaterializedSiteContent: true,
@@ -4696,7 +4766,7 @@ function buildMiningRockEntities(instance, siteEntity, populationHints, template
       dunObjectNameID: Math.max(0, toInt(rock.dunObjectNameID, 0)) || null,
       nameID: Math.max(0, toInt(rock.nameID, 0)) || undefined,
       objectiveTargetGroup: normalizeSlimNullableValue(rock.objectiveTargetGroup),
-      dunPosition: [contentOffset.x, contentOffset.y, contentOffset.z],
+      dunPosition: nativeRockPosition ? [...nativeRockPosition] : [contentOffset.x, contentOffset.y, contentOffset.z],
       dunRotation: Array.isArray(rock.dunRotation) ? rock.dunRotation : undefined,
       itemName: "",
       slimName: "",
@@ -4716,6 +4786,7 @@ function buildMiningRockEntities(instance, siteEntity, populationHints, template
         ? Math.max(1, rock.quantity * toFiniteNumber(oreRecord.radius, 1) / 10)
         : Math.max(500, toFiniteNumber(shellRecord.radius, toFiniteNumber(oreRecord.radius, 0)))) || 900,
       staticVisibilityScope: "bubble",
+      ...exactWireFields(rock.exactWire),
     }, instance);
   }).filter(Boolean);
 }
@@ -4754,6 +4825,11 @@ function listMiningObjectiveRockDescriptors(instance, populationHints) {
     ...rock,
     entityID: miningRockEntityID(siteID, index + 1, rock),
   }));
+}
+
+// A captured object's dunRotation or dunPosition: three numbers, or null.
+function dunTriple(value) {
+  return Array.isArray(value) && value.length === 3 ? value.map((entry) => toFiniteNumber(entry, 0)) : null;
 }
 
 function buildContainerEntities(instance, siteEntity, populationHints, template = null) {
@@ -4795,6 +4871,10 @@ function buildContainerEntities(instance, siteEntity, populationHints, template 
           : null,
         roomKey: normalizeText(container && container.roomKey, "") || null,
         dunObjectID: Math.max(0, toInt(container && (container.dunObjectID ?? container.objectID), 0)) || null,
+        // The captured object's facing and dungeon position, which its slim item carries (the AIR
+        // retrieval wrecks). Without a dunRotation the client draws every container the same way.
+        dunRotation: dunTriple(container && container.dunRotation),
+        dunPosition: dunTriple(container && container.dunPosition),
         bonus: container && container.bonus === true,
         persistsAfterResponse: container && container.persistsAfterResponse === true,
         failureExplodes: container && container.failureExplodes === true,
@@ -4818,6 +4898,7 @@ function buildContainerEntities(instance, siteEntity, populationHints, template 
           }))
           .filter((entry) => entry.typeID > 0),
         ordinal: index + 1,
+        exactWire: container && container.exactWire,
       }));
     })
     .slice(0, containerLimit);
@@ -4869,10 +4950,12 @@ function buildContainerEntities(instance, siteEntity, populationHints, template 
       groupID: toInt(typeRecord && typeRecord.groupID, 12) || 12,
       categoryID: toInt(typeRecord && typeRecord.categoryID, 2) || 2,
       graphicID: toInt(typeRecord && typeRecord.graphicID, 0) || null,
-      ownerID: 1,
+      ownerID: bloodStainedStarsRuntime.contract(roomTemplate) && container.role === "mission_delivery" ? 500021 : 1,
       itemName: displayName,
       slimName: displayName,
       dungeonSourceObjectID: container.dunObjectID,
+      ...(container.dunRotation ? { dunRotation: container.dunRotation } : {}),
+      ...(container.dunPosition ? { dunPosition: container.dunPosition } : {}),
       // A container keyed to a deeper pocket (the exploration tour's Exploration Supplies, in its
       // supply area) stands at that pocket's anchor, as props and gates do; its offset is
       // relative to the room.
@@ -4886,6 +4969,7 @@ function buildContainerEntities(instance, siteEntity, populationHints, template 
       direction: { x: 1, y: 0, z: 0 },
       radius: Math.max(200, toFiniteNumber(typeRecord && typeRecord.radius, 14)),
       staticVisibilityScope: "bubble",
+      ...(container.exactWire ? { exactWire: container.exactWire } : {}),
     };
   });
 }
@@ -4999,30 +5083,52 @@ function materializeEncounterRewardContainers(scene, instance, siteEntity, templ
   return createdCount;
 }
 
-// container_on_trigger_kill: once maybeGrantFetchObjectiveItems has armed the fetch container on the
-// trigger kill (spawnState.fetchObjectiveContainerTriggeredAtMs), materialize one real Cargo Container
-// holding the objective item at the recorded kill position for the player to loot. One-shot.
+// Fetch containers hold real inventory for manual pickup. Trigger-kill containers wait for the kill;
+// container_at_object places the crate at the authored mission object as soon as the site loads.
 function materializeFetchObjectiveContainer(scene, instance, siteEntity, template, populationHints, options = {}) {
   if (!scene || !instance || !siteEntity) {
     return 0;
   }
   const fetchObjective = normalizeFetchObjectiveHints(populationHints);
-  if (!fetchObjective || fetchObjective.mechanic !== "container_on_trigger_kill") {
+  if (!fetchObjective || !["container_on_trigger_kill", "container_at_object"].includes(fetchObjective.mechanic)) {
     return 0;
   }
-  const spawnState = normalizeObject(instance.spawnState);
-  if (Math.max(0, toInt(spawnState.fetchObjectiveContainerTriggeredAtMs, 0)) <= 0) {
+  const atObject = fetchObjective.mechanic === "container_at_object";
+  const latestInstance = dungeonRuntime.getInstance(instance.instanceID) || instance;
+  const spawnState = normalizeObject(latestInstance.spawnState);
+  if (!atObject && Math.max(0, toInt(spawnState.fetchObjectiveContainerTriggeredAtMs, 0)) <= 0) {
     return 0;
   }
-  if (Math.max(0, toInt(spawnState.fetchObjectiveContainerMaterializedAtMs, 0)) > 0) {
+  const materializedAtMs = Math.max(0, toInt(spawnState.fetchObjectiveContainerMaterializedAtMs, 0));
+  if (materializedAtMs > 0) {
+    if (atObject && Math.max(0, toInt(latestInstance.objectiveSatisfiedAtMs, 0)) <= 0) {
+      // Older attempts may have published the container before an objective write failed.
+      dungeonRuntime.markInstanceObjectiveSatisfied(instance.instanceID, {
+        nowMs: materializedAtMs,
+        reason: "fetch_objective_container_materialized",
+      });
+      dungeonRuntime.mergeSpawnState(instance.instanceID, {
+        fetchObjectiveContainerMaterializedAtMs: materializedAtMs,
+      }, { nowMs: options.nowMs, durable: true });
+    }
     return 0;
   }
   const nowMs = Math.max(0, toInt(options.nowMs, Date.now()));
   const siteID = Math.max(0, toInt(siteEntity && siteEntity.itemID, 0));
   const typeRecord = resolveGenericContainerTypeRecord() || resolveItemByTypeID(23) || {};
-  const dropPosition =
-    clonePosition(spawnState.fetchObjectiveContainerPosition) ||
-    addVectors(clonePosition(siteEntity.position), buildContentOffset(`${siteID}:fetch_container`, 0, 1));
+  let dropPosition;
+  if (atObject) {
+    [dropPosition] = resolveFetchObjectiveTriggerPositions(
+      scene, latestInstance, siteEntity, populationHints, fetchObjective.triggerEntity,
+    );
+  } else {
+    dropPosition = spawnState.fetchObjectiveContainerPosition
+      ? clonePosition(spawnState.fetchObjectiveContainerPosition)
+      : addVectors(clonePosition(siteEntity.position), buildContentOffset(`${siteID}:fetch_container`, 0, 1));
+  }
+  if (!dropPosition) {
+    return 0;
+  }
   const label = normalizeText(typeRecord && typeRecord.typeName, "Cargo Container");
   const containerEntity = {
     kind: "container",
@@ -5036,7 +5142,7 @@ function materializeFetchObjectiveContainer(scene, instance, siteEntity, templat
     dungeonSiteContentBonus: false,
     dungeonSiteContentFailureExplodes: false,
     dungeonSiteContentPersistsAfterResponse: true,
-    dungeonSiteContentTrigger: "trigger_kill",
+    dungeonSiteContentTrigger: atObject ? "on_load" : "trigger_kill",
     dungeonSiteContentLootProfile: null,
     dungeonSiteContentExplicitLoot: [
       { typeID: fetchObjective.typeID, quantity: fetchObjective.quantity },
@@ -5059,19 +5165,27 @@ function materializeFetchObjectiveContainer(scene, instance, siteEntity, templat
   };
   const created = materializeContainerEntity(
     scene,
-    instance,
+    latestInstance,
     siteEntity,
     template,
     populationHints,
     containerEntity,
-    { nowMs, broadcast: true },
+    { ...options, nowMs, broadcast: options.broadcast !== false },
   );
   if (!created) {
     return 0;
   }
+  if (atObject) {
+    // As with a trigger-kill container, turn-in still requires the actual item in the runner's cargo.
+    dungeonRuntime.markInstanceObjectiveSatisfied(instance.instanceID, {
+      nowMs,
+      reason: "fetch_objective_container_materialized",
+    });
+  }
+  // Publish the guard last so a refused objective write remains retryable.
   dungeonRuntime.mergeSpawnState(instance.instanceID, {
     fetchObjectiveContainerMaterializedAtMs: nowMs,
-  });
+  }, { nowMs, durable: atObject });
   return 1;
 }
 
@@ -5150,7 +5264,7 @@ function isDataRelicUniverseSignatureInstance(instance) {
   if (siteKind === "signature" && CONTAINER_COMPLETION_SITE_FAMILIES.has(siteFamily)) {
     return true;
   }
-  const template = dungeonAuthority.getTemplateByID(instance.templateID);
+  const template = dungeonAuthority.getTemplateByIDReadOnly(instance.templateID);
   if (siteFamily === "combat" && template?.hackingCombatSite === true) return true;
   if (siteKind !== "signature") return false;
   const completion = normalizeCompletionHints(resolvePopulationHints(instance, template));
@@ -5648,6 +5762,7 @@ function materializeContainerEntity(scene, instance, siteEntity, template, popul
     return false;
   }
   const nowMs = Math.max(0, toInt(options.nowMs, Date.now()));
+  if (!bloodStainedStarsRuntime.canMaterializeContainer(instance, template, containerEntity)) return false;
   const contentKey = normalizeText(containerEntity && containerEntity.dungeonSiteContentKey, "");
   const latestInstance = dungeonRuntime.getInstance(instance.instanceID) || instance;
   if (require("./missionSalvage").suppressMaterialization(latestInstance, contentKey, { scene, nowMs })) return false;
@@ -5693,9 +5808,11 @@ function materializeContainerEntity(scene, instance, siteEntity, template, popul
     // Required mission cargo must retain its hull and loot across spawn retries.
     // Preserve existing rescue receipts; fetch cargo gets its own namespace.
     const missionRole = containerEntity.dungeonSiteContentRole;
-    const receiptPrefix = {
+    const receiptPrefix = bloodStainedStarsRuntime.contract(template) && ["mission_delivery", "objective"].includes(missionRole)
+      ? `blood-stained-stars-${missionRole}` : {
       mission_rescue: "rescue-content",
       mission_fetch: "fetch-content",
+      fetch_objective: "fetch-content",
       incursion_mtac_factory: "incursion-factory-content",
       void_relic: "void-relic-content",
     }[missionRole];
@@ -5798,7 +5915,7 @@ function materializeContainerEntity(scene, instance, siteEntity, template, popul
       return false;
     }
     const createResult = grantContainerItems(
-      SITE_CONTENT_OWNER_ID,
+      bloodStainedStarsRuntime.contract(template) && containerEntity.dungeonSiteContentRole === "mission_delivery" ? 500021 : SITE_CONTENT_OWNER_ID,
       scene.systemID,
       0,
       [{
@@ -6081,7 +6198,8 @@ function buildGateEntities(instance, siteEntity, template) {
   if (siteFamily === "ore" && siteKind === "anomaly") {
     return [];
   }
-  if (!isMissionLikeSiteInstance(instance, template) && !(sceneProfile && sceneProfile.exactClientContent === true)) {
+  if (!isMissionLikeSiteInstance(instance, template) && !(sceneProfile && sceneProfile.exactClientContent === true) &&
+      template?.observatoryFlashpoint !== true) {
     return [];
   }
   const rawGateProfiles = normalizeArray(sceneProfile && sceneProfile.gateProfiles)
@@ -6482,6 +6600,7 @@ function buildEnvironmentEntities(instance, siteEntity, template, populationHint
       destinyCollisionTail: environmentProp && environmentProp.destinyCollisionTail,
       destinyCollisionTailSource:
         environmentProp && environmentProp.destinyCollisionTailSource,
+      exactWire: environmentProp && environmentProp.exactWire,
     });
   }
 
@@ -6586,6 +6705,7 @@ function buildEnvironmentEntities(instance, siteEntity, template, populationHint
       conditionState: cloneValue(healthState.conditionState),
       staticVisibilityScope: candidate.staticVisibilityScope || "bubble",
       ...destinyPresentation,
+      ...exactWireFields(candidate.exactWire),
     };
   }).filter((entity) => populationHints?.nativeObjectLifecycle?.version !== 1 ||
     !entity.nativeTriggerSpawn || normalizeIDList(instance.spawnState?.activatedNativeObjectIDs).includes(entity.dunObjectID));
@@ -7167,7 +7287,8 @@ function buildKillableStructureEntity(instance, siteEntity, encounterPlan, spawn
     position: addVectors(anchorPosition, contentOffset),
     velocity: { x: 0, y: 0, z: 0 },
     direction: { x: 1, y: 0, z: 0 },
-    radius: Math.max(250, toFiniteNumber(typeRecord && typeRecord.radius, 1_000)),
+    radius: fracturedLegacyRuntime.structureRadius(instance, context.template, spawnEntry) ??
+      Math.max(250, toFiniteNumber(typeRecord && typeRecord.radius, 1_000)),
     shieldCapacity: healthState.shieldCapacity,
     armorHP: healthState.armorHP,
     structureHP: healthState.structureHP,
@@ -7184,6 +7305,7 @@ function spawnEncounterKillableStructures(scene, instance, siteEntity, encounter
     const spawnEntry = spawnEntries[index];
     if (!fracturedLegacyRuntime.canMaterializeStructure(instance, template, spawnEntry)) continue;
     const entity = buildKillableStructureEntity(instance, siteEntity, encounterPlan, spawnEntry, {
+      template,
       itemID: allocateKillableStructureEntityID(scene, siteEntity && siteEntity.itemID),
       anchorPosition: options.anchorPosition,
       index,
@@ -7302,6 +7424,13 @@ function armDeferredEncounterPlans(instance, populationHints, options = {}) {
   const nowMs = Math.max(0, toInt(options.nowMs, Date.now()));
   const ghostTimerPhaseSpec = resolveGhostTimerPhaseSpec(populationHints);
   let armedCount = 0;
+  // Every site runs this each tick. Copy the template only for a Blood-Stained
+  // Stars site: one copy of a large mission template takes milliseconds.
+  const template = dungeonAuthority.getTemplateByIDReadOnly(instance.templateID)
+    ?.populationHints?.bloodStainedStars
+    ? dungeonAuthority.getTemplateByID(instance.templateID)
+    : null;
+  const bloodPolicy = bloodStainedStarsRuntime.contract(template);
   for (const plan of resolveEncounterPlans(populationHints)) {
     // Both visible_countdown (UI timer) and timer (silent delay) arm at site load and fire after
     // their elapsed time; arm them here so the tick can spawn them when due.
@@ -7315,7 +7444,12 @@ function armDeferredEncounterPlans(instance, populationHints, options = {}) {
     // pocket; room auto-activation on previous-room-clear must not start the clock early).
     // A room with no other waves falls back to arming when the room itself activates.
     const planRoomKey = resolveEncounterRoomKey(instance, populationHints, plan);
-    if (planRoomKey) {
+    const capturedActionArmed = (bloodPolicy?.delivery?.gatedEncounterKeys?.includes(plan.key) ||
+      bloodPolicy?.objectiveAcquiredEncounterKeys?.includes(plan.key)) &&
+      bloodStainedStarsRuntime.canSpawnEncounter(instance, template, plan);
+    // The ransom ambush begins combat in this room. Its real delivery receipt
+    // supplies the start anchor; waiting for a later kill wave would deadlock.
+    if (planRoomKey && !capturedActionArmed) {
       const planKey = normalizeText(plan.key, "");
       const siblingRoomPlans = resolveEncounterPlans(populationHints).filter((other) => (
         normalizeText(other && other.key, "") !== planKey &&
@@ -7497,7 +7631,7 @@ function spawnEncounterPlan(scene, instance, siteEntity, encounterPlan, options 
   // The captured Visions plans consist of exact native NPC entries. Publish a
   // group only after every entry and its initial health are materialized; an
   // incomplete attempt must not count as a smaller, easier encounter.
-  const atomicVisionsSpawn = Boolean((visionsSceneRuntime.contract(template) || fracturedLegacyRuntime.contract(template) ||
+  const atomicVisionsSpawn = Boolean((requiredPlan || visionsSceneRuntime.contract(template) || fracturedLegacyRuntime.contract(template) ||
       require("../incursion/incursionAdmission").isTemplate(template) ||
       template?._contentPack?.id === "evejs.career-agents" || template?.populationHints?.source === "career_agents") &&
     identitySpawnEntries.length > 0 && structureSpawnEntries.length === 0);
@@ -7592,22 +7726,26 @@ function spawnEncounterPlan(scene, instance, siteEntity, encounterPlan, options 
         behaviorOverrides: require("../incursion/incursionFriendlyActors").spawnOverrides(instance, entry) ||
           (entry && entry.passive === true ? cloneValue(PASSIVE_SITE_NPC_BEHAVIOR) : undefined) ||
           ((template?.securityMission && template.requiresMechanics?.includes("security-mission-native-npc-behavior-v1") ||
-          visionsSceneRuntime.contract(template) || fracturedLegacyRuntime.contract(template) || careerLessonRuntime.contract(template)) &&
+          visionsSceneRuntime.contract(template) || fracturedLegacyRuntime.contract(template) || bloodStainedStarsRuntime.contract(template) || careerLessonRuntime.contract(template)) &&
           entry.behaviorOverrides ? cloneValue(entry.behaviorOverrides) : undefined),
         // The layout's owner, for a profile without one (the career agents' rookies): without an
         // NPC owner the client's mission tracker does not count them as hostiles ("Hostiles
         // remaining") and points to the locked gate instead.
         fallbackOwnerID: Math.max(0, toInt(entry && entry.ownerID, 0)) || undefined,
+        ownerIDOverride: bloodStainedStarsRuntime.contract(template)
+          ? Math.max(0, toInt(entry.ownerID, 0)) || undefined : undefined,
         anchorName: `${normalizeText(siteEntity && siteEntity.itemName, "Site")} ${normalizeText(entry.label || encounterPlan.label, "Encounter")}`,
         runtimeKind: "nativeCombat",
         // An NPC that is one of the objective targets carries its entry's key, as a structure
         // does, so that its death counts for that target and not by its name.
         entityScopeMetadata: isObjectiveTargetSpawnEntry(entry, encounterPlan, completion) && normalizeText(entry.key, "")
           ? { ...encounterScopeMetadata,
+              ...(bloodStainedStarsRuntime.contract(template) ? { dungeonSpawnEntryKey: normalizeText(entry.key, "") } : {}),
               ...(requiredActor ? { dungeonSiteContentRole: requiredActorPolicy.PREPARING_ROLE } : {}),
               ...(atomicVisionsSpawn || identifyFetchEntries ? { dungeonSiteContentKey: normalizeText(entry.key, "") } : {}),
               dungeonObjectiveTargetKey: normalizeText(entry.key, "") }
           : { ...encounterScopeMetadata,
+              ...(bloodStainedStarsRuntime.contract(template) ? { dungeonSpawnEntryKey: normalizeText(entry.key, "") } : {}),
               ...(requiredActor ? { dungeonSiteContentRole: requiredActorPolicy.PREPARING_ROLE } : {}),
               ...(atomicVisionsSpawn || identifyFetchEntries ? { dungeonSiteContentKey: normalizeText(entry.key, "") } : {}) },
         broadcast: atomicVisionsSpawn ? false : options.broadcast !== false,
@@ -7628,7 +7766,7 @@ function spawnEncounterPlan(scene, instance, siteEntity, encounterPlan, options 
       }
       if (singleSpawn && singleSpawn.success && singleSpawn.data && Array.isArray(singleSpawn.data.spawned)) {
         for (const spawned of singleSpawn.data.spawned) {
-          if (fracturedLegacyRuntime.contract(template) && typeof entry.blocksEncounterProgress === "boolean") {
+          if ((fracturedLegacyRuntime.contract(template) || bloodStainedStarsRuntime.contract(template)) && typeof entry.blocksEncounterProgress === "boolean") {
             spawned.encounterProgressBlocker = entry.blocksEncounterProgress;
             spawned.entity.dungeonEncounterBlocksProgress = entry.blocksEncounterProgress;
           }
@@ -7917,7 +8055,7 @@ function spawnEncounterPlan(scene, instance, siteEntity, encounterPlan, options 
 // rollback can therefore never delete a previously published survivor.
 function repairCareerEncounterMembership(scene, instance, siteEntity, plan, options = {}) {
   if (!isActiveLifecycleState(instance.lifecycleState || "active")) return true;
-  const template = options.template || dungeonAuthority.getTemplateByID(instance.templateID);
+  const template = options.template || dungeonAuthority.getTemplateByIDReadOnly(instance.templateID);
   const required = requiredActorPolicy.declarations(instance, template, options.populationHints ?? resolvePopulationHints(instance, template))
     .filter(row => row.recoverMembership && row.planKey === plan.key);
   if (required.length) {
@@ -7940,7 +8078,7 @@ function repairCareerEncounterMembership(scene, instance, siteEntity, plan, opti
     spawnEncounterPlan(scene, latest, siteEntity, { ...plan, spawnEntries: missing,
       amount: missing.length, maxSpawnEntries: missing.length },
     { ...options, membershipRepair: true, requiredMembershipRepair: true });
-    const repaired = getEncounterStateByKey(dungeonRuntime.getInstance(instance.instanceID) || latest, plan.key);
+    const repaired = getEncounterStateByKey(dungeonRuntime.getInstanceReadOnly(instance.instanceID) || latest, plan.key);
     return repaired.spawnCount === required.length;
   }
   if (template?._contentPack?.id !== "evejs.career-agents" && template?.populationHints?.source !== "career_agents") return true;
@@ -8033,14 +8171,18 @@ function processEncounterPlansForTrigger(scene, instance, siteEntity, population
   }
   const nowMs = Math.max(0, toInt(options.nowMs, Date.now()));
   let encountersSpawned = 0;
-  // Playerbots add-on: these read-only checks share one template copy per
-  // call instead of copying the template three times for every plan.
-  const spawnCheckTemplate = dungeonAuthority.getTemplateByID(instance.templateID);
+  // The spawn checks only read the template: one shared frozen view, not a full
+  // copy per check per plan.
+  const templateView = dungeonAuthority.getTemplateByIDReadOnly(instance.templateID);
   for (const plan of triggeredPlans) {
     if (!require("../incursion/incursionHooks").canSpawnEncounter(instance,
-      spawnCheckTemplate, plan, { siteTickReconciled: options.siteTickReconciled })) continue;
-    if (!visionsSceneRuntime.canSpawnEncounter(instance, spawnCheckTemplate, plan)) continue;
-    if (!fracturedLegacyRuntime.canSpawnEncounter(instance, spawnCheckTemplate, plan)) continue;
+      templateView, plan, { siteTickReconciled: options.siteTickReconciled })) continue;
+    if (!visionsSceneRuntime.canSpawnEncounter(instance, templateView, plan)) continue;
+    if (!fracturedLegacyRuntime.canSpawnEncounter(instance, templateView, plan)) continue;
+    if (!bloodStainedStarsRuntime.canSpawnEncounter(instance, templateView, plan)) continue;
+    if (normalizedTrigger === "blood_stained_stars_delivery" && !bloodStainedStarsRemainingRuntime.deliveryEncounterReady(
+      instance, templateView, plan, nowMs,
+    )) continue;
     if (normalizedTrigger === "mining") {
       const paid = readPaidMissionMiningTrigger(instance, populationHints);
       if (!paid || nowMs < paid.armedAtMs + Math.max(0, toInt(plan.delaySeconds, 0)) * 1000) continue;
@@ -8210,7 +8352,7 @@ function maybeAdvanceEncounterDrivenProgression(instance, populationHints, optio
     }
     const roomState = workingInstance.roomStatesByKey && workingInstance.roomStatesByKey[roomKey];
     const roomSettled = roomPlans.every((plan) => settledPlansByKey[plan.key] === true) &&
-      visionsSceneRuntime.roomReady(workingInstance, dungeonAuthority.getTemplateByID(instance.templateID), roomKey);
+      visionsSceneRuntime.roomReady(workingInstance, dungeonAuthority.getTemplateByIDReadOnly(instance.templateID), roomKey);
     if (!roomSettled) {
       return;
     }
@@ -8831,6 +8973,12 @@ function applyTriggeredSiteEffects(scene, instance, siteEntity, populationHints,
 function resolveProximityTargetPosition(siteEntity, populationHints, targetKey, scene = null, instance = null) {
   const siteCenter = siteEntity && siteEntity.position ? clonePosition(siteEntity.position) : null;
   const key = normalizeText(targetKey, "");
+  if (key === "fetch_objective") {
+    const fetchObjective = normalizeFetchObjectiveHints(populationHints);
+    return fetchObjective
+      ? resolveFetchObjectiveTriggerPositions(scene, instance, siteEntity, populationHints, fetchObjective.triggerEntity)[0] || null
+      : null;
+  }
   if (key && siteCenter) {
     const instanceID = Math.max(0, toInt(instance && instance.instanceID, 0));
     if (scene && instanceID > 0) {
@@ -9421,10 +9569,11 @@ function isDungeonInstanceObjectiveCompleted(instance) {
   );
 }
 
-// A pilot has landed in a room of the site. Its on_room_entered waves fire, the site's progression
-// is settled at once (a site done on landing completes now, not on the next scene tick), and the
-// mission's tracker state is sent to the client. That has to reach the client while it is still
-// in the warp into the room: the client's mission graphs show the new step when that warp ends
+// A pilot has entered a room of the site (a warp's grid acquisition of the room, else the landing).
+// Its on_room_entered waves fire, the site's progression is settled at once (a site done on arrival
+// completes now, not on the next scene tick), and the mission's tracker state is sent to the client
+// (a ship in the warp into the mission's room counts as in the site). That has to reach the client
+// while it is still in the warp into the room: the client's mission graphs show the new step when that warp ends
 // (Explorer part 2, graph 603: "go to gate" arms a Warp Finished step that shows the gate). The
 // client's own request after the warp would arm it only for the next warp, the gate's.
 function enterSiteRoom(scene, instance, roomKey, options = {}) {
@@ -9584,7 +9733,11 @@ function notifyVisionsModuleCycle(scene, source, target, event) {
   }
 }
 
+// The incursion owner settles each site once per pass (see its sitePass).
 function tickSceneSiteBehaviors(scene, options = {}) {
+  return require("../incursion/incursionHooks").sitePass(() => tickSceneSiteBehaviorsInPass(scene, options));
+}
+function tickSceneSiteBehaviorsInPass(scene, options = {}) {
   if (!scene) {
     return {
       armedCount: 0,
@@ -9634,7 +9787,14 @@ function tickSceneSiteBehaviors(scene, options = {}) {
   for (const instance of instances) {
     const hazardRecovery = require("./siteHazardOutcomes").replayPendingSiteHazardDamage(instance, { scene, nowMs });
     if (!hazardRecovery.success) continue;
-    const template = dungeonAuthority.getTemplateByID(instance.templateID);
+    const flashpoint = require("../observatoryFlashpoint/flashpointHooks");
+    if (flashpoint.isSite(instance)) {
+      try { flashpoint.tick(scene, instance, nowMs); }
+      catch (error) { log.warn(`[Flashpoint] Encounter settlement deferred: ${error.stack || error.message}`); }
+      continue;
+    }
+    // Read-only for the whole pass: the authority's shared frozen view.
+    const template = dungeonAuthority.getTemplateByIDReadOnly(instance.templateID);
     const populationHints = resolvePopulationHints(instance, template);
     try {
       require("../incursion/incursionHooks").tick(scene, instance, template, nowMs);
@@ -9643,12 +9803,12 @@ function tickSceneSiteBehaviors(scene, options = {}) {
         // Conditional/timed stages can become eligible after room entry.
         // Spawn pending plans here. The membership pass below already checks
         // spawned plans and recovers any missing members.
-        const current = dungeonRuntime.getInstance(instance.instanceID) || instance;
+        const current = dungeonRuntime.getInstanceReadOnly(instance.instanceID) || instance;
         const site = scene.getEntityByID?.(instance.metadata?.siteID) || buildSiteEntity(current);
         if (site) for (const roomKey of policy.roomKeys) encountersSpawned += processEncounterPlansForTrigger(
           scene, current, site, resolvePopulationHints(current, template), "on_room_active",
           { nowMs, roomKey, retryUnspawnedOnly: true, siteTickReconciled: true });
-        const refreshed = dungeonRuntime.getInstance(instance.instanceID) || current;
+        const refreshed = dungeonRuntime.getInstanceReadOnly(instance.instanceID) || current;
         if (site) {
           // Gate predicates can change after either branch's combat outcome.
           // Publish the committed gate variant to observers already in the room;
@@ -9679,8 +9839,8 @@ function tickSceneSiteBehaviors(scene, options = {}) {
       continue;
     }
     try {
-      if (require("./visionsCaldariRuntime").tick(scene, dungeonRuntime.getInstance(instance.instanceID) || instance, template, nowMs)) {
-        const current = dungeonRuntime.getInstance(instance.instanceID);
+      if (require("./visionsCaldariRuntime").tick(scene, dungeonRuntime.getInstanceReadOnly(instance.instanceID) || instance, template, nowMs)) {
+        const current = dungeonRuntime.getInstanceReadOnly(instance.instanceID);
         const ship = [...(scene.sessions?.values() || [])].map(session => scene.getShipEntityForSession?.(session))
           .find(entity => Number(entity?.dungeonCurrentInstanceID) === Number(instance.instanceID));
         // Deferred native spawn cues are retried through the existing encounter
@@ -9698,7 +9858,7 @@ function tickSceneSiteBehaviors(scene, options = {}) {
       dungeonRuntime.mergeSpawnState(instance.instanceID, { visionsOfGreatness: visionsProgress }, { nowMs, durable: true, force: true });
     }
     if (visionsSceneRuntime.contract(template)) {
-      try { visionsSceneRuntime.tick(scene, dungeonRuntime.getInstance(instance.instanceID) || instance, template, nowMs); }
+      try { visionsSceneRuntime.tick(scene, dungeonRuntime.getInstanceReadOnly(instance.instanceID) || instance, template, nowMs); }
       catch (error) {
         log.warn(`[DungeonSites] Visions scene actions deferred: ${error.message}`);
         continue;
@@ -9767,6 +9927,23 @@ function tickSceneSiteBehaviors(scene, options = {}) {
         continue;
       }
     }
+    if (bloodStainedStarsRuntime.contract(template)) {
+      try {
+        if (instance.spawnState?.bloodFetchObjective && !require("./bloodStainedStarsFetch").isGranted(instance)) {
+          require("./bloodStainedStarsFetch").reconcile(instance, { nowMs });
+        }
+        bloodStainedStarsRuntime.tick(scene, instance, nowMs);
+      }
+      catch (error) {
+        log.warn(`[DungeonSites] Blood-Stained Stars progress deferred: ${error.message}`);
+        continue;
+      }
+    }
+    try { bloodStainedStarsRemainingRuntime.tick(scene, instance, nowMs); }
+    catch (error) {
+      log.warn(`[DungeonSites] Blood-Stained Stars progress deferred: ${error.message}`);
+      continue;
+    }
     // Recon has no NPC encounter plan: settle its canonical weather pulses
     // before the empty-encounters gate, on this existing scene tick only.
     try {
@@ -9780,7 +9957,7 @@ function tickSceneSiteBehaviors(scene, options = {}) {
     }
     // Mining objective runs before the encounter-plan gate so pure-mining sites (no NPCs) progress.
     processMiningObjective(scene, instance, populationHints, { nowMs });
-    processPaidMissionMiningObjective(scene, dungeonRuntime.getInstance(instance.instanceID) || instance,
+    processPaidMissionMiningObjective(scene, dungeonRuntime.getInstanceReadOnly(instance.instanceID) || instance,
       populationHints, { nowMs });
     if (scene.sessions instanceof Map) {
       for (const session of scene.sessions.values()) {
@@ -9790,14 +9967,14 @@ function tickSceneSiteBehaviors(scene, options = {}) {
       }
     }
     const refreshedForObjective =
-      dungeonRuntime.getInstance(instance.instanceID) || instance;
+      dungeonRuntime.getInstanceReadOnly(instance.instanceID) || instance;
     maybeAdvanceExplicitlySatisfiedObjective(refreshedForObjective, { nowMs });
     syncAgentMissionForCompletedDungeonObjective(
-      dungeonRuntime.getInstance(instance.instanceID) || refreshedForObjective,
+      dungeonRuntime.getInstanceReadOnly(instance.instanceID) || refreshedForObjective,
       { nowMs },
     );
     // A site guide's text for a container the pilot approaches (no player action to hook either).
-    dungeonTrackingRuntime.processGuideApproachTexts(scene, dungeonRuntime.getInstance(instance.instanceID) || instance);
+    dungeonTrackingRuntime.processGuideApproachTexts(scene, dungeonRuntime.getInstanceReadOnly(instance.instanceID) || instance);
     processGateDefenseHazards(scene, instance, populationHints, { nowMs });
     const plans = resolveEncounterPlans(populationHints);
     if (plans.length <= 0) {
@@ -9809,9 +9986,18 @@ function tickSceneSiteBehaviors(scene, options = {}) {
         scene.staticEntitiesByID.get(quietSiteID)
       ) || buildSiteEntity(instance);
       if (quietSiteEntity && isSceneSiteMaterialized(scene, quietSiteID)) {
+        fetchObjectiveGrants += processPendingFetchObjectiveGrant(instance, populationHints, { nowMs });
+        rewardContainersSpawned += materializeFetchObjectiveContainer(
+          scene,
+          dungeonRuntime.getInstanceReadOnly(instance.instanceID) || instance,
+          quietSiteEntity,
+          template,
+          populationHints,
+          { nowMs },
+        );
         fetchObjectiveGrants += processFetchObjectiveProximity(
           scene,
-          dungeonRuntime.getInstance(instance.instanceID) || instance,
+          dungeonRuntime.getInstanceReadOnly(instance.instanceID) || instance,
           quietSiteEntity,
           populationHints,
           { nowMs },
@@ -9824,7 +10010,7 @@ function tickSceneSiteBehaviors(scene, options = {}) {
         broadcast: true,
       });
       maybeCompleteClearedEncounterSite(
-        dungeonRuntime.getInstance(instance.instanceID) || instance,
+        dungeonRuntime.getInstanceReadOnly(instance.instanceID) || instance,
         populationHints,
         { nowMs, scene },
       );
@@ -9848,16 +10034,23 @@ function tickSceneSiteBehaviors(scene, options = {}) {
       siteEntity, plan, { nowMs, template, populationHints: membershipHints }))) continue;
     const progressResult = syncEncounterStateProgress(scene, instance, plans, { nowMs });
     encounterCompletions += Math.max(0, toInt(progressResult && progressResult.completedCount, 0));
+    if (bloodStainedStarsRuntime.contract(template)?.containerGates?.length) {
+      const current = dungeonRuntime.getInstanceReadOnly(instance.instanceID) || instance;
+      for (const container of buildContainerEntities(current, siteEntity, populationHints, template)) {
+        materializeContainerEntity(scene, current, siteEntity, template, populationHints, container, { nowMs, broadcast: true });
+      }
+    }
     armedCount += armDeferredEncounterPlans(instance, populationHints, { nowMs });
-    materializeDeferredGhostTimerHazards(scene, dungeonRuntime.getInstance(instance.instanceID) || instance,
+    materializeDeferredGhostTimerHazards(scene, dungeonRuntime.getInstanceReadOnly(instance.instanceID) || instance,
       siteEntity, populationHints, { nowMs });
     // Proximity-triggered encounters (e.g. "investigate the drone" ambushes) have no player action
     // to hook, so evaluate the player's distance to the target object every tick.
     encountersSpawned += processProximityEncounterTriggers(scene, instance, siteEntity, populationHints, { nowMs });
+    fetchObjectiveGrants += processPendingFetchObjectiveGrant(instance, populationHints, { nowMs });
     // Same for a proximity fetch pickup: reaching the mission object is the whole objective.
     fetchObjectiveGrants += processFetchObjectiveProximity(
       scene,
-      dungeonRuntime.getInstance(instance.instanceID) || instance,
+      dungeonRuntime.getInstanceReadOnly(instance.instanceID) || instance,
       siteEntity,
       populationHints,
       { nowMs },
@@ -9867,16 +10060,19 @@ function tickSceneSiteBehaviors(scene, options = {}) {
     // created. Retry the gated plans from those receipts, including after a
     // restart; already-spawned encounters retain their normal deduplication.
     const visionsHacks = visionsSceneRuntime.contract(template)?.hacks;
-    if (visionsHacks && visionsSceneRuntime.hacksComplete(dungeonRuntime.getInstance(instance.instanceID) || instance, template)) {
+    if (visionsHacks && visionsSceneRuntime.hacksComplete(dungeonRuntime.getInstanceReadOnly(instance.instanceID) || instance, template)) {
       encountersSpawned += processEncounterPlansForTrigger(scene,
-        dungeonRuntime.getInstance(instance.instanceID) || instance, siteEntity, populationHints,
+        dungeonRuntime.getInstanceReadOnly(instance.instanceID) || instance, siteEntity, populationHints,
         "container_hacked", { nowMs, hackedContainerDunObjectID: visionsHacks.dunObjectIDs[0] });
     }
     encountersSpawned += processMissionRescueObjective(scene,
-      dungeonRuntime.getInstance(instance.instanceID) || instance, siteEntity, populationHints, { nowMs });
+      dungeonRuntime.getInstanceReadOnly(instance.instanceID) || instance, siteEntity, populationHints, { nowMs });
+    encountersSpawned += processEncounterPlansForTrigger(scene,
+      dungeonRuntime.getInstanceReadOnly(instance.instanceID) || instance, siteEntity, populationHints,
+      "blood_stained_stars_delivery", { nowMs });
     encountersSpawned += processEncounterPlansForTrigger(scene, instance, siteEntity, populationHints, "timer", { nowMs });
     encountersSpawned += processEncounterPlansForTrigger(scene,
-      dungeonRuntime.getInstance(instance.instanceID) || instance, siteEntity, populationHints, "mining", { nowMs });
+      dungeonRuntime.getInstanceReadOnly(instance.instanceID) || instance, siteEntity, populationHints, "mining", { nowMs });
     const visibleCountdownDue = hasDueVisibleCountdownTrigger(instance, populationHints, { nowMs });
     const visibleCountdownEncounters = processEncounterPlansForTrigger(
       scene,
@@ -9906,7 +10102,7 @@ function tickSceneSiteBehaviors(scene, options = {}) {
         }, { nowMs, durable: true, force: true });
       }
     }
-    const latestInstance = dungeonRuntime.getInstance(instance.instanceID) || instance;
+    const latestInstance = dungeonRuntime.getInstanceReadOnly(instance.instanceID) || instance;
     syncEncounterStateProgress(scene, latestInstance, plans, { nowMs });
     // Kill-trigger waves: evaluated before wave_cleared, since their trigger ship dying is what
     // brings in the reinforcements that would otherwise have to clear first.
@@ -9918,7 +10114,7 @@ function tickSceneSiteBehaviors(scene, options = {}) {
       "entity_killed",
       { nowMs },
     );
-    const afterEntityKilled = dungeonRuntime.getInstance(instance.instanceID) || latestInstance;
+    const afterEntityKilled = dungeonRuntime.getInstanceReadOnly(instance.instanceID) || latestInstance;
     syncEncounterStateProgress(scene, afterEntityKilled, plans, { nowMs });
     encountersSpawned += processEncounterPlansForTrigger(
       scene,
@@ -9928,10 +10124,10 @@ function tickSceneSiteBehaviors(scene, options = {}) {
       "wave_cleared",
       { nowMs },
     );
-    const afterWaveClear = dungeonRuntime.getInstance(instance.instanceID) || afterEntityKilled;
+    const afterWaveClear = dungeonRuntime.getInstanceReadOnly(instance.instanceID) || afterEntityKilled;
     syncEncounterStateProgress(scene, afterWaveClear, plans, { nowMs });
-    settleVisionsOutcomes(scene, dungeonRuntime.getInstance(instance.instanceID) || afterWaveClear, template, nowMs);
-    syncEncounterStateProgress(scene, dungeonRuntime.getInstance(instance.instanceID) || afterWaveClear, plans, { nowMs });
+    settleVisionsOutcomes(scene, dungeonRuntime.getInstanceReadOnly(instance.instanceID) || afterWaveClear, template, nowMs);
+    syncEncounterStateProgress(scene, dungeonRuntime.getInstanceReadOnly(instance.instanceID) || afterWaveClear, plans, { nowMs });
     encountersSpawned += processEncounterPlansForTrigger(
       scene,
       afterWaveClear,
@@ -9940,7 +10136,7 @@ function tickSceneSiteBehaviors(scene, options = {}) {
       "battleships_destroyed",
       { nowMs },
     );
-    const refreshedForRewards = dungeonRuntime.getInstance(instance.instanceID) || afterWaveClear;
+    const refreshedForRewards = dungeonRuntime.getInstanceReadOnly(instance.instanceID) || afterWaveClear;
     syncEncounterStateProgress(scene, refreshedForRewards, plans, { nowMs });
     rewardContainersSpawned += materializeEncounterRewardContainers(
       scene,
@@ -9952,19 +10148,19 @@ function tickSceneSiteBehaviors(scene, options = {}) {
     );
     rewardContainersSpawned += materializeFetchObjectiveContainer(
       scene,
-      dungeonRuntime.getInstance(instance.instanceID) || refreshedForRewards,
+      dungeonRuntime.getInstanceReadOnly(instance.instanceID) || refreshedForRewards,
       siteEntity,
       template,
       populationHints,
       { nowMs },
     );
-    const refreshedForProgression = dungeonRuntime.getInstance(instance.instanceID) || refreshedForRewards;
+    const refreshedForProgression = dungeonRuntime.getInstanceReadOnly(instance.instanceID) || refreshedForRewards;
     const progressionResult = maybeAdvanceEncounterDrivenProgression(
       refreshedForProgression,
       populationHints,
       { nowMs, scene },
     );
-    const refreshedForCompletion = dungeonRuntime.getInstance(instance.instanceID) || refreshedForRewards;
+    const refreshedForCompletion = dungeonRuntime.getInstanceReadOnly(instance.instanceID) || refreshedForRewards;
     publishClientWaveValues(scene, refreshedForCompletion, { template, plans });
     maybeCompleteClearedEncounterSite(
       refreshedForCompletion,
@@ -9978,7 +10174,7 @@ function tickSceneSiteBehaviors(scene, options = {}) {
       broadcast: true,
     });
     syncAgentMissionForCompletedDungeonObjective(
-      dungeonRuntime.getInstance(instance.instanceID) || refreshedForProgression,
+      dungeonRuntime.getInstanceReadOnly(instance.instanceID) || refreshedForProgression,
       { nowMs },
     );
     gatesUnlocked += Math.max(0, toInt(progressionResult && progressionResult.gatesUnlocked, 0));
@@ -10041,6 +10237,12 @@ function markDestroyedObjectiveTargets(matchingInstances, destroyedEntity, optio
     }
     const template = dungeonAuthority.getTemplateByID(instance.templateID);
     const populationHints = resolvePopulationHints(instance, template);
+    if (options.scene && require("./bloodStainedStarsShieldRuntime").tick(
+      options.scene, instance, template, nowMs, destroyedEntity,
+    )) {
+      markedCount += 1;
+      continue;
+    }
     if (!destroyedEntityMatchesObjectiveTarget(instance, destroyedEntity, populationHints)) {
       continue;
     }
@@ -10105,38 +10307,100 @@ function normalizeFetchObjectiveHints(populationHints) {
 // the grant. agentMissionRuntime still gates journal completion on the items reaching the agent.
 function grantFetchObjectiveItemsToMissionOwner(instance, fetchObjective, options = {}) {
   const nowMs = Math.max(0, toInt(options.nowMs, Date.now()));
+  const instanceID = Math.max(0, toInt(instance && instance.instanceID, 0));
   const ownership = normalizeObject(instance && instance.ownership);
   const characterID = Math.max(
     0,
     toInt(ownership.missionOwnerCharacterID, toInt(ownership.characterID, 0)),
   );
-  if (characterID <= 0) {
+  if (characterID <= 0 || instanceID <= 0) {
     return false;
   }
+  const capturedTemplate = dungeonAuthority.getTemplateByID(instance.templateID);
+  const capturedFetch = bloodStainedStarsRuntime.contract(capturedTemplate);
+  if (capturedFetch && options.reconcileOnly === true) return false;
+  const latest = dungeonRuntime.getInstance(instanceID) || instance;
+  const existingGrantedAtMs = Math.max(0, toInt(latest.spawnState?.fetchObjectiveGrantedAtMs, 0));
+  if (!capturedFetch && existingGrantedAtMs > 0) {
+    // Older runtimes recorded the successful inventory grant before satisfying
+    // the objective. That saved guard is sufficient to repair only the latter.
+    if (isSiteObjectiveExplicitlySatisfied(latest)) return false;
+    dungeonRuntime.markInstanceObjectiveSatisfied(instanceID, {
+      nowMs: existingGrantedAtMs, reason: "fetch_objective_grant_checkpoint_recovered",
+    });
+    dungeonRuntime.mergeSpawnState(instanceID, { fetchObjectiveGrantedAtMs: existingGrantedAtMs },
+      { nowMs, durable: true, force: true });
+    return true;
+  }
+  const inventory = require("../inventory/itemStore");
+  const receiptKey = `dungeon-fetch-objective:${instanceID}`;
+  let intent = latest.spawnState?.fetchObjectiveGrantIntent;
+  if (!capturedFetch && intent != null && (
+    intent.version !== 1 || intent.characterID !== characterID ||
+    intent.typeID !== fetchObjective.typeID || intent.quantity !== fetchObjective.quantity ||
+    intent.mechanic !== fetchObjective.mechanic || intent.receiptKey !== receiptKey ||
+    !Number.isSafeInteger(intent.shipID) || intent.shipID <= 0 ||
+    !Number.isFinite(intent.acceptedAtMs) || intent.acceptedAtMs <= 0
+  )) return false;
+  const prior = capturedFetch ? null : inventory.getIdempotentGrantReceipt(receiptKey, {
+    requireDurable: true, reconcileWriteRefusal: true,
+  });
+  if (prior && !prior.success) return false;
+  if (options.reconcileOnly === true && !intent && !prior?.found) return false;
   let shipItemID = 0;
-  try {
-    const characterState = require(path.join(__dirname, "../character/characterState"));
-    const activeShip = characterState.getActiveShipRecord(characterID);
-    shipItemID = Math.max(0, toInt(activeShip && activeShip.itemID, 0));
-  } catch (_error) {
-    shipItemID = 0;
+  if (prior && prior.found) {
+    // A retry after boarding another ship repairs the original grant's checkpoints.
+    // Keep its recorded destination so the receipt cannot become a second cargo grant.
+    shipItemID = Math.max(0, toInt(prior.data && prior.data.locationID, 0));
+    if (intent && intent.shipID !== shipItemID) return false;
+  } else if (!capturedFetch && intent) {
+    shipItemID = intent.shipID;
+  } else {
+    try {
+      const characterState = require(path.join(__dirname, "../character/characterState"));
+      const activeShip = characterState.getActiveShipRecord(characterID);
+      shipItemID = Math.max(0, toInt(activeShip && activeShip.itemID, 0));
+    } catch (_error) {
+      shipItemID = 0;
+    }
   }
   if (shipItemID <= 0) {
     return false;
   }
-  const grantResult = grantItemsToOwnerLocation(characterID, shipItemID, ITEM_FLAGS.CARGO_HOLD, [
+  if (capturedFetch) {
+    return require("./bloodStainedStarsFetch").accept(instance, shipItemID, { nowMs });
+  }
+  if (!prior.found) {
+    const hull = inventory.findItemById(shipItemID);
+    if (!hull || Number(hull.ownerID) !== characterID || Number(hull.categoryID) !== 6) return false;
+    if (!intent) {
+      // The validated kill/approach accepts one grant before touching inventory.
+      // Ticks resume this intent even after the destroyed entity has gone away.
+      intent = { version: 1, characterID, shipID: shipItemID,
+        typeID: fetchObjective.typeID, quantity: fetchObjective.quantity, mechanic: fetchObjective.mechanic,
+        receiptKey, acceptedAtMs: Math.max(1, nowMs),
+        reason: normalizeText(options.reason, "") || "fetch_objective_items_granted" };
+      dungeonRuntime.mergeSpawnState(instanceID, { fetchObjectiveGrantIntent: intent },
+        { nowMs, durable: true });
+    }
+  }
+  const grantResult = inventory.grantItemsToOwnerLocationIdempotent(characterID, shipItemID, ITEM_FLAGS.CARGO_HOLD, [
     { itemType: fetchObjective.typeID, quantity: fetchObjective.quantity },
-  ]);
-  if (!grantResult || grantResult.success !== true) {
+  ], { receiptKey, grantedAtMs: nowMs });
+  if (!grantResult || grantResult.success !== true || grantResult.durable !== true) {
     return false;
   }
-  dungeonRuntime.mergeSpawnState(instance.instanceID, {
-    fetchObjectiveGrantedAtMs: nowMs,
+  const grantedAtMs = Math.max(0, toInt(grantResult.receipt && grantResult.receipt.grantedAtMs, nowMs));
+  // Commit the one-shot guard last: an objective write refusal must remain retryable.
+  // Its durable boundary also flushes the objective update staged immediately before it.
+  dungeonRuntime.markInstanceObjectiveSatisfied(instanceID, {
+    nowMs: grantedAtMs,
+    reason: normalizeText(intent && intent.reason, "") || normalizeText(options.reason, "") || "fetch_objective_items_granted",
   });
-  dungeonRuntime.markInstanceObjectiveSatisfied(instance.instanceID, {
-    nowMs,
-    reason: normalizeText(options.reason, "") || "fetch_objective_items_granted",
-  });
+  dungeonRuntime.mergeSpawnState(instanceID, {
+    fetchObjectiveGrantedAtMs: grantedAtMs,
+    fetchObjectiveGrantIntent: null,
+  }, { nowMs, durable: true });
   try {
     const agentMissionRuntime = loadedMissionRuntime.getLoadedMissionRuntime();
     if (
@@ -10153,6 +10417,12 @@ function grantFetchObjectiveItemsToMissionOwner(instance, fetchObjective, option
     log.debug(`[DungeonSites] mission inventory notification for character ${characterID} failed: ${error && error.message}`);
   }
   return true;
+}
+
+function processPendingFetchObjectiveGrant(instance, populationHints, options = {}) {
+  const fetchObjective = normalizeFetchObjectiveHints(populationHints);
+  if (!fetchObjective || !["auto_cargo_on_trigger_kill", "auto_cargo_on_proximity"].includes(fetchObjective.mechanic)) return 0;
+  return grantFetchObjectiveItemsToMissionOwner(instance, fetchObjective, { ...options, reconcileOnly: true }) ? 1 : 0;
 }
 
 // TQ parity for trigger-kill fetch missions: destroying the trigger entity delivers the objective
@@ -10207,6 +10477,14 @@ function maybeGrantFetchObjectiveItems(matchingInstances, destroyedEntity, optio
       continue;
     }
     const trigger = fetchObjective.triggerEntity;
+    if (bloodStainedStarsRuntime.contract(template)) {
+      // Several captured waves reuse the same hull. Only the recorded actor
+      // in the recorded encounter can produce that mission's objective cargo.
+      const entryKey = normalizeText(trigger.spawnEntryKey, ""), waveKey = normalizeText(trigger.encounterKey, "");
+      if (!entryKey || !waveKey || Number(candidate.dungeonSiteInstanceID) !== Number(instance.instanceID) ||
+          normalizeText(candidate.dungeonSpawnEntryKey, "") !== entryKey ||
+          normalizeText(candidate.dungeonEncounterKey, "") !== `instance:${instance.instanceID}:${waveKey}`) continue;
+    }
     const hasTriggerIdentity =
       Math.max(0, toInt(trigger.typeID, 0)) > 0 ||
       Math.max(0, toInt(trigger.nameID || trigger.dunObjectNameID, 0)) > 0 ||
@@ -10351,6 +10629,7 @@ function handleEncounterEntityDestroyed(scene, entityOrID, options = {}) {
     destroyedEntity || { itemID: entityID },
     {
       nowMs: options.nowMs,
+      scene,
     },
   );
   const fetchObjectiveGrants = maybeGrantFetchObjectiveItems(
@@ -10739,6 +11018,15 @@ function materializeSiteContents(scene, instance, siteEntity, template, options 
     }
   }
 
+  containersSpawned += materializeFetchObjectiveContainer(
+    scene,
+    dungeonRuntime.getInstance(workingInstance.instanceID) || workingInstance,
+    siteEntity,
+    template,
+    populationHints,
+    options,
+  );
+
   return {
     containersSpawned,
     hazardsSpawned,
@@ -10822,8 +11110,11 @@ function ensureSiteContentsMaterialized(scene, instanceOrSite, options = {}) {
     session: options.session || null,
   });
   markSceneSiteMaterialized(scene, siteID, instance.instanceID);
+  if (require("../observatoryFlashpoint/flashpointHooks").isSite(instance))
+    require("../observatoryFlashpoint/flashpointHooks").restoreScene(scene, instance, options.nowMs ?? Date.now());
   if (options.session && options.markCurrentDungeonRoom === true) {
-    const entryRoomKey = require("../incursion/incursionAdmission").admittedPolicy(instance)?.lobbyRoomKey || "room:entry";
+    const entryRoomKey = require("../incursion/incursionAdmission").admittedPolicy(instance)?.lobbyRoomKey ||
+      (template?.observatoryFlashpoint ? template.entryRoomKey : "room:entry");
     dungeonTrackingRuntime.enterDungeonRoomForSession(scene, options.session, instance, entryRoomKey, {
       nowMs: options.nowMs,
       roomPosition: siteEntity.position,
@@ -10866,6 +11157,11 @@ function ensureSiteContentsMaterialized(scene, instanceOrSite, options = {}) {
   };
 }
 
+// The site key of an operation's instance: the pilot's own, or one for everyone (shared).
+function buildOperationSiteKey(operationKey, characterID, shared = false) {
+  return `operation:${shared ? "shared" : characterID}:${operationKey}`;
+}
+
 function spawnTemplateForSession(session, templateID, options = {}) {
   const requestedTemplateID = normalizeText(templateID, "");
   const normalizedTemplateID = /^\d+$/.test(requestedTemplateID)
@@ -10905,7 +11201,7 @@ function spawnTemplateForSession(session, templateID, options = {}) {
   const operationKey = shared ? options.sharedOperationKey : options.operationKey;
   const characterID = Math.max(0, toInt(session && session.characterID, 0));
   if (operationKey !== undefined && (!characterID || typeof operationKey !== "string" || !/^[a-zA-Z0-9:_-]{1,200}$/.test(operationKey))) return { success: false, errorMsg: "OPERATION_KEY_INVALID" };
-  const operationSiteKey = operationKey ? `operation:${shared ? "shared" : characterID}:${operationKey}` : null;
+  const operationSiteKey = operationKey ? buildOperationSiteKey(operationKey, characterID, shared) : null;
   if (operationKey) {
     const existing = dungeonRuntime.findInstanceBySiteKey(operationSiteKey, { full: true });
     if (existing) {
@@ -11280,7 +11576,11 @@ function listStoredDungeonNativeWreckIDs(
   nativeControllerEntityIDs,
 ) {
   const nativeWreckIDs = new Set();
-  for (const wreckRecord of getNativeNpcStore().listNativeWrecks()) {
+  // Only a wreck in this system can match (wreckSystemMatches below), so copy
+  // only this system's wrecks instead of every stored wreck in the universe.
+  for (const wreckRecord of getNativeNpcStore().listNativeWrecksMatching((row) => (
+    entityIDsEqual(row.systemID, systemID)
+  ))) {
     const wreckSystemMatches = entityIDsEqual(
       wreckRecord && wreckRecord.systemID,
       systemID,
@@ -11388,6 +11688,13 @@ function listStoredDungeonInventoryItemIDs(
   );
 }
 
+function isPersistentFlashpointLoot(item) {
+  try {
+    const marker = JSON.parse(item?.customInfo || "null")?.evejsObservatoryFlashpointLoot;
+    return Number(marker?.instanceID) > 0 && ["dread", "observatory", "cache"].includes(marker.key);
+  } catch (_) { return false; }
+}
+
 function removeStoredDungeonSiteContent(systemID, options = {}) {
   const normalizedSystemID = normalizeCleanupIdentity(systemID);
   const siteID = normalizeCleanupIdentity(options.siteID);
@@ -11414,7 +11721,7 @@ function removeStoredDungeonSiteContent(systemID, options = {}) {
   );
   for (const itemID of inventoryItemIDs) {
     const item = findItemById(itemID);
-    if (item && Number(item.groupID) === 186 && item.spaceState?.homefrontRole !== "artifactCacheWreck") {
+    if (isPersistentFlashpointLoot(item) || item && Number(item.groupID) === 186 && item.spaceState?.homefrontRole !== "artifactCacheWreck") {
       updateInventoryItem(itemID, (currentItem) => ({
         ...currentItem,
         spaceState: clearDungeonScopeFields(currentItem.spaceState),
@@ -11503,7 +11810,7 @@ function removeSceneSiteContent(scene, siteID, options = {}) {
   ))
     // Site NPC wrecks carry the site's dungeonMaterializedSiteContent tag, so they land in this list
     // by default. They must survive the site: see the note in removeStoredDungeonSiteContent.
-    .filter((entity) => !(entity && (entity.nativeNpcWreck === true ||
+    .filter((entity) => !(entity && (entity.observatoryFlashpointRole || entity.nativeNpcWreck === true ||
       (entity.kind === "wreck" && entity.homefrontRole !== "artifactCacheWreck"))));
   const nativeControllerEntityIDs = listStoredDungeonNativeControllerEntityIDs(
     Math.max(0, toInt(scene.systemID, 0)),
@@ -11568,7 +11875,7 @@ function removeSceneSiteContent(scene, siteID, options = {}) {
   const spaceRuntime = getSpaceRuntime();
   for (const itemID of storedInventoryItemIDs) {
     const storedItem = findItemById(itemID);
-    if (Number(storedItem?.groupID) === 186 && storedItem?.spaceState?.homefrontRole !== "artifactCacheWreck") {
+    if (isPersistentFlashpointLoot(storedItem) || Number(storedItem?.groupID) === 186 && storedItem?.spaceState?.homefrontRole !== "artifactCacheWreck") {
       continue;
     }
     if (
@@ -11819,6 +12126,7 @@ function isSurvivingSitePocketEntity(entity) {
   if (!entity) {
     return false;
   }
+  if (entity.observatoryFlashpointRole) return true;
   if (entity.nativeNpcWreck === true || entity.kind === "wreck") {
     return true;
   }
@@ -12418,7 +12726,11 @@ function handleRuntimeChange(change) {
       // Mining quantity changes are persisted through spawnState. They do not
       // change the anomaly root, and must not replace the specialized ice
       // anchor with a generic dungeon root on every mining cycle.
-      if (isInPlaceGeneratedMiningStateUpdate) {
+      if (isInPlaceGeneratedMiningStateUpdate || previousWasVisible &&
+          previousSystemID === nextSystemID &&
+          entityIDsEqual(previousInstanceIdentity, nextInstanceIdentity) &&
+          entityIDsEqual(previousSiteIdentity, nextSiteIdentity) &&
+          require("../observatoryFlashpoint/flashpointHooks").isSite(next)) {
         return;
       }
       flushPendingSiteTeardownsForSite(nextScene, nextSiteID);
@@ -12508,7 +12820,15 @@ function startRuntimeSync() {
   sweepStoredTerminalDungeonSiteContent();
   pruneOrphanedSiteBlueprintLootReceipts();
   if (!siteBehaviorTicker) {
+    let lastFlashpointRewardRecoveryAtMs = 0;
     siteBehaviorTicker = setInterval(() => {
+      try { require("../observatoryFlashpoint/flashpointUniverse").maintain(); }
+      catch (error) { log.warn(`[Flashpoint] Regional reconciliation deferred: ${error.message}`); }
+      if (Date.now() - lastFlashpointRewardRecoveryAtMs >= 30000) {
+        lastFlashpointRewardRecoveryAtMs = Date.now();
+        require("../observatoryFlashpoint/flashpointHooks").recoverPending().catch(error =>
+          log.warn(`[Flashpoint] Pending reward recovery deferred: ${error.message}`));
+      }
       try { require("./siteHazardOutcomes").recoverAll(); }
       catch (error) { log.warn(`[universe-sites] hazard health recovery deferred: ${error.message}`); }
       const runtime = getSpaceRuntime();
@@ -12533,6 +12853,10 @@ function startRuntimeSync() {
     }
   }
   runtimeSyncStarted = true;
+  require("../observatoryFlashpoint/flashpointUniverse").reconcile();
+  require("../observatoryFlashpoint/flashpointHooks").recoverPending().catch(error => {
+    log.error(`[Flashpoint] Reward recovery deferred: ${error.stack || error.message}`);
+  });
   // Retry durable Homefront wallet receipts even when their scene is unloaded.
   require("../homefront/homefrontHooks")
     .rewards.recoverPending()
@@ -12571,6 +12895,8 @@ function handleSceneCreated(scene, options = {}) {
 
   const initialLoad = scene._universeDungeonSitesInitialized !== true;
   scene._universeDungeonSitesInitialized = true;
+  if (initialLoad) for (const entity of scene.dynamicEntities?.values() || [])
+    require("../observatoryFlashpoint/flashpointHooks").restoreLootEntity(scene, entity);
   // Inventory hydrates before the dungeon source. Restore already stored cans
   // before a reconnect can acquire them; a forced refresh must leave active
   // transient attempts alone.
@@ -12622,6 +12948,7 @@ function handleSceneCreated(scene, options = {}) {
     // the pocket. Restore admitted incursion births and room objects through
     // the existing content owner, without triggering a fresh encounter.
     if (isExactClientGeneratedMiningInstance(instance) ||
+        require("../observatoryFlashpoint/flashpointHooks").isSite(instance) ||
         require("../incursion/incursionAdmission").admittedPolicy(instance)) {
       const materializeResult = ensureSiteContentsMaterialized(scene, instance, {
         nowMs: options.nowMs,
@@ -12636,6 +12963,8 @@ function handleSceneCreated(scene, options = {}) {
       for (const key of Object.keys(contentSummary)) {
         contentSummary[key] += Math.max(0, toInt(spawnedContent[key], 0));
       }
+      if (require("../observatoryFlashpoint/flashpointHooks").isSite(instance))
+        require("../observatoryFlashpoint/flashpointHooks").restoreScene(scene, instance, options.nowMs ?? Date.now());
     }
   }
   if (contentSummary.miningRocksSpawned > 0) {
@@ -12670,11 +12999,19 @@ DungeonUniverseSiteService.homefrontPorts = {
   materializeContainer: materializeContainerEntity,
   occupied: anyPlayerShipPresentAtSite,
 };
+DungeonUniverseSiteService.flashpointPorts = {
+  structure: spawnEncounterKillableStructures,
+  materializeContainer: materializeContainerEntity,
+  containers: buildContainerEntities,
+  remove: destroyMaterializedContentEntity,
+  roomAnchor: resolveRoomWorldPositionForTemplate,
+};
 DungeonUniverseSiteService.ensureSiteContentsMaterialized = ensureSiteContentsMaterialized;
 DungeonUniverseSiteService.removeSceneSiteContent = removeSceneSiteContent;
 DungeonUniverseSiteService.removeStoredDungeonSiteContent = removeStoredDungeonSiteContent;
 DungeonUniverseSiteService.activateNativeMissionObjects = activateNativeMissionObjects;
 DungeonUniverseSiteService.spawnTemplateForSession = spawnTemplateForSession;
+DungeonUniverseSiteService.buildOperationSiteKey = buildOperationSiteKey;
 DungeonUniverseSiteService.purgePrivateOperationForCharacter = purgePrivateOperationForCharacter;
 DungeonUniverseSiteService.handleSceneCreated = handleSceneCreated;
 DungeonUniverseSiteService.hasPendingSiteTeardownForInstance =
@@ -12710,132 +13047,23 @@ DungeonUniverseSiteService.resolveRoomWorldPositionForTemplate = resolveRoomWorl
 // Narrow adapter: seasonal policy owns state; the dungeon service owns world entities.
 // Trusted AIR adapter. Entity creation, visibility and removal remain owned by
 // the dungeon/NPC/scene domains; graph actions cannot select public entities.
-// The AIR fleet's arrival formation at the combat site (template 9105). EveJS would warp the
-// pilot and all 14 companions (Balin, Bowheads, Orca, Nestors, ...) to the same point, so
-// everyone lands inside each other. Keep the formation the fleet had at the first site (9103):
-// Balin about 3 km from the pilot, the rest in their authored positions around him (15-30 km;
-// the lesson only needs them within 100 km). Slot key -> offset from the pilot's point.
-const AIR_BALIN_FROM_PILOT = Object.freeze({ x: 2500, y: 0, z: 1500 });
-// How far out the combat site's hostiles start their warp in (airEncounterPorts.hostiles).
-const AIR_HOSTILE_WARP_IN_METERS = 1_000_000;
-let airFleetFormationCache = null;
-function airFleetFormation() {
-  if (airFleetFormationCache) return airFleetFormationCache;
-  const first = dungeonAuthority.getTemplateByID("evejs.air-tutorial:9103")?.airEncounter;
-  if (!first?.balin) return null;
-  const balin = first.balin.positionOffset;
-  const offsets = new Map([["balin", AIR_BALIN_FROM_PILOT]]);
-  (first.escorts || []).forEach((spec, index) => offsets.set(`escort:${index}`, {
-    x: spec.positionOffset.x - balin.x + AIR_BALIN_FROM_PILOT.x,
-    y: spec.positionOffset.y - balin.y + AIR_BALIN_FROM_PILOT.y,
-    z: spec.positionOffset.z - balin.z + AIR_BALIN_FROM_PILOT.z,
-  }));
-  airFleetFormationCache = offsets;
-  return offsets;
-}
-// After a relog EveJS re-creates the companions at the combat site on the pilot's landing
-// point (the template's entryOffset): place them in formation there too.
-function airFormationOffset(instance, spec) {
-  const offsets = airFleetFormation();
-  const entry = instance.templateID === "evejs.air-tutorial:9105" && dungeonAuthority.getTemplateByID(instance.templateID)?.airEncounter?.entryOffset;
-  const atEntry = entry && ["x", "y", "z"].every(axis => Math.abs(Number(spec.positionOffset?.[axis]) - Number(entry[axis])) < 0.5);
-  return atEntry && offsets?.has(spec.key) ? addVectors(entry, offsets.get(spec.key)) : spec.positionOffset;
-}
-// During the fleet warp a companion aligns with at most this share of the pilot ship's inertial
-// mass (mass x agility), so it is aligned a little before the pilot is.
-const AIR_FLEET_ALIGN_SHARE = 0.75;
-// The fleet warp only: a companion slower to align than that gets a lower agility (SetBallAgility
-// to its Grid bubble, so every client turns it the same way); restoreAirCompanionAlign gives its
-// own back.
-function quickenAirCompanionAlign(scene, companion, inertialMass) {
-  const mass = Number(companion?.mass) || 0;
-  if (!(mass > 0) || !(inertialMass > 0) || mass * (Number(companion.inertia) || 1) <= inertialMass) return;
-  const previousState = { inertia: companion.inertia, mass: companion.mass, maxVelocity: companion.maxVelocity };
-  if (companion.airFleetAlignOwnInertia === undefined) companion.airFleetAlignOwnInertia = companion.inertia;
-  companion.inertia = inertialMass / mass;
-  scene.broadcastShipPrimeUpdates(companion, { previousState });
-}
-// A hull with more than this many times the pilot ship's inertial mass (the Bowheads, about
-// eleven times the pilot's Astero; the next, the Nestors, under twice) is quickened by its mass
-// instead (lightenAirCompanion).
-const AIR_FLEET_LIGHTEN_INERTIA_FACTOR = 5;
-// The same quicker align by a lower mass (SetBallMass) at the hull's own agility. Clients seem to
-// swing a ship's model round by its mass, not its agility: at the lower agility alone a
-// Bowhead's model, 400,000 t, turned round slowly and the warp snapped it onto its warp line;
-// the Orca, 15,000 t, turns round quickly.
-function lightenAirCompanion(scene, companion, inertialMass) {
-  const mass = Number(companion?.mass) || 0, inertia = Number(companion?.inertia) || 1;
-  if (!(mass > 0) || !(inertialMass > 0) || mass * inertia <= inertialMass) return;
-  const previousState = { inertia: companion.inertia, mass: companion.mass, maxVelocity: companion.maxVelocity };
-  if (companion.airFleetAlignOwnMass === undefined) companion.airFleetAlignOwnMass = companion.mass;
-  companion.mass = inertialMass / inertia;
-  scene.broadcastShipPrimeUpdates(companion, { previousState });
-}
-function restoreAirCompanionAlign(scene, companion) {
-  if (companion.airFleetAlignOwnInertia === undefined && companion.airFleetAlignOwnMass === undefined) return;
-  const previousState = { inertia: companion.inertia, mass: companion.mass, maxVelocity: companion.maxVelocity };
-  if (companion.airFleetAlignOwnInertia !== undefined) companion.inertia = companion.airFleetAlignOwnInertia;
-  if (companion.airFleetAlignOwnMass !== undefined) companion.mass = companion.airFleetAlignOwnMass;
-  delete companion.airFleetAlignOwnInertia;
-  delete companion.airFleetAlignOwnMass;
-  scene.broadcastShipPrimeUpdates(companion, { previousState });
+// A scripted AIR ship's module for one of TQ's FX kinds (airEncounterPorts.fire): its hull's
+// weapon, or its hull's entity web or scrambler.
+const AIR_SCRIPTED_EWAR_FAMILIES = Object.freeze({ ModifyTargetSpeed: "stasisWebifier", WarpScramble: "warpScrambler" });
+function airScriptedModule(source, kind) {
+  const equipment = require("../../space/npc/npcEquipment");
+  if (kind === "Laser") {
+    const moduleItem = equipment.getNpcWeaponModules(source)[0];
+    if (!moduleItem) throw new Error(`AIR_WEAPON_MISSING:${source.typeID}`);
+    const bankModuleIDs = Array.isArray(moduleItem.npcWeaponBankModuleIDs) ? moduleItem.npcWeaponBankModuleIDs : [Number(moduleItem.itemID)];
+    return { moduleItem, effectName: String(moduleItem.npcEffectName || "").trim() || null, options: { activationHint: "weapon", bankModuleIDs } };
+  }
+  const family = AIR_SCRIPTED_EWAR_FAMILIES[kind];
+  const entry = family && equipment.getNpcHostileModules(source).find(module => module.definition?.family === family);
+  if (!entry) throw new Error(`AIR_EWAR_MISSING:${kind}:${source.typeID}`);
+  return { moduleItem: entry.moduleItem, effectName: entry.effectName, options: {} };
 }
 DungeonUniverseSiteService.airEncounterPorts = {
-  // The combat site's hostiles; with options.arrival they warp in (scene 1.2's "Unidentified
-  // Fleet", which on TQ warps in as Aura says these are the ships that attacked the cloning
-  // facility), from AIR_HOSTILE_WARP_IN_METERS out: most of a warp is its slowdown, so a short one
-  // lands within seconds and is seen on grid from its start.
-  hostiles(scene, instance, specs, options = {}) {
-    for (const spec of specs) {
-      if (scene.getDynamicEntities().some(entity => entity.airNpeOwnerCharacterID === instance.ownership.characterID && entity.airEncounterSlot === spec.key)) continue;
-      const contract = dungeonAuthority.getTemplateByID(instance.templateID).airEncounter;
-      const hull = contract.hostileProfiles.find(profile => profile.shipTypeID === spec.typeID);
-      const resolved = hull && getNpcSpawnService().resolveProfileDefinition(hull.sourceProfileID);
-      if (!resolved?.success) throw new Error("AIR_HOSTILE_PROFILE_MISSING");
-      const definition = cloneValue(resolved.data);
-      definition.profile = { ...definition.profile, shipTypeID: spec.typeID, presentationTypeID: spec.typeID, presentationName: "Unidentified Ship", name: "Unidentified Ship", bounty: 0 };
-      definition.profile.hardwareFamily = "sdeEntityNpc";
-      definition.loadout = { loadoutID: `air-hull:${spec.typeID}`, modules: [], charges: [], cargo: [] };
-      definition.lootTable = null;
-      definition.behaviorProfile = { ...definition.behaviorProfile, autoAggro: false, autoActivateWeapons: false, autoAggroTargetClasses: [], returnToHomeWhenIdle: false };
-      // Generic retaliation can run on the first laser activation, even a miss,
-      // before AIR journals a positive hit. This lesson hull cruises from birth.
-      const cruiseOnly = Number(spec.typeID) === 57801;
-      if (cruiseOnly) Object.assign(definition.behaviorProfile, { useChasePropulsion: false, useSdeChaseVelocity: false });
-      const cruiseSpeed = Number(definition.behaviorProfile.cruiseSpeedMetersPerSecond);
-      if (cruiseOnly && !(Number.isFinite(cruiseSpeed) && cruiseSpeed > 0)) throw new Error("AIR_HOSTILE_CRUISE_SPEED_MISSING");
-      const position = addVectors(instance.position, spec.positionOffset), root = scene.getEntityByID(instance.spawnState.siteID);
-      const origin = options.arrival ? { ...position, x: position.x - AIR_HOSTILE_WARP_IN_METERS } : position;
-      const spawned = getNativeNpcService().spawnNativeNpcEntityInContext({ scene, systemID: scene.systemID, anchorEntity: root }, definition, {
-        transient: true, skipInitialBehaviorTick: true, broadcast: false, position: origin, spawnStateOverride: { position: origin, ...(cruiseOnly ? { maxVelocity: cruiseSpeed } : {}) },
-        entityScopeMetadata: { dungeonMaterializedSiteContent: true, dungeonSiteInstanceID: instance.instanceID, dungeonSiteID: root.itemID, airNpeOwnerCharacterID: instance.ownership.characterID, airNpeOperationID: 2433, airNpeInstanceID: instance.instanceID },
-      });
-      if (!spawned.success || !spawned.data?.entity) throw new Error(`AIR_HOSTILE_SPAWN_FAILED:${spawned.errorMsg}`);
-      spawned.data.entity.airEncounterSlot = spec.key;
-      if (options.arrival) {
-        // Its home is the site, not where it starts its warp: the behavior loop clears the combat
-        // of an NPC beyond its leash from home (isBeyondLeash), and the attack order never held.
-        const controller = require("../../space/npc/npcRuntime").getControllerByEntityID(spawned.data.entity.itemID);
-        if (controller) controller.homePosition = { ...position };
-        const warp = require("../../space/npc/npcRuntime").warpBatchToPoints([{ entityID: spawned.data.entity.itemID, point: position }], { ingressDurationMs: 2000, acquireForRelevantSessions: true, useNativeWarpProfile: true });
-        if (!warp.success) throw new Error(`AIR_HOSTILE_ARRIVAL_FAILED:${warp.errorMsg}`);
-      } else scene.broadcastAddBalls([spawned.data.entity]);
-    }
-  },
-  // A companion keeps moving with the pilot: a manual order, which its behavior loop keeps (a plain
-  // scene follow is stopped by its idle controller).
-  follow(scene, source, target, rangeMeters) {
-    const keepRepairLock = source.airEncounterSlot === "balin" && Number(source.typeID) === 57788;
-    const result = getNpcSpawnService().issueManualOrder(source.itemID, { type: "follow", targetID: target.itemID, followRangeMeters: rangeMeters, allowWeapons: false, ...(keepRepairLock ? { keepLock: true } : {}) });
-    if (!result?.success) throw new Error(`AIR_COMPANION_FOLLOW_FAILED:${result?.errorMsg}`);
-    return result;
-  },
-  attack(scene, sources, target, fire = true, orbitDistanceMeters = 8000) {
-    for (const source of sources) {
-      const result = getNpcSpawnService().issueManualOrder(source.itemID, { type: fire ? "attack" : "holdFire", targetID: target.itemID, allowWeapons: fire, movementMode: "orbit", orbitDistanceMeters, keepLock: true });
-      if (!result?.success) throw new Error(`AIR_ATTACK_REFUSED:${result?.errorMsg}`);
-    }
-  },
   retire(scene, characterID, instanceIDs) {
     for (const entity of scene.getDynamicEntities()) {
       if (entity.ownerID !== characterID || ![entity.airNpeInstanceID, entity.dungeonCurrentInstanceID, entity.dungeonSiteInstanceID].some(id => instanceIDs.includes(id))) continue;
@@ -12856,16 +13084,26 @@ DungeonUniverseSiteService.airEncounterPorts = {
     const persisted = require("../../space/runtime/entitySpacePersistence").persistShipEntity(entity);
     if (!persisted?.success) throw new Error(`AIR_SHIP_SCOPE_FAILED:${persisted?.errorMsg}`);
   },
-  actors(scene, instance, specs, options = {}) {
+  actors(scene, instance, specs) {
     const created = [];
     try {
       for (const spec of specs) {
         if (scene.getDynamicEntities().some(entity => entity.airNpeOwnerCharacterID === instance.ownership.characterID && entity.airEncounterSlot === spec.key)) continue;
-        const root = scene.getEntityByID(instance.spawnState.siteID), position = addVectors(instance.position, airFormationOffset(instance, spec));
-        const origin = options.arrival ? { ...position, x: position.x - 149597870700 } : position;
+        const root = scene.getEntityByID(instance.spawnState.siteID), position = addVectors(instance.position, spec.positionOffset);
+        // A scripted arrival (spec.warpIn, the AIR scene ships) is first seen as on TQ: already
+        // spec.warpIn.ticksIn ticks into its warp, which started its distance back along its line.
+        // TQ's ball is then ticksIn - 1 evolve steps along (every arrival of TQ's November 2026
+        // scenes, scene 1's and scene 2's, matches it).
+        const warpIn = spec.warpIn, evolve = require("../../space/destiny/simulation/evolve");
+        const start = warpIn && addVectors(position, { x: -warpIn.direction.x * warpIn.distance, y: -warpIn.direction.y * warpIn.distance, z: -warpIn.direction.z * warpIn.distance });
+        const warpState = warpIn && { mode: "WARP", targetPoint: { ...position }, warpFactor: warpIn.warpFactor, warpMinRange: warpIn.minimumRange || 0, warpDistance: warpIn.distance, effectStamp: scene.nextDestinyStamp - warpIn.ticksIn, speedFraction: 1, direction: { ...warpIn.direction } };
+        const inWarp = warpIn && evolve.warpDistance(warpState, start, { x: 0, y: 0, z: 0 }, warpIn.ticksIn - 1);
+        const origin = warpIn ? inWarp.position : position;
         const profileID = `air-encounter:${spec.key}`;
         const result = getNativeNpcService().spawnNativeNpcEntityInContext({ scene, systemID: scene.systemID, anchorEntity: root }, {
-          profile: { profileID, name: spec.label || spec.key, shipTypeID: spec.typeID, presentationTypeID: spec.typeID, presentationName: spec.label || spec.key, corporationID: 1000125, factionID: 500021, entityType: "npc", hardwareFamily: "miningops", bounty: 0, hostileResponseThreshold: -11, friendlyResponseThreshold: -11 },
+          profile: { profileID, name: spec.label || spec.key, shipTypeID: spec.typeID, presentationTypeID: spec.typeID, presentationName: spec.label || spec.key, corporationID: 1000125, factionID: 500021, entityType: "npc", hardwareFamily: "miningops", bounty: 0,
+            // TQ's standing thresholds for the ship (red for a hostile), friendly when it has none.
+            hostileResponseThreshold: spec.standings?.hostile ?? -11, friendlyResponseThreshold: spec.standings?.friendly ?? -11 },
           loadout: { loadoutID: profileID, modules: [], charges: [], cargo: [] },
           behaviorProfile: { behaviorProfileID: profileID, autoAggro: false, autoAggroTargetClasses: [], autoActivateWeapons: false, returnToHomeWhenIdle: false }, lootTable: null,
         }, { transient: true, skipInitialBehaviorTick: true, broadcast: false, position: origin, spawnStateOverride: { position: origin },
@@ -12874,10 +13112,32 @@ DungeonUniverseSiteService.airEncounterPorts = {
         });
         if (!result.success || !result.data?.entity) throw new Error(`AIR_ACTOR_SPAWN_FAILED:${result.errorMsg}`);
         const entity = result.data.entity; entity.airEncounterSlot = spec.key; created.push(entity);
-        if (options.arrival) {
-          const warp = require("../../space/npc/npcRuntime").warpBatchToPoints([{ entityID: entity.itemID, point: position }], { ingressDurationMs: 2000, acquireForRelevantSessions: true, useNativeWarpProfile: true });
-          if (!warp.success) throw new Error(`AIR_ACTOR_ARRIVAL_FAILED:${warp.errorMsg}`);
-        } else scene.broadcastAddBalls([entity]);
+        // TQ never tells the pilot that Balin locks them (no 'otheradd', and he is not among
+        // the pilot's targeters); his lock losses do come.
+        if (spec.key === "balin") entity.targetingNoticeSuppressedForCharacterID = instance.ownership.characterID;
+        // A scripted ship (the AIR scene ships): its scene alone moves it, with TQ's mass. On TQ
+        // none of them leaves a wreck.
+        if (spec.scripted) {
+          entity.suppressWreckOnDeath = true;
+          // TQ's ball carries no corporation or alliance (-1, -1), fleet and hostiles alike.
+          entity.airScripted = true; entity.destinyCorporationID = -1; entity.destinyAllianceID = -1;
+          // TQ's mass and max speed are the ship's own (Dogma bases): a web takes its share of
+          // that max speed and leaves the mass alone, as on TQ.
+          const bases = {};
+          if (Number(spec.mass) > 0) entity.mass = bases.mass = Number(spec.mass);
+          if (Number(spec.maxVelocity) > 0) entity.maxVelocity = bases.maxVelocity = Number(spec.maxVelocity);
+          entity.scriptedDogmaBases = bases;
+          // Its health as TQ first showed it (the rescue site's backdrop lands there damaged).
+          if (spec.conditionState) entity.conditionState = { ...entity.conditionState, ...spec.conditionState };
+          const ordered = getNpcSpawnService().issueManualOrder(entity.itemID, { type: "scripted" });
+          if (!ordered?.success) throw new Error(`AIR_ACTOR_SCRIPT_FAILED:${ordered?.errorMsg}`);
+        }
+        if (warpIn) {
+          Object.assign(entity, warpState);
+          evolve.setBallVelocity(entity, inWarp.velocity);
+          entity.warpDestination = { rawDestination: { ...position }, targetPoint: { ...position }, stopDistance: 0, warpSpeedAU: warpIn.warpFactor / 1000, requestedAtMs: scene.getCurrentSimTimeMs(), activatedAtMs: scene.getCurrentSimTimeMs(), origin: start };
+        }
+        scene.broadcastAddBalls([entity]);
       }
       return created;
     } catch (error) {
@@ -12885,7 +13145,8 @@ DungeonUniverseSiteService.airEncounterPorts = {
       throw error;
     }
   },
-  arrive(scene, instance, specs) { return this.actors(scene, instance, specs, { arrival: true }); },
+  // An AIR scene ship that leaves its site unseen (it reappears elsewhere through actors).
+  withdraw(scene, entity) { destroyMaterializedContentEntity(scene, entity, { broadcast: true }); },
   repair(scene, source, target) {
     const pseudoSession = { characterID: 0, _space: { systemID: scene.systemID, shipID: source.itemID }, sendNotification() {} };
     const modules = require("../../space/npc/npcEquipment").getNpcAssistanceModules(source).filter(entry => ["remoteArmor", "remoteShield"].includes(entry.definition?.family));
@@ -12905,104 +13166,46 @@ DungeonUniverseSiteService.airEncounterPorts = {
     }
     return { success: true };
   },
-  fleetWarp(scene, session, companions, point, destination) {
-    const options = { destinationStaticInstanceID: destination.instanceID, destinationDungeonSiteID: destination.spawnState.siteID, stopDistance: 0 };
-    const ship = scene.getShipEntityForSession(session);
-    const distance = entity => Math.hypot(entity.position.x - point.x, entity.position.y - point.y, entity.position.z - point.z);
-    if (ship.mode !== "WARP" && !scene.hasQueuedWarpOrder(ship) && distance(ship) > 100000) {
-      const result = scene.warpToPoint(session, point, options);
-      if (!result.success) throw new Error(`AIR_PLAYER_WARP_FAILED:${result.errorMsg}`);
-    }
-    const formation = airFleetFormation();
-    const warps = [];
-    for (const companion of companions) {
-      if (companion.airNpeOwnerCharacterID !== destination.ownership.characterID || Number(session.characterID) !== destination.ownership.characterID) throw new Error("AIR_COMPANION_WARP_FORBIDDEN");
-      const target = formation ? addVectors(point, formation.get(companion.airEncounterSlot) || AIR_BALIN_FROM_PILOT) : point;
-      if (companion.mode !== "WARP" && !scene.hasQueuedWarpOrder(companion) && Math.hypot(companion.position.x - target.x, companion.position.y - target.y, companion.position.z - target.z) > 100000) {
-        warps.push({ itemID: companion.itemID, target });
-      }
-      Object.assign(companion, { dungeonSiteInstanceID: destination.instanceID, dungeonSiteID: destination.spawnState.siteID, airNpeInstanceID: destination.instanceID, airNpeOperationID: 2433 });
-    }
-    // A fleet warp, as on TQ: the companions aligned by then enter warp in the tick the pilot's ship
-    // does (it aligns first) and at its warp speed, so the fleet travels and lands with the pilot. Each warping
-    // on its own native profile, they left before the pilot had aligned and landed first.
-    const pending = { session, options: { ...options, warpSpeedAU: ship.warpSpeedAU }, warps };
-    if (ship.mode === "WARP" && ship.warpDestination?.activatedAtMs) this.warpCompanions(scene, ship, pending);
-    else {
-      ship.pendingCompanionWarp = pending;
-      if (!(scene.pendingCompanionWarpShips instanceof Set)) scene.pendingCompanionWarpShips = new Set();
-      scene.pendingCompanionWarpShips.add(ship);
-      // Meanwhile they align with the pilot, as on TQ: each turns toward its warp line and speeds
-      // up along it (NPC order "align"), rather than sitting still until the warp starts. A hull
-      // slower to align than the pilot's ship (the Nestors, the Orca, ...) aligns a little faster
-      // than it for this warp only, so the whole fleet is aligned when the pilot is: by a lower
-      // agility, or the Bowheads, far heavier than the rest, by a lower mass. Its own agility and
-      // mass are back once its warp starts.
-      const pilotInertialMass = require("../../space/destiny/simulation/evolve").inertialMass(ship);
-      for (const { itemID, target } of warps) {
-        const companion = scene.getEntityByID(itemID);
-        const heavy = (Number(companion.mass) || 0) * (Number(companion.inertia) || 1) > pilotInertialMass * AIR_FLEET_LIGHTEN_INERTIA_FACTOR;
-        (heavy ? lightenAirCompanion : quickenAirCompanionAlign)(scene, companion, pilotInertialMass * AIR_FLEET_ALIGN_SHARE);
-        const direction = { x: target.x - companion.position.x, y: target.y - companion.position.y, z: target.z - companion.position.z };
-        const ordered = getNpcSpawnService().issueManualOrder(itemID, { type: "align", direction });
-        if (!ordered?.success) { log.warn(`[AirEncounter] companion ${itemID} align failed: ${ordered?.errorMsg}`); continue; }
-        // It starts in the pilot's tick, not at its brain's next think a tick or two later;
-        // the brain keeps the order going.
-        const controller = require("../../space/npc/npcService").getControllerByEntityID(itemID);
-        if (controller?.manualOrder?.type === "align") require("../../space/npc/npcBehaviorLoop").syncNpcAlign(scene, companion, controller, controller.manualOrder);
-      }
-    }
+  // A scripted AIR ship opens fire as TQ's did, locked on its target first: "Laser" (its guns),
+  // "ModifyTargetSpeed" (its web), "WarpScramble" (its scrambler). Already on that target, the
+  // module keeps cycling; on another, it switches.
+  fire(scene, source, target, kind) {
+    const module = airScriptedModule(source, kind);
+    const pseudoSession = { characterID: 0, _space: { systemID: scene.systemID, shipID: source.itemID }, sendNotification() {} };
+    const active = source.activeModuleEffects?.get(Number(module.moduleItem.itemID));
+    if (active && Number(active.targetID) === target.itemID) return { success: true };
+    if (active) scene.deactivateGenericModule(pseudoSession, module.moduleItem.itemID, { reason: "npc", deferUntilCycle: false });
+    // On TQ they lock and fire at any range, every shot and web lands (their damage is the
+    // scene's), and a switch to another target is immediate.
+    const locked = scene.finalizeTargetLock(source, target, { nowMs: scene.getCurrentSimTimeMs(), ignoreRange: true });
+    source.scriptedEffectsAlwaysLand = true;
+    source.moduleReactivationLocks?.delete(Number(module.moduleItem.itemID));
+    if (!locked?.success) { const range = scene.getTargetLockRangeDecision(source, target); throw new Error(`AIR_FIRE_LOCK_FAILED:${kind}:${locked?.errorMsg}:${Math.round(range?.actualDistance)}/${Math.round(range?.desiredRange)}`); }
+    const result = scene.activateGenericModule(pseudoSession, module.moduleItem, module.effectName, { targetID: target.itemID, ...module.options });
+    if (!result?.success) throw new Error(`AIR_FIRE_FAILED:${kind}:${result?.errorMsg}`);
+    return result;
   },
-  // The pilot's ship enters warp in the next Destiny tick (scene startPendingCompanionWarps): each
-  // companion, aligned with the pilot by then, gets an ordinary warp order for that tick at the
-  // pilot's warp factor and its own agility back, and a velocity along its warp line at its full
-  // speed (the last per cent of its align), so it counts as aligned (Ball::IsAlignedForWarp) and
-  // enters warp in that same tick. Warp curves start from the tick a warp starts, so pilot and
-  // fleet travel side by side, on the server and in every client, and land together. An entity
-  // warp-in (warpCompanions) instead fakes a curve five ticks in, and the fleet ran ahead.
-  warpCompanionsAligned(scene, ship, { session, options, warps }) {
-    const evolveEngine = require("../../space/destiny/simulation/evolve");
-    const { queueOrApplyMovementChange } = require("../../space/destiny/commands/movementQueueing");
-    const { buildSetBallVelocityPayload } = require("../../space/destiny/stream/actions");
-    const warpSpeedAU = Number(ship.warpFactor) > 0 ? Number(ship.warpFactor) / 1000 : options.warpSpeedAU;
-    for (const { itemID, target } of warps) {
-      const companion = scene.getEntityByID(itemID);
-      if (!companion) continue;
-      // The warp replaces the align order; a stale one would turn the companion again after landing.
-      getNpcSpawnService().issueManualOrder(itemID, { type: "resume" });
-      const warp = scene.warpDynamicEntityToPoint(companion, target, { ...options, session, warpSpeedAU });
-      if (!warp.success) {
-        restoreAirCompanionAlign(scene, companion);
-        log.warn(`[AirEncounter] companion ${itemID} warp failed: ${warp.errorMsg}`);
-        continue;
-      }
-      queueOrApplyMovementChange(scene, companion, "airFleetWarpAlign", scene.getCurrentSimTimeMs(), () => {
-        // Its own agility comes back in the tick its warp starts, not a tick before: clients turn
-        // the hull at its agility, and a last tick at its own slow one left a Bowhead short of
-        // the warp line, so the warp snapped it onto it.
-        restoreAirCompanionAlign(scene, companion);
-        const line = { x: target.x - companion.position.x, y: target.y - companion.position.y, z: target.z - companion.position.z };
-        const length = Math.hypot(line.x, line.y, line.z) || 1, speed = Math.max(1, Number(companion.maxVelocity) || 1);
-        evolveEngine.setBallVelocity(companion, { x: (line.x / length) * speed, y: (line.y / length) * speed, z: (line.z / length) * speed });
-        scene.queueBubbleHistory([{ stamp: scene.nextDestinyStamp, payload: buildSetBallVelocityPayload(companion.itemID, companion.velocity) }]);
-      });
-      // The NPC owner wakes once the warp has landed; awake, an idle controller stops a warp.
-      const constants = evolveEngine.setupWarpConstants(Math.round(warpSpeedAU * 1000), Math.hypot(target.x - companion.position.x, target.y - companion.position.y, target.z - companion.position.z));
-      require("../../space/npc/npcService").scheduleNpcController(itemID, scene.getCurrentSimTimeMs() + 1000 + ((constants.accelTime + constants.cruiseTime + constants.decelTime) * 1000));
-    }
+  // TQ's stop of one of them (not its target's death: that stops it by itself).
+  cease(scene, source, kind) {
+    const module = airScriptedModule(source, kind);
+    if (!source.activeModuleEffects?.has(Number(module.moduleItem.itemID))) return { success: true };
+    const pseudoSession = { characterID: 0, _space: { systemID: scene.systemID, shipID: source.itemID }, sendNotification() {} };
+    return scene.deactivateGenericModule(pseudoSession, module.moduleItem.itemID, { reason: "npc", deferUntilCycle: false });
   },
-  // The pilot's ship entered warp (scene handleWarpActivated) with its companions still waiting:
-  // they enter warp now, as an entity warp-in.
-  warpCompanions(scene, ship, { session, options, warps }) {
-    for (const { itemID, target } of warps) {
-      getNpcSpawnService().issueManualOrder(itemID, { type: "resume" });
-      const companion = scene.getEntityByID(itemID);
-      if (companion) restoreAirCompanionAlign(scene, companion);
-      // The NPC owner holds its behavior wake until native warp completes.
-      // A raw scene warp lets an idle controller stop its alignment.
-      const warp = require("../../space/npc/npcRuntime").warpToPoint(itemID, target, { ...options, session, forceImmediateStart: true, useNativeWarpProfile: true, acquireForRelevantSessions: true });
-      if (!warp.success) log.warn(`[AirEncounter] companion ${itemID} warp failed: ${warp.errorMsg}`);
-    }
+  // One cycle of one remote assistance module ("armor" or "shield"), as a scripted AIR ship's
+  // order on its own tick: TQ's Balin starts his armour repair and his shield transfer apart.
+  // Each runs one cycle (repeat 0) with repeat 1 in its FX; the armour lands when the cycle
+  // completes and the shield when it starts, as on TQ.
+  assist(scene, source, target, family) {
+    const wanted = { armor: "remoteArmor", shield: "remoteShield" }[family];
+    const entry = require("../../space/npc/npcEquipment").getNpcAssistanceModules(source).find(module => module.definition?.family === wanted);
+    if (!entry) throw new Error(`AIR_ASSIST_MODULE_MISSING:${family}`);
+    const pseudoSession = { characterID: 0, _space: { systemID: scene.systemID, shipID: source.itemID }, sendNotification() {} };
+    scene.finalizeTargetLock(source, target, { nowMs: scene.getCurrentSimTimeMs() });
+    const result = scene.activateGenericModule(pseudoSession, entry.moduleItem, entry.effectName, { targetID: target.itemID, activationHint: "assistance",
+      repeat: 0, assistancePresentationRepeat: 1, assistanceLandsAtCycleEnd: family === "armor" });
+    if (!result?.success) throw new Error(`AIR_ASSIST_FAILED:${result?.errorMsg}`);
+    return result;
   },
 };
 DungeonUniverseSiteService.airMiningPorts = {
@@ -13018,6 +13221,8 @@ DungeonUniverseSiteService.airMiningPorts = {
     for (const actor of actors) {
       if (scene.getDynamicEntities().some(entity => entity.dungeonSiteInstanceID === instance.instanceID && entity.airMiningActorKey === actor.key)) continue;
       const position = addVectors(instance.position, actor.positionOffset);
+      const velocity = actor.velocity ? { x: actor.velocity.x, y: actor.velocity.y, z: actor.velocity.z } : { x: 0, y: 0, z: 0 };
+      const speed = Math.hypot(velocity.x, velocity.y, velocity.z);
       const profileID = `air-mining:${actor.key}`;
       const definition = {
         profile: { profileID, name: actor.label, shipTypeID: actor.typeID, presentationTypeID: actor.typeID, presentationName: actor.label, corporationID: 1000125, factionID: 500021, entityType: "npc", hardwareFamily: "miningops", bounty: 0, hostileResponseThreshold: -11, friendlyResponseThreshold: -11 },
@@ -13027,7 +13232,11 @@ DungeonUniverseSiteService.airMiningPorts = {
       };
       const result = getNativeNpcService().spawnNativeNpcEntityInContext({ scene, systemID: scene.systemID, anchorEntity: root }, definition, {
         transient: true, skipInitialBehaviorTick: true, broadcast: false,
-        position, spawnStateOverride: { position, maxVelocity: actor.maxVelocity || 420, speedFraction: 1 },
+        position, spawnStateOverride: {
+          position, velocity, maxVelocity: actor.maxVelocity || 420,
+          ...(speed > 0 ? { direction: { x: velocity.x / speed, y: velocity.y / speed, z: velocity.z / speed } } : {}),
+          speedFraction: Number.isFinite(actor.exactWire?.speedFraction) ? actor.exactWire.speedFraction : 1,
+        },
         behaviorOverrides: { autoAggro: false, autoAggroTargetClasses: [], autoActivateWeapons: false, returnToHomeWhenIdle: false },
         entityScopeMetadata: { dungeonMaterializedSiteContent: true, dungeonSiteInstanceID: instance.instanceID, dungeonSiteID: root.itemID, airNpeOwnerCharacterID: instance.ownership.characterID, airNpeOperationID: 2674, airNpeInstanceID: instance.instanceID },
       });
@@ -13036,16 +13245,20 @@ DungeonUniverseSiteService.airMiningPorts = {
       entity.airMiningActorKey = actor.key;
       entity.airMiningGroup = actor.group;
       entity.airMiningTargetable = false;
+      Object.assign(entity, exactWireFields(actor.exactWire));
       scene.broadcastAddBalls([entity]);
     }
   },
   targetable(scene, entity, value) {
     entity.airMiningTargetable = Boolean(value);
+    // Server side only: Tranquility sends no slim change when a rock becomes targetable.
     if (!value) scene.clearAllTargetingForEntity(entity);
-    scene.broadcastSlimItemChanges([entity]);
   },
-  cloak(scene, entity, value) {
-    const result = value ? scene.cloakEntity(entity, { cloakMode: 2, uncloakRange: 0 }) : scene.uncloakEntity(entity);
+  // options: cloakMode, uncloakRange and cloakSpecialFx of the cloak; uncloakRenderFxOptions of the uncloak.
+  cloak(scene, entity, value, options = {}) {
+    const result = value
+      ? scene.cloakEntity(entity, { cloakMode: options.cloakMode ?? 2, uncloakRange: options.uncloakRange ?? 0, ...(options.cloakSpecialFx === false ? { cloakSpecialFx: false } : {}) })
+      : scene.uncloakEntity(entity, options.uncloakRenderFxOptions ? { uncloakRenderFxOptions: options.uncloakRenderFxOptions } : {});
     if (!result.success) throw new Error(`AIR_OBJECT_CLOAK_FAILED:${result.errorMsg}`);
   },
   remove: destroyMaterializedContentEntity,
@@ -13072,6 +13285,14 @@ DungeonUniverseSiteService.fwOpenPorts = {
     return entity;
   },
 };
+DungeonUniverseSiteService.agentHomebasePorts = {
+  describe(template, position) {
+    const instance = { instanceID: 0, solarSystemID: 0, position,
+      currentRoomKey: template.entryRoomKey, roomStatesByKey: {}, spawnState: {},
+      ownership: { visibilityScope: "public" }, metadata: {} };
+    return buildEnvironmentEntities(instance, { itemID: 0, position }, template, template.populationHints);
+  },
+};
 DungeonUniverseSiteService.incursionStructurePorts = {
   sources(instance, objectIDs) {
     const current = dungeonRuntime.getInstance(instance.instanceID) || instance, template = dungeonAuthority.getTemplateByID(current.templateID);
@@ -13095,9 +13316,16 @@ DungeonUniverseSiteService.fabricatorPorts = {
   remove: destroyMaterializedContentEntity,
   occupied: anyPlayerShipPresentAtSite,
   structure(scene,instance,root,entry) {
-    const entity = spawnEncounterKillableStructures(scene,instance,root,{key:entry.key},[entry])[0]?.entity || null;
+    // The objective tracker indexes the first slim it receives. Publish only
+    // after its dungeon object identity and Fabricator health are installed.
+    const entity = spawnEncounterKillableStructures(scene,instance,root,{key:entry.key},[entry],{broadcast:false})[0]?.entity || null;
     if (entity && entry.typeID === 91774) Object.assign(entity,{shieldCapacity:2000,armorHP:14000,structureHP:4000});
     else if (entity) Object.assign(entity,{shieldCapacity:0,armorHP:0,structureHP:1000});
+    if (entity) {
+      entity.dunObjectID = entity.itemID;
+      entity.fabricatorRole = entry.typeID === 91774 ? "core" : "bonus";
+      scene.broadcastAddBalls?.([entity]);
+    }
     return entity;
   },
   bonusType(name) { return require("../seasons/eventHooks").fabricatorBonuses.BONUSES[name]?.typeID || 0; },
@@ -13110,6 +13338,7 @@ DungeonUniverseSiteService.fabricatorPorts = {
       profileQuery:profile.profileID, amount:1, transient:true, runtimeKind:"nativeCombat",
       position:{x:root.position.x+Math.cos(angle)*22000,y:root.position.y,z:root.position.z+Math.sin(angle)*22000},
       entityScopeMetadata:{dungeonMaterializedSiteContent:true,dungeonSiteInstanceID:instance.instanceID,dungeonSiteID:root.itemID},
+      runtimeEntityMetadata:{objectiveTargetGroup:"horde_target",fabricatorRole:"npc",fabricatorSlot:slot.key},
       broadcast:true,
     });
     if (!result.success) throw new Error(`Fabricator spawn failed: ${result.errorMsg}`);
@@ -13129,6 +13358,7 @@ DungeonUniverseSiteService.fabricatorPorts = {
   },
 };
 DungeonUniverseSiteService._testing = {
+  syncEncounterStateProgress,
   activateNativeMissionObjects,
   resolveEncounterPlans,
   maybeAdvanceEncounterDrivenProgression,
@@ -13148,6 +13378,7 @@ DungeonUniverseSiteService._testing = {
   resolveContainerTypeRecord,
   materializeContainerEntity,
   anyPlayerShipWithinRange,
+  resolveProximityTargetPosition,
   getContentEntityRefsByKey,
   processFetchObjectiveProximity,
   processMissionRescueObjective,
