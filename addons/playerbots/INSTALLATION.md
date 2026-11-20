@@ -162,6 +162,11 @@ writes or preserves these `.env` values:
 - `EVEJS_PLAYER_BOTS_ADDON_TOKEN`: a random 64-character hexadecimal token.
 - `EVEJS_PLAYER_BOTS_ADDON_MODE=auto`: written only if this setting is absent.
 
+The server enables the engagement module by default. To use the previous patrol
+and fleet attack logic, set `EVEJS_PLAYER_BOTS_ENGAGEMENT=0` in the EveJS
+project’s `.env` and recreate the server with the same Compose files. Set it
+to `1` or remove the setting and recreate the server to re-enable the module.
+
 The Compose overlay gives the EveJS health probe a 20-second Docker timeout so
 the default 15-second game and gateway probes do not fail spuriously while a
 large roster is loading. It allows up to 120 seconds for EveJS to flush state

@@ -383,6 +383,54 @@ async function advanceFleetAttack(operation, bot, dependencies = {}) {
     kit.save(operation);
     return { delayMs: COMBAT_POLL_MS };
   }
+  // [ENGAGEMENT-SEAM:B] BEGIN
+  let engagement;
+  try {
+    const runtime = require("./playerBotEngagementRuntime");
+    if (runtime.handles("B", operation, bot)) engagement = runtime;
+  } catch (_) { /* An unavailable module leaves the host path below active. */ }
+  if (engagement) {
+    const committed = operation.mode === "war" || operation.mode === "nullsec-conflict" ||
+      (operation.mode === "piracy" && bot.wildfire === true && target.kind === "ship" &&
+        target.session && !require("./playerBotCapacityRuntime").isPlayerBotSession(target.session));
+    const result = engagement.runSeamB({
+      bot, operation, attached, state: spaceState, fit, drones, target, distance,
+      space: kit.space, drone: kit.droneRuntime, stance: committed ? "committed" : "cautious",
+      lock: true, rangePolicy: "control",
+      cadence: { closingMs: COMBAT_POLL_MS, engagedMs: COMBAT_POLL_MS },
+      fleetDrones: {
+        launch() {
+          const launched = launchCombatDrones(bot, session, scene, entity.itemID, operation, kit);
+          if (launched.success) {
+            kit.record(operation, `Launched ${launched.drones.length} fitted combat drone(s) for locked target ${operation.targetID}.`);
+            kit.save(operation);
+          }
+          return launched;
+        },
+        read: () => controlledCombatDrones(scene, entity.itemID, requiredDroneTypes),
+      },
+    });
+    if (result) {
+      if (result.reason === "lock-refused") {
+        kit.record(operation, `Target lock is being retried: ${String(result.detail || "targeting authority refused the lock.").slice(0, 160)}`);
+        kit.save(operation);
+      } else if (result.reason === "approach-failed" || result.reason === "lock-range-infeasible") {
+        kit.record(operation, `Waiting to close on locked target ${operation.targetID}: ${String(result.detail || "approach authority is retrying.").slice(0, 180)}`);
+        kit.save(operation);
+      } else if (result.reason === "engage-refused") {
+        return beginRetreat(operation, bot, `The drone combat authority refused the target: ${result.detail || "no engagement was accepted"}.`, kit, attached);
+      } else if (result.status === "no-weapon") {
+        return beginRetreat(operation, bot, result.detail, kit, attached);
+      } else if (result.justEngaged) {
+        operation.engagedAtMs ||= Date.now();
+        operation.lastEngagedTargetID = Number(target.itemID);
+        kit.record(operation, `Engaged the legally authorized Fleet target ${target.itemID} with ${result.droneCount} fitted combat drone(s).`);
+        kit.save(operation);
+      }
+      return { delayMs: result.delayMs };
+    }
+  }
+  // [ENGAGEMENT-SEAM:B] END
   if (distance > approachRange) {
     const currentFollowID = positive(entity.followTargetID);
     const currentFollowRange = Number(entity.followRange) || 0;
