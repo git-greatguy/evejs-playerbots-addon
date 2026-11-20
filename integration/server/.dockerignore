@@ -11,6 +11,8 @@
 !tools/
 !tools/DatabaseCreator/
 !tools/DatabaseCreator/**
+!tools/moon-data/
+!tools/moon-data/generate-moon-composition-pack.js
 !tools/ContentPacks/
 !tools/ContentPacks/**
 !tools/ErrorReport/

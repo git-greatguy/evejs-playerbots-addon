@@ -1816,11 +1816,75 @@ async function advanceCombat(operation, bot, kit) {
       return { delayMs: 15_000 };
     }
     operation.emptySinceAt = 0;
-    const targetDistance = Math.hypot(
-      Number(entity.position.x) - Number(activeTarget.position.x),
-      Number(entity.position.y) - Number(activeTarget.position.y),
-      Number(entity.position.z) - Number(activeTarget.position.z),
-    );
+    // [ENGAGEMENT-SEAM:A] BEGIN
+    let engagement;
+    try {
+      const runtime = require("./playerBotEngagementRuntime");
+      if (runtime.handles("A", operation, bot)) engagement = runtime;
+    } catch (_) { /* An unavailable module leaves the host path below active. */ }
+    if (engagement) {
+      const targetID = Number(activeTarget.itemID);
+      const isDefensive = Number(operation.defensiveTargetID) === targetID;
+      const isWildfirePlayer = operation.mode === "piracy" && bot.wildfire === true &&
+        activeTarget.kind === "ship" && activeTarget.session &&
+        !require("./playerBotCapacityRuntime").isPlayerBotSession(activeTarget.session);
+      const committed = operation.mode === "war" || operation.mode === "nullsec-conflict" || isWildfirePlayer;
+      const result = engagement.runSeamA({
+        bot, operation, attached, state, fit, space, drones: currentDrones, target: activeTarget,
+        stance: committed ? "committed" : "cautious", lock: false,
+        rangePolicy: committed || isDefensive ? "control" : "legacy",
+        cadence: { closingMs: 15_000, engagedMs: isDefensive ? 1_000 : 15_000 },
+        beforeEngage() {
+          operation.targetID = targetID;
+          operation.targetLabel = String(activeTarget.itemName || targetID);
+          if (operation.mode === "piracy" && require("./playerBotWildfireRuntime").isRevengePilot(bot)) {
+            require("./playerBotWildfireRuntime").sayBurn(session, bot.characterID);
+          }
+          operation.pendingCombatAction = { kind: "engage", targetID, startedAt: new Date().toISOString() };
+          kit.save(operation);
+        },
+      });
+      if (result) {
+        if (result.status === "refused" && result.reason === "approach-failed") {
+          return kit.block(operation, "holding", result.detail);
+        }
+        if (result.status === "refused" && result.reason === "engage-refused") {
+          operation.targetID = null;
+          operation.pendingCombatAction = null;
+          operation.stage = "return";
+          operation.defensiveTargetID = null;
+          record(operation, kit, `Drone combat authority refused target ${targetID}: ${result.detail}.`);
+          return { delayMs: 15_000 };
+        }
+        if (result.status === "no-weapon") {
+          operation.stage = "return";
+          record(operation, kit, `${result.detail} The combat patrol is returning to station.`);
+          return { delayMs: 15_000 };
+        }
+        if (result.status === "target-lost") {
+          if (operation.targetID != null) {
+            operation.targetID = null;
+            kit.save(operation);
+          }
+          return { delayMs: 15_000 };
+        }
+        if (result.justEngaged) {
+          operation.pendingCombatAction = null;
+          record(operation, kit, isDefensive
+            ? `Responding to legal hostile ship ${targetID} with ${result.droneCount} drone(s); the attack will be revalidated each combat step.`
+            : `Engaged eligible ${activeTarget.npcEntityType === "npc" ? "pirate NPC" : operation.mode === "war" ? "war target" : "cargo-bearing player ship"} ${targetID} with ${result.droneCount} drone(s).`);
+        } else if (Number(operation.targetID) !== targetID && (result.status === "engaging" ||
+            (result.status === "closing" && result.droneCount > 0))) {
+          // A defensive alert clears targetID even if a drone has already engaged on its own.
+          operation.targetID = targetID;
+          operation.targetLabel = String(activeTarget.itemName || targetID);
+          kit.save(operation);
+        }
+        return { delayMs: result.delayMs };
+      }
+    }
+    // [ENGAGEMENT-SEAM:A] END
+    const targetDistance = state.distanceTo(activeTarget.itemID) ?? Number.POSITIVE_INFINITY;
     const effectiveDroneRange = Math.max(1_000, Math.min(
       DRONE_ATTACK_RANGE_METERS,
       Number(fit.droneAttackRange) || DRONE_ATTACK_RANGE_METERS,
