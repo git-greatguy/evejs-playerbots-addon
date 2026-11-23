@@ -156,3 +156,22 @@ test("marked Upwell HQ is selected and used as the hauling depot", () => {
   assert.equal(extractor.marketStationID, 1001);
   assert.equal(extractor.depositOnly, true);
 });
+
+test("structure upkeep is assigned before the caretaker's HQ mining loop", () => {
+  const fs = require("node:fs");
+  const source = fs.readFileSync(require.resolve(
+    "../integration/server/server/src/services/playerbots/playerBotDirectorRuntime.js"), "utf8");
+  const start = source.indexOf("let assignment = escortAssignment || (coreInstallPlan");
+  const chain = source.slice(start, source.indexOf(";", start));
+  assert.ok(start > 0);
+  assert.ok(chain.indexOf("structureMaintenanceAssignment") < chain.indexOf("localHQMiningAssignment"));
+  assert.ok(chain.indexOf("structureMaintenanceAssignment") < chain.indexOf("prioritizeHeadquarters"));
+});
+
+test("structure maintenance keeps every owned structure and only ranks the HQ first", () => {
+  const fs = require("node:fs");
+  const source = fs.readFileSync(require.resolve(
+    "../integration/server/server/src/services/playerbots/playerBotStructureRuntime.js"), "utf8");
+  assert.ok(!source.includes(".filter((structure) => isCorporationHeadquartersStructure(structure, corporationID))"));
+  assert.ok(source.includes("const headquartersFirst = Number(right.headquarters) - Number(left.headquarters);"));
+});

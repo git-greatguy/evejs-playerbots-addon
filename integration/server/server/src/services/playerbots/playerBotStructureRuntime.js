@@ -145,6 +145,18 @@ function isMissingCorporationHeadquarters(bot) {
   return missing;
 }
 
+function generateCorporationHeadquartersName(bot, corporationID, fallbackName) {
+  const corporation = require("../corporation/corporationState").getCorporationRecord(positiveID(corporationID)) || {};
+  const existingNames = new Set(require("../structure/structureState").listStructures()
+    .map((structure) => String(structure && (structure.name || structure.itemName) || "").trim().toLowerCase())
+    .filter(Boolean));
+  return require("./playerBotHeadquartersNameRuntime").generateHeadquartersName({
+    corporationName: corporation.corporationName || bot && bot.corporationName || fallbackName,
+    random: bot && bot.headquartersNameRandom,
+    isAvailable: (candidate) => !existingNames.has(candidate.toLowerCase()),
+  });
+}
+
 function isCorporationHeadquartersStructure(structure, corporationID) {
   const id = positiveID(corporationID);
   if (!id) return false;
@@ -252,15 +264,7 @@ function findAutonomousPurchasePlan(bot) {
     fundingSource = "seed-capital";
   }
 
-  const corporation = require("../corporation/corporationState").getCorporationRecord(corporationID) || {};
-  const existingNames = new Set(require("../structure/structureState").listStructures()
-    .map((structure) => String(structure && (structure.name || structure.itemName) || "").trim().toLowerCase())
-    .filter(Boolean));
-  const structureName = require("./playerBotHeadquartersNameRuntime").generateHeadquartersName({
-    corporationName: corporation.corporationName || bot.corporationName || type.name,
-    random: bot.headquartersNameRandom,
-    isAvailable: (candidate) => !existingNames.has(candidate.toLowerCase()),
-  });
+  const structureName = generateCorporationHeadquartersName(bot, corporationID, type.name);
   return {
     typeID,
     coreTypeID: positiveID(type.defaultQuantumCoreTypeID),
@@ -816,13 +820,17 @@ function findStructureMaintenancePlan(bot) {
     .filter((structure) => Number(structure && (structure.ownerCorpID || structure.ownerID)) === corporationID)
     .filter((structure) => !structure.destroyedAt && !structure.unanchoring && structure.hasQuantumCore === true)
     .filter((structure) => structureState.isDockingServiceOnline(structure))
-    .filter((structure) => isCorporationHeadquartersStructure(structure, corporationID))
     .filter((structure) => !activeTargets.has(positiveID(structure.structureID)))
+    .map((structure) => ({ structure, headquarters: isCorporationHeadquartersStructure(structure, corporationID) }))
+    // Every owned structure stays maintained; the corporation headquarters
+    // is served first, then low-power structures, then by ID.
     .sort((left, right) => {
-      const lowPowerFirst = Number(Number(right.upkeepState) === constants.STRUCTURE_UPKEEP_STATE.LOW_POWER) -
-        Number(Number(left.upkeepState) === constants.STRUCTURE_UPKEEP_STATE.LOW_POWER);
-      return lowPowerFirst || positiveID(left.structureID) - positiveID(right.structureID);
-    });
+      const headquartersFirst = Number(right.headquarters) - Number(left.headquarters);
+      const lowPowerFirst = Number(Number(right.structure.upkeepState) === constants.STRUCTURE_UPKEEP_STATE.LOW_POWER) -
+        Number(Number(left.structure.upkeepState) === constants.STRUCTURE_UPKEEP_STATE.LOW_POWER);
+      return headquartersFirst || lowPowerFirst || positiveID(left.structure.structureID) - positiveID(right.structure.structureID);
+    })
+    .map((entry) => entry.structure);
   if (!structures.length) return null;
 
   const itemTypeByID = new Map(itemTypes.listItemTypes()
@@ -2091,9 +2099,6 @@ function start(bot, itemID, systemID = null, options = {}) {
   if (!objective) return { success: false, message: positiveID(systemID) ? `System ${systemID} is not a reachable claimable null-sec system within ${MAX_DEPLOYMENT_ROUTE_HOPS} jumps.` : "No reachable null-sec structure deployment system is available." };
   const character = require("../character/characterState").getCharacterRecord(bot.characterID) || {};
   const corporationID = positiveID(character.corporationID || bot.corporationID);
-  const corporation = corporationID
-    ? require("../corporation/corporationState").getCorporationRecord(corporationID) || {}
-    : {};
   const corporationHasStructure = corporationID && !isMissingCorporationHeadquarters(bot);
   const headquarters = options.headquarters === true || !corporationHasStructure;
   const operation = tools.baseOperation("structure-deployment", bot, {
@@ -2104,7 +2109,7 @@ function start(bot, itemID, systemID = null, options = {}) {
     typeID: Number(item.typeID),
     corporationID,
     structureName: headquarters
-      ? `${corporation.corporationName || bot.corporationName || type.name} Headquarters`.slice(0, 200)
+      ? generateCorporationHeadquartersName(bot, corporationID, type.name).slice(0, 200)
       : String(item.itemName || type.name || `Structure ${item.typeID}`).slice(0, 200),
     headquarters,
     sourceStationID: inHangar ? sourceStationID : null,
