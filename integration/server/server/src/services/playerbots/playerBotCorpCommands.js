@@ -726,7 +726,7 @@ function stopTimer() {
 
 const HELP = [
   "/bots corp recall [corporationID] [station|structure <id>] - send every pilot to the corporation HQ, dock and hold them there",
-  "/bots corp work [corporationID] [auto|mine|pi|director] [trips <n>] - release the hold and start mining and PI around the HQ",
+  "/bots corp work [corporationID] [auto|mine|pi|director] [trips <n>] [station|structure <id>] - release the hold and start mining and PI around the HQ",
   "/bots corp status [corporationID] - show where the corporation's pilots are",
   "/bots corp hq [corporationID] [list | set <structureOrStationID> | clear] - show, list or change the HQ the commands above use (set/clear: CEO or staff)",
   "/bots corp deposit [corporationID] [status | on | off | auto | deliveries | hangar <1-7>] - deliver completed mining and PI output to the corporation HQ instead of selling it",
@@ -1056,7 +1056,7 @@ function commandHeadquarters(parsed, session, corporationID, options = {}) {
 
 // Appended (never substituted) to the existing /bots help text by the preload.
 const BOTS_HELP_ADDENDUM = [
-  "Corporation commands: /bots corp <recall|work|status|hq|help> ... (also /playerbots corp ...)",
+  "Corporation commands: /bots corp <recall|work|status|hq|deposit|help> ... (also /playerbots corp ...)",
   "/bots corp recall [corporationID] [station|structure <id>] - stop every pilot's work, send them to the corporation HQ, dock and hold (pause) them there",
   "/bots corp work [corporationID] [auto|mine|pi|director] [trips <n>] [station|structure <id>] - release the hold, then start work. auto: planetary pilots set up PI, security/piracy/sovereignty pilots go back to the director, everyone else mines",
   "/bots corp status [corporationID] - pilots docked at the HQ, held, travelling, working (by operation) and idle, plus recall progress",

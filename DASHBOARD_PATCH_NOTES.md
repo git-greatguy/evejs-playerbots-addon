@@ -142,10 +142,18 @@ Local test build; not yet proposed upstream.
   `app.js` (router), `api.js`, `ui.js`, `roster.js`, `drawer.js` and one
   `view-*.js` per page. The old single `app.js` is removed. No build step.
 - `compose.override.yaml`: dashboard bind default `127.0.0.1`.
-- `integration/manifest.json`: hashes for the changed and new files.
+- `integration/manifest.json`: hashes for the changed and new files, and the
+  add-on file list (`addonFiles`) regenerated so `verify.py` checks the new
+  `dashboard/js/` modules instead of the removed `dashboard/app.js`.
 - Docs: `GUIDE.md`, `OPERATIONS.md`, `README.md`, `INSTALLATION.md`,
   `TROUBLESHOOTING.md` (root and add-on copies) updated for the new pages and
-  bind default.
+  bind default. `OPERATIONS.md` no longer says corporation orders are lost on
+  restart, and lists `/bots corp deposit`.
+- `README.md` rewritten: quick start, feature list, dashboard pages, every chat
+  command, dashboard settings and environment variables with defaults and
+  ranges, hard limits and installer options.
+- `/bots corp help` text now lists `deposit` and the `station|structure`
+  option on `work`.
 
 ### Tests
 

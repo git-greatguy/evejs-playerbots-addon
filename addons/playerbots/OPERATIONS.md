@@ -864,6 +864,7 @@ staff can change the saved HQ.
 /bots corp work   [corporationID] [auto|mine|pi|director] [trips <n>]
 /bots corp status [corporationID]
 /bots corp hq     [corporationID] [list | set <structureOrStationID> | clear]
+/bots corp deposit [corporationID] [status | on | off | auto | deliveries | hangar <1-7>]
 ```
 
 `recall` stops each pilot's work, sends it to the corporation HQ and pauses it
@@ -872,9 +873,13 @@ recall to a corporation structure pauses the pilot at once and steps it there,
 without its usual threat responses, so use it in safe space. A pilot whose
 structure trip fails is released back to the director. `work` releases the
 corporation and starts mining around the HQ (or the nearest safe belts) and
-PI setup, or leaves the pilots to the director. Orders are kept in memory:
-after a restart, run `recall` or `work` again; `status` lists held pilots that
-are not at the HQ. Saved HQs are stored in the game store.
+PI setup, or leaves the pilots to the director. `deposit` (CEO or staff)
+sends finished mining and PI output to the HQ, Corporation Deliveries or a
+hangar division instead of the market. Recall and work orders, from chat or
+the dashboard's Corporations page, are saved in the game store and re-issued
+about a minute after the server starts; a recall holds the corporation until
+it is sent to work, resumed or the order is cancelled. `status` lists held
+pilots that are not at the HQ. Saved HQs are stored in the game store.
 
 ## Optional local defense
 
