@@ -47,6 +47,7 @@ const {
 } = require(path.join(__dirname, "./corporationState"));
 const {
   computeCharacterCorporationMemberLimit,
+  effectiveCorporationMemberLimit,
   hasRoomForAnotherMember,
 } = require(path.join(__dirname, "./corporationMemberLimit"));
 const {
@@ -2535,9 +2536,10 @@ class CorpRegistryRuntimeService extends BaseService {
       currentCorporationID !== corporationID
     ) {
       const targetCorporation = getCorporationRecord(corporationID) || {};
-      if (!hasRoomForAnotherMember(targetCorporation.memberLimit, targetCorporation.memberCount)) {
+    const memberLimit = effectiveCorporationMemberLimit(targetCorporation);
+    if (!hasRoomForAnotherMember(memberLimit, targetCorporation.memberCount)) {
         throwWrappedUserError("CrpAccessDenied", {
-          reason: `This corporation is at its member limit (${targetCorporation.memberLimit}).`,
+        reason: `This corporation is at its member limit (${memberLimit}).`,
         });
       }
     }
@@ -2668,6 +2670,10 @@ class CorpRegistryRuntimeService extends BaseService {
       changeDate,
     );
     return null;
+  }
+
+  canManageRecruitment(corporationID, session) {
+    return canManageCorporationRecruitment(corporationID, session);
   }
 
   Handle_InsertInvitation(args, session) {
@@ -3569,7 +3575,7 @@ class CorpRegistryRuntimeService extends BaseService {
     const memberLimit = computeCharacterCorporationMemberLimit(characterID);
     updateCorporationRecord(corporationID, { memberLimit });
     notifyCorporationChanged(corporationID, previousCorporation);
-    return memberLimit;
+    return effectiveCorporationMemberLimit({ ...corporationRecord, memberLimit });
   }
 
   Handle_UpdateLogo(args, session) {

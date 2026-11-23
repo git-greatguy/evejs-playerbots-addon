@@ -44,10 +44,28 @@ function toForm(settings, field) {
   return Number.isFinite(value) ? Number(value.toPrecision(8)) : "";
 }
 
+// Settings saved in the Windows launcher are shown but locked here.
+const LAUNCHER_NOTE = "Set in EVEJS Launcher (Mods → Playerbots → Configure)";
+function settingKey(field) {
+  return field[2] ? field[2][0] : field[0];
+}
+function isLocked(key) {
+  return Array.isArray(saved.launcherManagedFields) && saved.launcherManagedFields.includes(key);
+}
+
 function fieldHtml(field) {
   const [name, label, , min, max, step, hint] = field;
   const def = defaults ? toForm(defaults, field) : null;
-  return `<label>${esc(label)}<input class="field" name="${name}" type="number" min="${min}" max="${max}" step="${step}" required value="${esc(toForm(saved, field) ?? "")}">${hint ? `<small>${esc(hint)}</small>` : ""}${def !== null && def !== undefined ? `<small class="default-hint">Default ${esc(def)}</small>` : ""}</label>`;
+  const locked = isLocked(settingKey(field));
+  const note = locked
+    ? `<small class="default-hint">${esc(LAUNCHER_NOTE)}</small>`
+    : def !== null && def !== undefined ? `<small class="default-hint">Default ${esc(def)}</small>` : "";
+  return `<label>${esc(label)}<input class="field" name="${name}" type="number" min="${min}" max="${max}" step="${step}" required value="${esc(toForm(saved, field) ?? "")}"${locked ? ` disabled title="${esc(LAUNCHER_NOTE)}"` : ""}>${hint ? `<small>${esc(hint)}</small>` : ""}${note}</label>`;
+}
+
+function checkHtml(key, label, suffix = "") {
+  const locked = isLocked(key);
+  return `<label class="check"${locked ? ` title="${esc(LAUNCHER_NOTE)}"` : ""}><input type="checkbox" name="${key}" ${saved[key] ? "checked" : ""}${locked ? " disabled" : ""}> ${label}${suffix}${locked ? ` <span class="muted">(${esc(LAUNCHER_NOTE)})</span>` : ""}</label>`;
 }
 
 function group(id) {
@@ -75,8 +93,8 @@ function pageHtml(effectiveAutowork, roster) {
   <form id="settings-form">
     <div class="panel"><div class="panel-head"><div><h2>Autonomous work</h2><p>When off, the director gives no pilot new work. Running operations finish and dashboard orders still work.</p></div></div>
       <div class="panel-body"><div class="form-grid">
-        <label class="check"><input type="checkbox" name="autoworkEnabled" ${saved.autoworkEnabled ? "checked" : ""}> Autonomous work on <span class="muted">(now ${effectiveAutowork ? "on" : "off"})</span></label>
-        <label class="check"><input type="checkbox" name="rosterSeedEnabled" ${saved.rosterSeedEnabled ? "checked" : ""}> Gradual roster seeding on</label>
+        ${checkHtml("autoworkEnabled", "Autonomous work on", ` <span class="muted">(now ${effectiveAutowork ? "on" : "off"})</span>`)}
+        ${checkHtml("rosterSeedEnabled", "Gradual roster seeding on")}
       </div>
       <div id="seed-status" class="notice info" style="margin:14px 0 0"></div></div></div>
     <div class="panel"><div class="panel-head"><h2>Population</h2></div><div class="panel-body"><div class="form-grid">${group("population")}</div></div></div>
@@ -99,12 +117,14 @@ function bodyFromForm(form) {
   const body = {};
   for (const field of FIELDS) {
     const [name, , convert] = field;
+    if (isLocked(settingKey(field))) continue;
     const value = Number(form.elements.namedItem(name).value);
     if (convert) body[convert[0]] = Math.round(value * convert[1]);
     else body[name] = value;
   }
-  body.autoworkEnabled = form.elements.namedItem("autoworkEnabled").checked;
-  body.rosterSeedEnabled = form.elements.namedItem("rosterSeedEnabled").checked;
+  for (const key of ["autoworkEnabled", "rosterSeedEnabled"]) {
+    if (!isLocked(key)) body[key] = form.elements.namedItem(key).checked;
+  }
   return body;
 }
 
@@ -187,9 +207,8 @@ async function load(fresh) {
     if (!defaults || !(await confirmDialog("Reset settings", "Reset every setting on this page to its default and save?", "Reset and save"))) return;
     saved = { ...saved, ...defaults };
     const form = $("settings-form");
-    for (const field of FIELDS) form.elements.namedItem(field[0]).value = String(toForm(defaults, field) ?? "");
-    form.elements.namedItem("autoworkEnabled").checked = defaults.autoworkEnabled === true;
-    form.elements.namedItem("rosterSeedEnabled").checked = defaults.rosterSeedEnabled === true;
+    for (const field of FIELDS) if (!isLocked(settingKey(field))) form.elements.namedItem(field[0]).value = String(toForm(defaults, field) ?? "");
+    for (const key of ["autoworkEnabled", "rosterSeedEnabled"]) if (!isLocked(key)) form.elements.namedItem(key).checked = defaults[key] === true;
     form.requestSubmit();
   });
   $("names-template").addEventListener("click", () => {

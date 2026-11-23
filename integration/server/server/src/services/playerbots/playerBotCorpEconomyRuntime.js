@@ -23,11 +23,20 @@ const DEFAULT_POLICY = Object.freeze({
   corpReserve: 50_000,
   maxGrantsPerCycle: 2,
 });
-const HUMAN_CEO_PROFIT_SHARE = 0.40;
+function option(name, fallback, minimum, maximum) {
+  const value = Number(process.env[`EVEJS_PLAYER_BOTS_${name}`] ?? fallback);
+  return Number.isInteger(value) && value >= minimum && value <= maximum ? value : fallback;
+}
+const HUMAN_CEO_PROFIT_SHARE = option("PLAYER_CORP_PROFIT_SHARE_PERCENT", 60, 0, 100) / 100;
+const BOT_CEO_OPERATION_SHARE = option("BOT_CORP_OPERATION_SHARE_PERCENT", 20, 0, 100) / 100;
+const MINIMUM_PROFIT_SHARE = option("CORP_MIN_PROFIT_SHARE_ISK", 1, 1, 1_000_000);
 const MAX_LEDGER = 40;
 const repo = createTableRepository("service:playerbots", { strict: true });
 let profitSettlementQueue = Promise.resolve();
 const profitSnapshotCache = new Map();
+const bufferedTracking = new Map();
+let trackingTimer;
+let trackingShutdownRegistered = false;
 
 let accountService = null;
 
@@ -39,19 +48,98 @@ function getAccountService() {
   return accountService;
 }
 
-function readState() {
+function readStateSnapshot() {
   repo.ensureTable(TABLE);
   const result = repo.read(TABLE, ECONOMY_PATH);
   const data = result.success && result.data && typeof result.data === "object" ? result.data : {};
-  return { corporations: {}, ...JSON.parse(JSON.stringify(data)) };
+  return { corporations: {}, ...data };
+}
+
+function readState() {
+  return JSON.parse(JSON.stringify(readStateSnapshot()));
+}
+
+function writeEconomy(path, value) {
+  const result = repo.write(TABLE, path, value);
+  if (!result.success) throw new Error(result.errorMsg || "PLAYERBOT_CORP_ECONOMY_WRITE_FAILED");
+}
+
+function flushEconomy() {
+  const flush = repo.flushTableSync(TABLE);
+  if (!flush || flush.success !== true) throw new Error(flush && flush.errorMsg || "PLAYERBOT_CORP_ECONOMY_FLUSH_FAILED");
 }
 
 function saveState(state) {
-  const result = repo.write(TABLE, ECONOMY_PATH, state);
-  if (!result.success) throw new Error(result.errorMsg || "PLAYERBOT_CORP_ECONOMY_WRITE_FAILED");
-  const flush = repo.flushTableSync(TABLE);
-  if (!flush || flush.success !== true) throw new Error(flush && flush.errorMsg || "PLAYERBOT_CORP_ECONOMY_FLUSH_FAILED");
+  writeEconomy(ECONOMY_PATH, state);
+  flushEconomy();
   return state;
+}
+
+function settleInOrder(callback) {
+  const next = profitSettlementQueue.then(callback);
+  profitSettlementQueue = next.catch(() => {});
+  return next;
+}
+
+function trackingPath(corporationID, characterID) {
+  return `${ECONOMY_PATH}/corporations/${corporationID}/profitTracking/${characterID}`;
+}
+
+function flushTracking() {
+  clearTimeout(trackingTimer); trackingTimer = undefined;
+  const groups = new Map();
+  for (const [key, tracking] of bufferedTracking) {
+    const separator = key.lastIndexOf("/");
+    const path = key.slice(0, separator);
+    if (!groups.has(path)) groups.set(path, []);
+    groups.get(path).push({ key, pilotID: key.slice(separator + 1), tracking });
+  }
+  for (const [path, changes] of groups) {
+    const stored = repo.read(TABLE, path);
+    const merged = stored.success ? { ...stored.data } : {};
+    for (const { pilotID, tracking } of changes) merged[pilotID] = tracking;
+    writeEconomy(path, merged);
+    for (const { key } of changes) bufferedTracking.delete(key);
+  }
+}
+
+function scheduleTrackingSave() {
+  if (trackingTimer || !bufferedTracking.size) return;
+  trackingTimer = setTimeout(() => {
+    trackingTimer = undefined;
+    settleInOrder(flushTracking).catch(error => {
+      require("../../utils/logger").warn(`[PlayerBots] Profit tracking save deferred: ${error.message}`);
+      scheduleTrackingSave();
+    });
+  }, 60_000);
+  trackingTimer.unref?.();
+}
+
+function queueTracking(path, tracking) {
+  if (!trackingShutdownRegistered) {
+    require("../../gameStore").registerShutdownHook("playerbots-profit-tracking", () => settleInOrder(flushTracking));
+    trackingShutdownRegistered = true;
+  }
+  bufferedTracking.set(path, tracking);
+  scheduleTrackingSave();
+}
+
+function savePilotTracking(path, tracking) {
+  writeEconomy(path, tracking);
+  bufferedTracking.delete(path);
+}
+
+function readPilotEconomy(corporationID, bot, journal) {
+  const key = trackingPath(corporationID, Number(bot.characterID));
+  const stored = readStateSnapshot().corporations[String(corporationID)] || {};
+  const previous = bufferedTracking.get(key) || stored.profitTracking?.[bot.characterID];
+  // Only clone the active pilot's tracking. The rest of a 15,000-pilot
+  // corporation's economy and immutable ledger entries remain shared.
+  const corporationEntry = { ...stored, profitTracking: previous ? {
+    [bot.characterID]: structuredClone(previous),
+  } : {} };
+  const tracking = getOrCreateProfitTracking(corporationEntry, bot, corporationID, journal);
+  return { key, previous, corporationEntry, tracking };
 }
 
 function getCorpEntry(state, corporationID) {
@@ -89,20 +177,17 @@ function characterCorporationID(characterID) {
   return Number(record && record.corporationID) || 0;
 }
 
-function isBotCorporation(corporationID) {
-  return require("./playerBotRuntime").listBots().some((bot) =>
-    Number(characterCorporationID(bot.characterID) || bot.corporationID) === Number(corporationID));
+function isPlayerLed(corporationID) {
+  const corporation = require("../corporation/corporationState").getCorporationRecord(Number(corporationID)) || null;
+  const ceoID = Number(corporation && corporation.ceoID) || 0;
+  return Boolean(corporation && !corporation.deleted && corporation.isNPC === false && ceoID > 0 &&
+    !require("./playerBotRuntime").hasBotProfile(ceoID) && characterCorporationID(ceoID) === Number(corporationID));
 }
 
 function isHumanLedBotCorporation(corporationID, knownBots = null) {
-  const corporation = require("../corporation/corporationState").getCorporationRecord(Number(corporationID)) || null;
-  const ceoID = Number(corporation && corporation.ceoID) || 0;
-  if (!corporation || corporation.isNPC === true || ceoID <= 0 || !getCharacterRecord(ceoID)) return false;
-  const bots = knownBots || require("./playerBotRuntime").listBots();
-  const members = bots.filter((bot) =>
-    Number(characterCorporationID(bot.characterID) || bot.corporationID) === Number(corporationID));
-  if (!members.length) return false;
-  return !members.some((bot) => Number(bot.characterID) === ceoID);
+  if (!isPlayerLed(corporationID)) return false;
+  if (knownBots) return knownBots.some(bot => characterCorporationID(bot.characterID) === Number(corporationID));
+  return require("./playerBotRuntime").countBotsInCorporation(corporationID) > 0;
 }
 
 function roundIsk(value) {
@@ -242,7 +327,7 @@ function cumulativeNetProfit(balance, tracking) {
 
 function getCumulativeNetProfit(bot) {
   const characterID = Number(bot && bot.characterID) || 0;
-  const corporationID = Number(getCharacterRecord(characterID)?.corporationID || bot && bot.corporationID) || 0;
+  const corporationID = characterCorporationID(characterID) || Number(bot?.corporationID) || 0;
   if (!characterID || !corporationID) return { netProfit: 0, balance: 0, capitalBaseline: 0 };
   const balance = getBalance(characterID);
   const journal = getCharacterWalletJournal(characterID);
@@ -250,9 +335,7 @@ function getCumulativeNetProfit(bot) {
   const cacheKey = `${corporationID}:${characterID}`;
   const cached = profitSnapshotCache.get(cacheKey);
   if (cached && cached.balance === balance && cached.latestTransactionID === latestTransactionID) return cached.value;
-  const state = readState();
-  const corporationEntry = getCorpEntry(state, corporationID);
-  const tracking = getOrCreateProfitTracking(corporationEntry, bot, corporationID, journal);
+  const { corporationEntry, tracking } = readPilotEconomy(corporationID, bot, journal);
   reconcileProfitJournal(tracking, journal, corporationID, characterID, corporationEntry);
   const netProfit = cumulativeNetProfit(balance, tracking);
   tracking.cumulativeNetProfit = netProfit;
@@ -268,11 +351,12 @@ function getCumulativeNetProfit(bot) {
     externalCapital: Number(tracking.externalCapital) || 0,
     paidToCorporation: Number(tracking.paidToCorporation) || 0,
   };
+  if (profitSnapshotCache.size >= 30_000) profitSnapshotCache.clear();
   profitSnapshotCache.set(cacheKey, { balance, latestTransactionID, value });
   return value;
 }
 
-async function sendPendingProfitShare(bot, corporationID, state, corporationEntry, tracking, pending) {
+async function sendPendingProfitShare(bot, corporationID, key, corporationEntry, tracking, pending) {
   const session = require("./playerBotSpaceRuntime").getActorSession(bot);
   const result = await getAccountService().Handle_GiveCash(
     [corporationID, Number(pending.amount)],
@@ -293,64 +377,72 @@ async function sendPendingProfitShare(bot, corporationID, state, corporationEntr
     ...(tracking.confirmedPaymentKeys || []),
     String(pending.idempotencyKey),
   ])].slice(-100);
-  corporationEntry.sharesReceived = roundIsk(Number(corporationEntry.sharesReceived) + Number(pending.amount));
+  corporationEntry.sharesReceived = roundIsk((Number(corporationEntry.sharesReceived) || 0) + Number(pending.amount));
   appendLedger(corporationEntry, {
     type: "profit-share",
     characterID: Number(bot.characterID),
     amount: Number(pending.amount),
-    shareRate: HUMAN_CEO_PROFIT_SHARE,
+    shareRate: pending.shareRate ?? 0.40,
     cumulativeNetProfit: Number(tracking.cumulativeNetProfit) || 0,
-    reason: "40% of cumulative net profit after operating costs",
+    reason: "Share of cumulative net profit after operating costs",
     idempotencyKey: pending.idempotencyKey,
   });
   tracking.updatedAt = new Date().toISOString();
-  saveState(state);
+  const path = `${ECONOMY_PATH}/corporations/${corporationID}`;
+  savePilotTracking(key, tracking);
+  writeEconomy(`${path}/sharesReceived`, corporationEntry.sharesReceived);
+  writeEconomy(`${path}/ledger`, corporationEntry.ledger);
+  flushEconomy();
+  profitSnapshotCache.delete(`${corporationID}:${bot.characterID}`);
   return Number(pending.amount);
 }
 
 async function settleHumanLedProfitShare(bot) {
   const characterID = Number(bot && bot.characterID) || 0;
   if (!characterID) return 0;
-  const corporationID = Number(getCharacterRecord(characterID)?.corporationID) || 0;
-  if (!corporationID || !isHumanLedBotCorporation(corporationID)) return 0;
-  const settlement = profitSettlementQueue.catch(() => 0).then(async () => {
-    if (Number(getCharacterRecord(characterID)?.corporationID) !== corporationID ||
-        !isHumanLedBotCorporation(corporationID)) return 0;
+  const corporationID = characterCorporationID(characterID);
+  if (!corporationID) return 0;
+  return settleInOrder(async () => {
+    if (characterCorporationID(characterID) !== corporationID || !isPlayerLed(corporationID)) return 0;
     const balance = getBalance(characterID);
     const journal = getCharacterWalletJournal(characterID);
-    const state = readState();
-    const corporationEntry = getCorpEntry(state, corporationID);
-    const tracking = getOrCreateProfitTracking(corporationEntry, bot, corporationID, journal);
+    const { key, previous, corporationEntry, tracking } = readPilotEconomy(corporationID, bot, journal);
+    const pending = tracking.pendingPayments[0];
+    if (pending) return sendPendingProfitShare(bot, corporationID, key, corporationEntry, tracking, pending);
     reconcileProfitJournal(tracking, journal, corporationID, characterID, corporationEntry);
     const profit = cumulativeNetProfit(balance, tracking);
     const targetContribution = Math.floor(Math.max(0, profit) * HUMAN_CEO_PROFIT_SHARE * 100) / 100;
-    const amount = roundIsk(targetContribution - Number(tracking.paidToCorporation));
+    const amount = Math.min(roundIsk(balance), roundIsk(targetContribution - Number(tracking.paidToCorporation)));
     tracking.cumulativeNetProfit = profit;
     tracking.targetContribution = targetContribution;
-    tracking.updatedAt = new Date().toISOString();
-    saveState(state);
-    const pending = tracking.pendingPayments[0];
-    if (pending) return sendPendingProfitShare(bot, corporationID, state, corporationEntry, tracking, pending);
-    if (amount < 1 || balance < amount) return 0;
+    if (amount < MINIMUM_PROFIT_SHARE) {
+      if (JSON.stringify(tracking) !== JSON.stringify(previous)) {
+        tracking.updatedAt = new Date().toISOString();
+        queueTracking(key, tracking);
+      }
+      return 0;
+    }
 
-    const idempotencyKey = `playerbot:profit-share:${corporationID}:${characterID}:${Math.round(targetContribution * 100)}`;
-    const nextPayment = { amount, idempotencyKey, countsTowardProfit: true, createdAt: new Date().toISOString() };
+    const idempotencyKey = `playerbot:profit-share:${corporationID}:${characterID}:${Math.round((Number(tracking.paidToCorporation) + amount) * 100)}`;
+    const nextPayment = { amount, idempotencyKey, shareRate: HUMAN_CEO_PROFIT_SHARE,
+      countsTowardProfit: true, createdAt: new Date().toISOString() };
     tracking.pendingPayments = [nextPayment];
-    saveState(state);
-    return sendPendingProfitShare(bot, corporationID, state, corporationEntry, tracking, nextPayment);
+    savePilotTracking(key, tracking);
+    flushEconomy();
+    return sendPendingProfitShare(bot, corporationID, key, corporationEntry, tracking, nextPayment);
   });
-  profitSettlementQueue = settlement.catch(() => 0);
-  return settlement;
 }
 
 async function settleProfitShares(bots = require("./playerBotRuntime").listBots()) {
   const summary = { eligibleBots: 0, contributions: 0, amount: 0, failures: 0 };
   // Leadership is resolved once per corporation for this pass.
   const humanLedByCorporation = new Map();
+  let inspected = 0;
   for (const bot of bots) {
+    if (++inspected % 32 === 0) await new Promise(resolve => setImmediate(resolve));
     const corporationID = characterCorporationID(bot.characterID);
     if (!humanLedByCorporation.has(corporationID)) {
-      humanLedByCorporation.set(corporationID, isHumanLedBotCorporation(corporationID, bots));
+      humanLedByCorporation.set(corporationID, isPlayerLed(corporationID));
     }
     if (!humanLedByCorporation.get(corporationID)) continue;
     summary.eligibleBots += 1;
@@ -368,23 +460,32 @@ async function settleProfitShares(bots = require("./playerBotRuntime").listBots(
   return summary;
 }
 
-// Bot-led corporations keep the original per-operation share. A human CEO's
-// corporation instead receives 40% of each bot's cumulative net profit, based
+// Bot-led corporations use a per-operation share. A human CEO's corporation
+// receives a configurable share of each bot's cumulative net profit, based
 // on wallet balance less capital and operating spend, with previous donations
 // added back so a payout never reduces the profit base.
 async function payCorpShare(bot, profit, reason, paymentKey = null) {
-  const corporationID = Number(require("../character/characterState").getCharacterRecord(bot.characterID)?.corporationID) || 0;
-  if (!corporationID || !isBotCorporation(corporationID)) return 0;
-  if (isHumanLedBotCorporation(corporationID)) return settleHumanLedProfitShare(bot);
-  if (!(profit > 0)) return 0;
+  const corporationID = characterCorporationID(bot.characterID);
+  if (!corporationID || !require("./playerBotRuntime").hasBotProfile(bot.characterID)) return 0;
+  if (isPlayerLed(corporationID)) return settleHumanLedProfitShare(bot);
+  if (!(profit > 0) || !BOT_CEO_OPERATION_SHARE) return 0;
+  return settleInOrder(() => payOperationShare(bot, corporationID, profit, reason, paymentKey));
+}
+
+async function payOperationShare(bot, corporationID, profit, reason, paymentKey) {
+  if (characterCorporationID(bot.characterID) !== corporationID) return 0;
+  const corporation = require("../corporation/corporationState").getCorporationRecord(corporationID);
+  if (!corporation || corporation.deleted || corporation.isNPC !== false ||
+      !require("./playerBotRuntime").hasBotProfile(corporation.ceoID)) return 0;
   const state = readState();
   const entry = getCorpEntry(state, corporationID);
-  const amount = Math.floor(profit * Number(entry.policy.corpShare) * 100) / 100;
+  const amount = Math.floor(profit * BOT_CEO_OPERATION_SHARE * 100) / 100;
   if (!(amount >= 1) || (!paymentKey && getBalance(bot.characterID) < amount)) return 0;
   const idempotencyKey = paymentKey
     ? `playerbot:corp-share:${Number(bot.characterID)}:${String(paymentKey).replace(/[^a-zA-Z0-9:._-]/g, "-").slice(0, 180)}`
     : null;
-  if (idempotencyKey && (entry.ledger || []).some((row) => row && row.idempotencyKey === idempotencyKey)) return amount;
+  const previous = idempotencyKey && (entry.ledger || []).find(row => row?.idempotencyKey === idempotencyKey);
+  if (previous) return Number(previous.amount) || 0;
   const session = require("./playerBotSpaceRuntime").getActorSession(bot);
   const result = await getAccountService().Handle_GiveCash(
     [corporationID, amount],
@@ -408,7 +509,11 @@ async function payCorpShare(bot, profit, reason, paymentKey = null) {
 }
 
 // The CEO bot funds members below the minimum balance from the corp wallet.
-async function fundMembers(bots = []) {
+function fundMembers(bots = []) {
+  return settleInOrder(() => fundMembersInOrder(bots));
+}
+
+async function fundMembersInOrder(bots) {
   const summary = { grants: 0, granted: 0, refused: 0 };
   const corporations = new Map();
   for (const bot of bots) {
@@ -428,10 +533,12 @@ async function fundMembers(bots = []) {
     const entry = getCorpEntry(state, corporationID);
     const policy = { ...DEFAULT_POLICY, ...entry.policy };
     const needy = members
-      .filter((bot) => bot !== ceo && bot.status !== "paused" && getBalance(bot.characterID) < policy.memberMinBalance)
-      .sort((left, right) => getBalance(left.characterID) - getBalance(right.characterID))
+      .filter(bot => bot !== ceo && bot.status !== "paused")
+      .map(bot => ({ bot, balance: getBalance(bot.characterID) }))
+      .filter(row => row.balance < policy.memberMinBalance)
+      .sort((left, right) => left.balance - right.balance)
       .slice(0, policy.maxGrantsPerCycle);
-    for (const member of needy) {
+    for (const { bot: member } of needy) {
       if (getCorpBalance(corporationID) < policy.memberGrant + policy.corpReserve) break;
       const session = require("./playerBotSpaceRuntime").getActorSession(ceo);
       const before = getBalance(member.characterID);
@@ -458,16 +565,16 @@ async function fundMembers(bots = []) {
       }
     }
   }
-  saveState(state);
+  if (summary.grants || summary.refused) saveState(state);
   return summary;
 }
 
 function formatCorpEconomy() {
-  const state = readState();
-  const bots = require("./playerBotRuntime").listBots();
+  const state = readStateSnapshot();
   const rows = Object.entries(state.corporations).map(([corporationID, entry]) => {
-    const humanLed = isHumanLedBotCorporation(corporationID, bots);
-    const shareLabel = humanLed ? "40% of cumulative net profit" : `${(Number(entry.policy.corpShare) * 100).toFixed(0)}% per-operation share`;
+    const humanLed = isPlayerLed(corporationID);
+    const shareLabel = humanLed ? `${(HUMAN_CEO_PROFIT_SHARE * 100).toFixed(0)}% of cumulative net profit` :
+      `${(BOT_CEO_OPERATION_SHARE * 100).toFixed(0)}% per-operation share`;
     const trackedProfit = Object.values(entry.profitTracking || {}).reduce((total, row) =>
       total + (Number(row && row.cumulativeNetProfit) || 0), 0);
     return `Corp ${corporationID}: wallet ${getCorpBalance(corporationID).toFixed(2)} ISK; contributions received ${Number(entry.sharesReceived || 0).toFixed(2)}; ` +

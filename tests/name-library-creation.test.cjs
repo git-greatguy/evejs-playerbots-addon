@@ -62,7 +62,7 @@ function roster(t) {
       const id = nextID++; characters.set(id, { characterID: id, characterName: name });
       return { success: true, data: { characterID: id, characterName: name } };
     } },
-    "./playerBotPortraitRuntime": { ensurePortrait() {} },
+    "./playerBotPortraitRuntime": { ensurePortrait() {}, queuePortrait() {} },
     "./playerBotEconomyRuntime": { hubStationForRace: () => 60000001 },
     "./playerBotProvisioningRuntime": { reconcileManagedCorporationMemberLimits() {} },
   });

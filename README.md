@@ -8,12 +8,13 @@ they will join your corporation or fleet and fly with you when asked.
 The add-on is a companion process that sits next to your EveJS server. The
 server stays in charge of every character, wallet, ship, market order and
 item; the add-on only decides what each bot should do next, through a private
-API inside Docker. It never opens the game database itself.
+API. It never opens the game database itself. It runs either with **Docker
+Compose** or, on Windows, as a mod for **EVEJS Launcher** with no Docker.
 
 | | |
 | --- | --- |
-| **Version** | 0.2.152, experimental test build |
-| **Works with** | EveJS `261115.2` (source checkout, run with Docker Compose) |
+| **Version** | 0.2.152 (Windows launcher package 0.2.152.11), experimental test build |
+| **Works with** | EveJS `261115.2`, run with Docker Compose or EVEJS Launcher 1.0.91+ on Windows |
 | **Dashboard** | `http://127.0.0.1:8080` on the server machine |
 | **License** | AGPL-3.0-only |
 
@@ -47,8 +48,11 @@ next.
   new ones as they fill up.
 - Every pilot starts with 1 billion ISK, kept back so routine work cannot
   spend it all.
-- Portraits work offline. Corporation and alliance names can come from a name
-  list you edit on the dashboard.
+- Every bot gets a portrait from 32 bundled faces, with no internet needed.
+  Missing or blank portraits are repaired in the background, and existing
+  bots can be refreshed once after an upgrade (custom portraits are kept).
+- Corporation and alliance names can come from a name list you edit on the
+  dashboard.
 
 ### Work they do without being told
 
@@ -74,7 +78,9 @@ after a restart.
   and null-sec conflict.
 - **Corporations and alliances**: CEOs found alliances, corporations declare
   wars on each other and fund their fleets, and alliances move goods between
-  members.
+  members. Bots pay part of their profit to their corporation: 60% of net
+  profit to a human-led corporation and 20% of each profitable job to a
+  bot-led one, by default.
 - **Structures and sovereignty**: deploying Upwell structures in null-sec,
   capturing neutral hubs and running sovereignty campaigns. *(Sovereignty
   results still need live proof.)*
@@ -88,6 +94,10 @@ after a restart.
 - **Command whole corporations.** Recall a corporation to its headquarters and
   hold it there, send it back to work, choose where its output goes, or pick
   out individual pilots. These orders survive a server restart.
+- **Recruit bots into your corporation.** Name your corporation in the
+  settings and use `/bots corp inviteall`, or let the server recruit eligible
+  bots automatically. Player corporations can hold up to 15,000 members and
+  1,000 bots by default.
 - **Watch and steer everything** from the [dashboard](#the-dashboard) in your
   browser.
 
@@ -107,7 +117,10 @@ after a restart.
 The add-on also ships server-side improvements that help any busy EveJS
 server: a steadier space tick, a log of any tick that holds the server for a
 second or more, slower upkeep in systems nobody is watching, cleanup of sites
-in long-empty systems, and a Performance page that shows where time goes.
+in long-empty systems, combat progress and profit tracking saved in batches,
+roster and task lookups that avoid scanning every bot, and a Performance page
+that shows where time goes. The Windows package also supports a multicore TCP
+build of EveJS.
 
 On a clean test server, 500 bots were seeded and all 500 held online at once
 in about 3 GiB of server memory. See
@@ -118,7 +131,19 @@ measurements.
 
 ## Install
 
-### You need
+There are two ways to run Playerbots. Pick the one that matches how you run
+EveJS:
+
+- **Docker Compose** (Linux, macOS or Windows with Docker Desktop): follow the
+  steps below.
+- **EVEJS Launcher on Windows** (no Docker): import
+  `dist/evejs-playerbots-windows-v0.2.152.11.zip` in **Mods → Import**, turn
+  it on, and set it up under **Configure**. Full steps, upgrades and removal:
+  [`windows-native/README.md`](windows-native/README.md).
+
+Both install the same server code and the same dashboard.
+
+### You need (Docker)
 
 - An EveJS **`261115.2`** source checkout, set up with Docker (a fresh one or
   your existing server; existing game data is kept).
@@ -127,7 +152,7 @@ measurements.
 - A running, healthy EveJS **Market** service. The add-on does not create the
   market; EveJS's own market tools do (see `doc/SETUP.md` in EveJS).
 
-### Steps
+### Steps (Docker)
 
 1. **Get the add-on.** Unpack `dist/evejs-playerbots-addon-v0.2.152.zip`, or
    clone this repository to install straight from its source. *(This branch's
@@ -338,6 +363,7 @@ on after a server restart.
 | `/bots corp status [corpID]` | Who is home, held, travelling, working or idle |
 | `/bots corp hq [corpID] [list \| set <id> \| clear]` | Show, list or change the headquarters |
 | `/bots corp deposit [corpID] [status\|on\|off\|auto\|deliveries\|hangar <1-7>]` | Deliver mined and PI goods to headquarters instead of selling them |
+| `/bots corp inviteall [status\|cancel]` | Invite every eligible bot into the corporation set as the recruitment target (CEO, director or personnel manager) |
 | `/bots corp help` | Full corporation help in game |
 
 </details>
@@ -406,7 +432,9 @@ In fleet chat:
 ### On the dashboard
 
 Most things you'd want to change are on the **Settings** page. Changes apply
-straight away, survive restarts, and win over any `.env` value.
+straight away, survive restarts, and win over any `.env` value. On the
+Windows launcher, anything saved under **Mods → Playerbots → Configure** wins
+instead and shows on this page as locked ("Set in EVEJS Launcher").
 
 | Setting | Default | Allowed |
 | --- | --- | --- |
@@ -449,14 +477,34 @@ the smaller of the target and the online limit.
 seeding at most 10 pilots per batch, pausing above 250 ms event-loop p95 or
 95% CPU, and skipping any pilot that takes over a second to create.
 
-### In `.env`
+### In `.env` (Docker) or Configure (Windows)
 
 Server-level switches live in the EveJS `.env` file and are read when the
 containers start, so recreate `server` and `playerbots-addon` after changing
-them. Every name below starts with `EVEJS_PLAYER_BOTS_` unless written in
+them. On Windows the same switches are fields under **Mods → Playerbots →
+Configure** and apply at the next Game start. Every name below starts with `EVEJS_PLAYER_BOTS_` unless written in
 full. The dashboard settings above can also be given starting values here
 (`TARGET`, `MAX_ONLINE`, `MAX_PER_SYSTEM` and so on; see
 [`OPERATIONS.md`](OPERATIONS.md#configure-bot-count-and-connection-rotation)).
+
+#### Recruitment, corporations and portraits
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `RECRUITMENT_CORPORATION` | empty | Player corporation that `/bots corp inviteall` and automatic recruitment fill. Name or ticker; `name:…` or `ticker:…` if both match. Empty turns recruitment off. |
+| `AUTO_RECRUIT_CORPORATION` | `0` | `1` recruits eligible bots continuously, inviting as the corporation's CEO |
+| `RECRUITMENT_BATCH_SIZE` | 4 | Bots handled per recruitment batch (1–16) |
+| `PLAYER_CORPORATION_MEMBER_LIMIT` | 15000 | Seats in a human-led corporation, CEO included; `0` uses EveJS's skill-based limit |
+| `PLAYER_CORPORATION_BOT_LIMIT` | 1000 | Most bots one human-led corporation can hold (1–15,000) |
+| `PLAYER_CORP_PROFIT_SHARE_PERCENT` | 60 | Share of a bot's net profit paid to its human-led corporation |
+| `BOT_CORP_OPERATION_SHARE_PERCENT` | 20 | Share of each profitable job paid to a bot-led corporation |
+| `CORP_MIN_PROFIT_SHARE_ISK` | 1 | Smallest corporation payout; smaller amounts wait until they reach it |
+| `REFRESH_EXISTING_PORTRAITS` | `1` | `0` keeps existing bot portraits instead of refreshing them once after upgrading |
+
+Recruitment takes bots from NPC corporations or their own specialist
+corporation, leaves at least five in each specialist corporation, and never
+moves bots already in another player corporation. Lowering a limit stops new
+joins above it; nobody is removed.
 
 #### Dashboard and network
 
@@ -591,6 +639,38 @@ also by [@ubermidas](https://github.com/ubermidas), merged into this copy:
 - Newly deployed headquarters get a generated name instead of a fixed
   "<Corp> Headquarters".
 
+### Luna update and Windows package (0.2.152.10 by @rizonx)
+
+The Luna update by [@rizonx](https://github.com/rizonx), released as the
+Windows launcher package *Playerbots 0.2.152.10 (Windows, Luna Update)*, is
+merged into this copy. Its gameplay and performance changes now ship with
+both the Docker add-on and the Windows package, and the Windows package is
+built from this repository so it carries the new dashboard too.
+
+- **Corporation recruitment**: `/bots corp inviteall [status|cancel]` and
+  optional automatic recruitment into a chosen player corporation, with
+  configurable member and bot limits.
+- **Corporation income**: player-led corporations get 60% of their bots' net
+  profit (was 40%), bot-led corporations 20% of each profitable job (was
+  10%), with a minimum payout setting.
+- **Portrait repair**: 32 bundled portraits, a one-time refresh of existing
+  bots (old portraits backed up), background repair of missing ones, and
+  local portrait serving on the Windows dashboard.
+- **Performance**: buffered combat progress and profit saves, task claims and
+  bot lookups without full-roster scans, cheaper corporation membership
+  counts.
+- **Windows launcher package**: install, disable, remove and recover from
+  EVEJS Launcher, with the multicore TCP build detected automatically. Source
+  in [`windows-native/`](windows-native/).
+
+What changed while merging: the server start-up and settings code now work
+with or without the Windows driver, so the same files serve both setups; the
+Windows dashboard accepts `localhost` as well as `127.0.0.1`; and the new
+recruitment, income and portrait settings are passed through the Docker
+Compose file. In Docker, the new defaults apply after the next rebuild,
+including the larger corporation income shares and the 15,000-seat member
+limit for player corporations.
+
 ### Installing a patch
 
 Patches like this one arrive as source changes before a new release ZIP
@@ -623,7 +703,8 @@ To go back, run `python3 rollback.py /path/to/evejs` and rebuild.
 | `integration/server/` | The EveJS server files the add-on installs |
 | `integration/manifest.json` | Supported EveJS version and checksums for every managed file |
 | `install.py`, `install.sh`, `verify.py`, `rollback.py` | Installer, checker and rollback |
-| `dist/` | The release ZIP |
+| `dist/` | The release ZIPs (Docker add-on and Windows launcher package) |
+| `windows-native/` | Windows launcher package: mod manifest, installer helper, native driver, multicore TCP file, release history |
 | `tests/` | Node test suites (`node --test tests/*.test.cjs`; some need an EveJS checkout in `EVEJS_ROOT`) |
 | `GUIDE.md` | Every chat command with examples |
 | `INSTALLATION.md`, `OPERATIONS.md`, `TROUBLESHOOTING.md` | Installing, running and fixing |
@@ -646,8 +727,18 @@ python tools/playerbots/build-addon-package.py --compat-root "$EVEJS_COMPAT_ROOT
 ```
 
 Check the ZIP before sharing it, and don't call a source-only commit an
-installable release. The ZIP now in `dist/` is the 0.2.152 build with the
-headquarters upkeep patch, but without the dashboard overhaul.
+installable release. The Docker ZIP now in `dist/` is the 0.2.152 build with
+the headquarters upkeep patch, but without the dashboard overhaul or the Luna
+update.
+
+The Windows launcher package needs no EveJS checkout; it is built from this
+repository and checked against the release history in
+`windows-native/history/` so the launcher can upgrade earlier packages in
+place:
+
+```sh
+python tools/playerbots/build-windows-native.py
+```
 
 </details>
 
@@ -671,7 +762,10 @@ Playerbots. Thanks to them for the collaboration.
 
 **Contributors:** [@gzy40347](https://github.com/gzy40347),
 [@ChaosRemnant](https://github.com/ChaosRemnant),
-[@ubermidas](https://github.com/ubermidas)
+[@ubermidas](https://github.com/ubermidas) (dashboard overhaul, corporation
+headquarters), [@rizonx](https://github.com/rizonx) (Luna update: corporation
+recruitment, corporation income, portrait repair, performance work and the
+Windows launcher package)
 
 **License:** AGPL-3.0-only (see `LICENSE`). Source and license notes for
 EveJS and the fittings are in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

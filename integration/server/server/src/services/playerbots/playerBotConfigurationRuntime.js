@@ -2,6 +2,14 @@
 
 const { createTableRepository } = require("../../gameStore/tableRepository");
 
+// Settings saved in the Windows launcher are locked in the dashboard. Docker
+// builds have no launcher and therefore no locked settings.
+const nativePlayerbotsPath = require("path").join(__dirname, "../../../playerbots-native/native.cjs");
+function launcherOverrides() {
+  if (!require("fs").existsSync(nativePlayerbotsPath)) return {};
+  return require(nativePlayerbotsPath).launcherOverrides();
+}
+
 const TABLE = "playerBots";
 const PATH = "/_dashboardSettings";
 const MAX_ROSTER = 15_000;
@@ -96,6 +104,9 @@ function getSettings() {
   }
   if (typeof stored.autoworkEnabled === "boolean") settings.autoworkEnabled = stored.autoworkEnabled;
   if (typeof stored.rosterSeedEnabled === "boolean") settings.rosterSeedEnabled = stored.rosterSeedEnabled;
+  const locked = launcherOverrides();
+  Object.assign(settings, locked);
+  settings.launcherManagedFields = Object.keys(locked);
   settings.rosterCeiling = Math.min(MAX_ROSTER, settings.rosterCeiling);
   settings.rosterTarget = Math.min(settings.rosterTarget, settings.rosterCeiling);
   settings.maxOnline = Math.min(MAX_ONLINE, settings.maxOnline);
@@ -132,7 +143,13 @@ function updateSettings(patch = {}) {
   delete next.maximums;
   delete next.updatedAt;
   delete next.defaults;
+  delete next.launcherManagedFields;
+  const locked = launcherOverrides();
   for (const [key, value] of Object.entries(patch)) {
+    if (Object.hasOwn(locked, key)) {
+      if (value !== next[key]) return { success: false, message: `${key} is managed in EVEJS Launcher > Mods > Configure.` };
+      continue;
+    }
     if (booleanSettings.has(key)) {
       if (typeof value !== "boolean") return { success: false, message: `${key} must be true or false.` };
       next[key] = value;
@@ -148,6 +165,11 @@ function updateSettings(patch = {}) {
   }
   if (next.rosterTarget > next.rosterCeiling) return { success: false, message: "Roster target cannot exceed its ceiling." };
   if (next.directorThinkMaxMs < next.directorThinkMinMs) return { success: false, message: "Director maximum think delay must be at least the minimum." };
+  const stored = readStored();
+  for (const key of Object.keys(locked)) {
+    if (Object.hasOwn(stored, key)) next[key] = stored[key];
+    else delete next[key];
+  }
   next.updatedAt = new Date().toISOString();
   const result = repo.write(TABLE, PATH, next);
   if (!result.success) return { success: false, message: result.errorMsg || "Could not save playerbot settings." };

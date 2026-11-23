@@ -1,6 +1,6 @@
 "use strict";
 
-const { getCharacterRecord, getActiveShipRecord } = require("../character/characterState");
+const { getCharacterRecord, readSharedCharacterRecord, getActiveShipRecord } = require("../character/characterState");
 const playerBots = require("./playerBotRuntime");
 const spaceRuntime = require("../../space/runtime");
 const worldData = require("../../space/worldData");
@@ -25,6 +25,7 @@ const CORPORATION_BOT_RECONCILE_INTERVAL_MS = 30_000;
 const ROUTE_SECURITY_COST = Object.freeze({ highsec: 1, lowsec: 3, nullsec: 9 });
 
 const actorSessions = new Map();
+const registeredActors = new Map();
 const stargateRouteCache = new Map();
 let desiredConnectedCharacterIDs = new Set();
 let lastConnectionPlan = null;
@@ -262,8 +263,8 @@ function popRouteCandidate(heap) {
   return first;
 }
 
-function createActorSession(bot) {
-  const session = playerBots.createBotSession(bot);
+function createActorSession(bot, character) {
+  const session = playerBots.createBotSession(bot, character);
   const characterID = normalizePositiveID(bot && bot.characterID);
   if (!characterID) throw new Error("PLAYERBOT_CHARACTER_ID_REQUIRED");
   const clientID = -characterID;
@@ -352,13 +353,13 @@ function syncActorSession(session, character, fallbackCharacterID = 0) {
 function getActorSession(bot) {
   const characterID = normalizePositiveID(bot && bot.characterID);
   if (!characterID) throw new Error("PLAYERBOT_CHARACTER_ID_REQUIRED");
+  const character = readSharedCharacterRecord(characterID);
+  if (!character) throw new Error(`PLAYERBOT_CHARACTER_NOT_FOUND:${characterID}`);
   let session = actorSessions.get(characterID);
   if (!session) {
-    session = createActorSession(bot);
+    session = createActorSession(bot, character);
     actorSessions.set(characterID, session);
   }
-  const character = getCharacterRecord(characterID);
-  if (!character) throw new Error(`PLAYERBOT_CHARACTER_NOT_FOUND:${characterID}`);
   syncActorSession(session, character, characterID);
   if (started && desiredConnectedCharacterIDs.has(characterID)) registerPresence(session, characterID);
   return session;
@@ -368,24 +369,22 @@ function registerPresence(session, characterID) {
   const id = normalizePositiveID(characterID);
   if (!id || !desiredConnectedCharacterIDs.has(id)) return false;
   const sessionRegistry = require("../chat/sessionRegistry");
-  if (!sessionRegistry.isRegisteredSession(session)) {
-    const limit = require("./playerBotConnectionScheduleRuntime").getMaxConnected();
-    if (connectedActorCount >= limit) return false;
+  if (sessionRegistry.isRegisteredSession(session)) {
+    registeredActors.set(id, session);
+    return true;
   }
-  try {
-    require("./playerBotPortraitRuntime").ensurePortrait(id);
-  } catch (error) {
-    log.warn(`[PlayerBots] Portrait generation failed char=${id}: ${error.message}`);
-  }
-  if (!sessionRegistry.isRegisteredSession(session)) {
-    sessionRegistry.register(session);
-    connectedActorCount += 1;
-    require("../online/onlineStatusRuntime").notifyCharacterOnlineState(id, true);
-  }
+  const limit = require("./playerBotConnectionScheduleRuntime").getMaxConnected();
+  if (connectedActorCount >= limit) return false;
+  sessionRegistry.register(session);
+  registeredActors.set(id, session);
+  connectedActorCount += 1;
+  require("./playerBotPortraitRuntime").queuePortrait(id, true);
+  require("../online/onlineStatusRuntime").notifyCharacterOnlineState(id, true);
   return true;
 }
 
 function unregisterPresence(session, characterID) {
+  registeredActors.delete(characterID);
   const sessionRegistry = require("../chat/sessionRegistry");
   const xmpp = require("../chat/xmppStubServer");
   if (session && session._playerBotLocalRoom) {
@@ -418,10 +417,8 @@ function syncLocalPresence() {
     return;
   }
   const sessionRegistry = require("../chat/sessionRegistry");
-  for (const session of sessionRegistry.getSessions()) {
-    if (!session || session._playerBotActor !== true) continue;
-    const characterID = normalizePositiveID(session.characterID || session.charID || session.charid);
-    if (!characterID) continue;
+  for (const [characterID, session] of registeredActors) {
+    if (!sessionRegistry.isRegisteredSession(session)) continue;
     try {
       const roomName = chatRuntime.getLocalChatRoomNameForSession(session) || "";
       if (roomName === (session._playerBotLocalRoom || "")) continue;
@@ -442,10 +439,8 @@ function syncScopedChannelPresence() {
     return;
   }
   const sessionRegistry = require("../chat/sessionRegistry");
-  for (const session of sessionRegistry.getSessions()) {
-    if (!session || session._playerBotActor !== true) continue;
-    const characterID = normalizePositiveID(session.characterID || session.charID || session.charid);
-    if (!characterID) continue;
+  for (const [characterID, session] of registeredActors) {
+    if (!sessionRegistry.isRegisteredSession(session)) continue;
     try {
       const currentRooms = xmpp.getPlayerBotScopedRoomNames(session);
       const previousRooms = new Set(session._playerBotScopedPresenceRooms || []);
@@ -558,10 +553,8 @@ function getHumanConnectedCorporationIDs() {
     if (!session || capacity.isPlayerBotSession(session)) continue;
     const characterID = normalizePositiveID(session.characterID || session.charID || session.charid);
     if (!characterID) continue;
-    const character = getCharacterRecord(characterID) || {};
-    const corporationID = normalizePositiveID(
-      session.corporationID || session.corpid || character.corporationID,
-    );
+    const corporationID = normalizePositiveID(session.corporationID || session.corpid ||
+      readSharedCharacterRecord(characterID)?.corporationID);
     if (corporationID) corporationIDs.add(corporationID);
   }
   return corporationIDs;
@@ -653,7 +646,6 @@ function reconcileActorConnections(options = {}) {
     if (!bot) continue;
     try {
       const session = getActorSession(bot);
-      registerPresence(session, characterID);
       if (activeWork.has(characterID) && !isDockedSession(session) &&
           bot.status !== "paused" && bot.autonomyPaused !== true) {
         const scene = session._space && spaceRuntime.getSceneForSession(session);
@@ -703,6 +695,9 @@ function reconcileConnectedCorporations() {
   require("./playerBotDirectorRuntime").enforceConcurrentWorkLimit({ skipUpgradeMarketPlanning: true });
   const corporationIDs = getHumanConnectedCorporationIDs();
   const presence = reconcileActorConnections({ humanCorporations: corporationIDs });
+  if (require("./playerBotLoadController").getPlayerBotLoadController().shouldPauseLowPriorityWork()) {
+    return [{ ...presence, corporations: corporationIDs.size }];
+  }
   for (const corporationID of corporationIDs) {
     try {
       const director = require("./playerBotDirectorRuntime");
@@ -1514,10 +1509,12 @@ function getBotPresenceInfo(bot, characterRecord = null) {
 
 function getStatusSummary() {
   let inSpace = 0;
-  for (const session of require("../chat/sessionRegistry").getSessions()) {
-    if (session && session._playerBotActor === true && session._space && spaceRuntime.getSceneForSession(session)) {
+  const sessionRegistry = require("../chat/sessionRegistry");
+  for (const session of registeredActors.values()) {
+    if (!session._space || !sessionRegistry.isRegisteredSession(session)) continue;
+    if (spaceRuntime.getSceneForSession(session)) {
       inSpace += 1;
-    } else if (session && session._playerBotActor === true && session._space) {
+    } else {
       session._space = null;
     }
   }
@@ -1525,7 +1522,7 @@ function getStatusSummary() {
     activeActors: inSpace,
     cachedActors: actorSessions.size,
     connectedActors: connectedActorCount,
-    totalBots: playerBots.listBots().length,
+    totalBots: playerBots.getBotCount(),
     connectionSchedule: lastConnectionPlan ? {
       maxConnected: lastConnectionPlan.maxConnected,
       selected: lastConnectionPlan.selectedCount,
@@ -1541,13 +1538,13 @@ function getStatusSummary() {
 function start() {
   if (started) return getStatusSummary();
   started = true;
+  require("./playerBotPortraitRuntime").startPortraitRepair(playerBots.listBotProfiles());
   const bots = playerBots.listBots();
   const capacity = require("./playerBotDirectorRuntime").enforceConcurrentWorkLimit();
   const connection = reconcileActorConnections({ bots });
   const attachedCount = connection.attached;
   const failedCount = Math.max(0, connection.selected - connection.connected);
   const presentCount = connection.connected;
-  reconcileConnectedCorporations();
   localPresenceTimer = setInterval(() => {
     syncLocalPresence();
     syncScopedChannelPresence();
@@ -1569,14 +1566,14 @@ function start() {
   return { ...status, attachedCount, failedCount };
 }
 
-function shutdown() {
-  if (!started && actorSessions.size === 0) return true;
+async function shutdown() {
   started = false;
   const deadline = Date.now() + SHUTDOWN_TIMEOUT_MS;
   if (localPresenceTimer) clearInterval(localPresenceTimer);
   localPresenceTimer = null;
   if (corporationBotPresenceTimer) clearInterval(corporationBotPresenceTimer);
   corporationBotPresenceTimer = null;
+  await require("./playerBotPortraitRuntime").stopPortraitRepair();
   for (const [characterID, session] of actorSessions) {
     unregisterPresence(session, characterID);
   }
@@ -1592,6 +1589,7 @@ function shutdown() {
     if (Date.now() >= deadline) break;
   }
   actorSessions.clear();
+  registeredActors.clear();
   desiredConnectedCharacterIDs = new Set();
   lastConnectionPlan = null;
   connectedActorCount = 0;

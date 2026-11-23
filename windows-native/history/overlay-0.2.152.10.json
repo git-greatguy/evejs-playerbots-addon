@@ -1,0 +1,777 @@
+{
+  "schema": 1,
+  "version": "261115.2",
+  "files": {
+    "server/assets/fittings/fitall.json": {
+      "stock": null,
+      "native": "db8cae1d88f34ba6dca76b7c73292fbf9be1489ccc310d970e6a22d1484597b3"
+    },
+    "server/bootstrap.js": {
+      "stock": "5a1722b1129b717f020b5dcf74e40324871351134d244877a275847d3b337fcb",
+      "native": "77533ac778ecc7bd4b9c529bc23ba02535094ac25dece314746ec2b356b1779d"
+    },
+    "server/src/_secondary/express/gatewayServices/careerGoalGatewayService.js": {
+      "stock": "3d4dfb6ae03c2d119101b25f3ee68958226caebedac44f415587dfba529436a9",
+      "native": "be6abb76853a890ea081bac92c2a0cdbfc4c1d90a2ac74bd285e228557a9119b"
+    },
+    "server/src/_secondary/fitting/fittingStore.js": {
+      "stock": "be4e3ebd0b4cb389c74576e91542d636b1c59d3203192149d0e79247bd4602c9",
+      "native": "644b9df30c3722dc6e7a8c99bb1ccbd271e6034bac6ef18857d5e8810b270d9a"
+    },
+    "server/src/gameStore/index.js": {
+      "stock": "c28ab321eaac630388850bde5c9f40c4086c015a1978314965c10fde07415d0b",
+      "native": "11486d52e799fb281aef8525769a4398f995f2a2f3a0d9f8cc1363bdb598ad6a"
+    },
+    "server/src/gameStore/tableOwnership.js": {
+      "stock": "f33a8d203598f87a38a8cc0b8d1db909f39d6e77206d5c901f208c9715e50a38",
+      "native": "fe5e8b1524b0ac5b0e449f461b8ce3e5c5fec351bc7d2f893c1aa238c6f67ec1"
+    },
+    "server/src/network/tcp/index.js": {
+      "stock": "ee4c5a14a0c0fbce1b00f26cd49167d7b8b3256530f091cf93888d83cf34ba91",
+      "native": "7e9954859052ce4607d2081538d2d992ad3da5300ef82a1b5cb34af8b3917873"
+    },
+    "server/src/services/account/accountService.js": {
+      "stock": "59e508abefeafc38500af887c77a1892f75802cfaecfc7381107b53ddb544791",
+      "native": "a04ae68c035d1155894e2a0437a24143bde9cca37b7202c6063bc64bd6dbf076"
+    },
+    "server/src/services/account/walletState.js": {
+      "stock": "7caef0a74a8118a388654ea53796066fdd0fcdb3132120abe1d3b30d030eda7d",
+      "native": "06eec76ae686e3484213a3a0841624428d5f18a60aeb4db3263268e5687f8ce4"
+    },
+    "server/src/services/career/careerEventLedger.js": {
+      "stock": "c06f1d412e7879300cf10c2ed6c1702dff14a1cc4d3925731fa581d93b6a6e4f",
+      "native": "bcf9fa7482eded0d73ebd758be94329be8514045b57541136d63bbcfa493039c"
+    },
+    "server/src/services/career/careerExplorationSources.js": {
+      "stock": "8e1af8fe28c6bb83ff53228ed7d32f8b2cf84258606a62abc9070d9fc878bded",
+      "native": "c4b8f236581f67202d9e80a194fcf846182b04045c15159e02afec80a85d6db6"
+    },
+    "server/src/services/character/charService.js": {
+      "stock": "825a6546302d0d8acc8bded3f2fd14180419d177886802ce4a0fdaf37ec7c73b",
+      "native": "911dba5d872d240b4d9e1417a8bec6c114b117bd1804512e0ec7e6aa35c9d5ac"
+    },
+    "server/src/services/chat/chatCommands.js": {
+      "stock": "344e9c97bbeeb1714ded4124c6ff4d2b030cf9ec1d9b2d9e1825836b571c9530",
+      "native": "d32c37d7df534e87d4126df632c399775ef7f3ac178697c7c382a610808af80e",
+      "previousNative": "a2aeb94e63bda9ac6240966fb84fe08581acb442b572ae1eb37df4a95d7769eb"
+    },
+    "server/src/services/chat/commandSessionEffects.js": {
+      "stock": "bced7cc7236b4154d8416181c5a97e371fbbce698b4a84e20bcd60745e52b6bf",
+      "native": "f52a2bd067d03e724906e6b7a60cbd5acd70cf735b30e89bc3da1c7f20e01e00"
+    },
+    "server/src/services/chat/commands/commandAccess.js": {
+      "stock": "8b7821a656c82ac0b1618645d6cf03097b6ecc0dbdb9a4691b5b56455c8f7743",
+      "native": "f37d540baa076c13040843886df13eddda4fb1bfb8f61f8fb4c0940d0d5fc7fa"
+    },
+    "server/src/services/chat/commands/transport.js": {
+      "stock": "7601a921c536c1c4eb36771f7aab9bba9a8cab1107b1a54f5b89d0c1aa073c31",
+      "native": "b4dac8b22a5ede3cf1ef494c836c94b1ef46f629c28ade840dd3cd537c59a93a"
+    },
+    "server/src/services/chat/playerBotPrivateFitRequest.js": {
+      "stock": null,
+      "native": "774445723d39dc76de95133d483174f0ca7d7c22e13dcfb854a398a861075116"
+    },
+    "server/src/services/chat/playerBotTransportDestination.js": {
+      "stock": null,
+      "native": "24ce18175d2184fe78fb8ab07da3aa9218ce5fc689c1cae6d3ae3a395178026e"
+    },
+    "server/src/services/chat/systemMessageChunks.js": {
+      "stock": null,
+      "native": "0ff49d0eadbc2f217d9b6d36398070a44a0ec3e2718907d820b9326fc52beba1"
+    },
+    "server/src/services/chat/xmppStubServer.js": {
+      "stock": "aaf610ba196e0b114623672e76efc7fb74541983b5039693be7da31db40fbf67",
+      "native": "bc144ac16542a95fe2d6cb5caadce1e54a9ea283d56395830af318b58a5d4165"
+    },
+    "server/src/services/contracts/contractRuntimeState.js": {
+      "stock": "986d31345c6d40eb41401c18199b3667ab12cfc8a9b391dc28bf00c7c5638875",
+      "native": "ff58cebe5fb2290566a8feb729b377e369612b0a4baf7a0bb82c8f6f761ef772"
+    },
+    "server/src/services/corporation/allianceFormationEligibility.js": {
+      "stock": "cf5f1552b202f8e971a32ca8368b52ef9b2eb70a6f1f1c0525522f60fcfe1a26",
+      "native": "95339e48b44a6d68e6d00b1d5fca13bae5764f0937ec26e0300bfc805482ae56"
+    },
+    "server/src/services/corporation/allianceFoundingState.js": {
+      "stock": "f5781a5c0fc248ba0d2828719ea46e14d0b0f5d3854f960367fa06dd6f81ce75",
+      "native": "a5e939df4c11c15d11da4d3e30d315952958fc794d7484239d0d61e716a4db81"
+    },
+    "server/src/services/corporation/corpRegistryRuntime.js": {
+      "stock": "d3a0dfba93f0e0b7998c53f7c81a767d26749690cc04852a29fe7988757f8a5d",
+      "native": "b7ac691f3de4eda13241f2625a5d888ee49d9e1695f2a126ae5112557bbf96c3",
+      "previousNative": "441354a49fb29791b7b9e76413560e8edcbe12868f78c295666601073f7d851c"
+    },
+    "server/src/services/corporation/warDeclarationState.js": {
+      "stock": "f3283455647d39e55586e2530b3d3e1639b7ffc059f6514a76957ebef0b90327",
+      "native": "1395cb2ce77cc355bba6b565c4073f65af94754fbe9b9ff023c8e705ae030a7f"
+    },
+    "server/src/services/dungeon/dungeonAuthority.js": {
+      "stock": "cf0fc6dd1c1ab247f6556eed3372bdb028d9790f92e322795714c4b7e71a974a",
+      "native": "f7701c54650cb8eefad067d0dfaa0b28c38b1d25546ffcd475988c7a0c7f0996"
+    },
+    "server/src/services/dungeon/dungeonRuntimeState.js": {
+      "stock": "d414ba7a351d58606ba9afb24bdf1484c1a021dc82c8b55fed3c6b81089fda5f",
+      "native": "fa6933882338042718d388fc015c6337bc72d1e36b1453ac80fda492283f9b1c"
+    },
+    "server/src/services/dungeon/dungeonUniverseRuntime.js": {
+      "stock": "302492d982457a5ce424419b3a37e1e7a2f35e1c50c1f77f967e6ab32a37a9af",
+      "native": "6cbacb6d944abd9982f870c516fd0c8c9d0fdd0ed376afa1321036c52dfcdbbd"
+    },
+    "server/src/services/dungeon/dungeonUniverseSiteService.js": {
+      "stock": "df3375917b6044167acc7d176f3b151de5d648328018c4e02b6f8c5c400c2374",
+      "native": "d38e68bd7514c953ff4b2bf1eb0a0fce4d9051ede1230e418cc3fc751386d1a4"
+    },
+    "server/src/services/fleets/fleetRuntime.js": {
+      "stock": "a676beaa6509cda39d640d86f13c91466b5cc0adcc70ee05c96aaa52e29f5371",
+      "native": "d2f496dfeef2aea0c322b126a8fbe5c2ba3704bbe0bb4b997c12113507312b33"
+    },
+    "server/src/services/mail/mailState.js": {
+      "stock": "419bb844e95e8704198c0afee9a70b14076cdc5faa69abb122e150affc78e09c",
+      "native": "f51530727b8b88a70d4a86d30f7860227a2c16e9daafa9af51a46fdb0994fcbf"
+    },
+    "server/src/services/market/asyncWorkDeduper.js": {
+      "stock": null,
+      "native": "7b64a4338d108fe5bcdcc75530bda7ad31c4dfdf754851c8682c174d20c3889f"
+    },
+    "server/src/services/market/marketEscrowState.js": {
+      "stock": "30350b5c5741120e6ae49bd01da9c73a0de456917de3b449ad49d7c3e9c98b9f",
+      "native": "ae433efc0a5fe4d891ee21587943b702494d869825443c136fb3006b8879e292"
+    },
+    "server/src/services/market/marketProxyService.js": {
+      "stock": "3b8c2a5005c1003e2067f467a8e63e2aca4c6f683c4941622f311b58274171ca",
+      "native": "eae81ba40e80ff6457b179a62f6a22231d4fde9bcebd7628c21bfdb263691c07"
+    },
+    "server/src/services/mining/miningNpcOperations.js": {
+      "stock": "5ce327785991ee6ffb18b523e4af1862cccc93e2be6e13e09bdefc2855aff4cd",
+      "native": "41b9e088362ded900539c908f3573a7108e6a0a7931e92015b756191a63cf947"
+    },
+    "server/src/services/notifications/notificationState.js": {
+      "stock": "faf2156bed806c9616f1cff175ee7c9e08ea033ec468da297b93260f98173157",
+      "native": "ae8ab780c1c155341a4e16fdfb6ec9a1c7aa5388a7155ad0a2d985187fe7f09d"
+    },
+    "server/src/services/online/onlineStatusRuntime.js": {
+      "stock": "f0d3658c5fd78a92a42e61610f61c5dcd4534c1981ae5920d89af22d155d02f7",
+      "native": "788220fa3ab779347075954fd31c88453e193a2f194c1b5407439c5adca0cb4e"
+    },
+    "server/src/services/planet/planetLaunchIDNormalization.js": {
+      "stock": null,
+      "native": "da1ef0370d265cb130be2f26009f736bc1df2789d08f5f72069c1647b4189a64"
+    },
+    "server/src/services/planet/planetMgrService.js": {
+      "stock": "726ee5e88e5b7009ace10b535bef39057ec761846984bd3c37df456c47912151",
+      "native": "28e3cee95fde6b86dafd306bf3e46f010ca9246f94c121ecd650691ec2b0db48"
+    },
+    "server/src/services/planet/planetRuntimeStore.js": {
+      "stock": "6c4f9c89b8b5395561ce6be413a07b8f8d783d9c7582f4d9df0a92e6d7dcb555",
+      "native": "256f60570378649382ad2bd0246d244a956a853c5c09609185e713e54ca22594"
+    },
+    "server/src/services/playerbots/playerBotAddonApiRuntime.js": {
+      "stock": null,
+      "native": "98a1923db67abd59bc364d7c6e93f07474781bd1052a05e01352816974766d58"
+    },
+    "server/src/services/playerbots/playerBotAllianceLogisticsRuntime.js": {
+      "stock": null,
+      "native": "50473fcfcf50ddaab70772b893b933ff0bc29d060f3a4f03de6c82e11d56042a"
+    },
+    "server/src/services/playerbots/playerBotAllianceRuntime.js": {
+      "stock": null,
+      "native": "221bcf662eba09a08d9d2857b24839222da924d955f31a5b440b85425ff68418"
+    },
+    "server/src/services/playerbots/playerBotAutonomyRuntime.js": {
+      "stock": null,
+      "native": "91186ed1950d1e0889b73ba84770c24910c70271efb37dc2caba9b22ad3ac2fe",
+      "previousNative": "08d736a9c7f0b0a758a537303857c188737257fb24f7e7779f3cba6be679703a"
+    },
+    "server/src/services/playerbots/playerBotCapacityRuntime.js": {
+      "stock": null,
+      "native": "9ab848fd61bdf09bcc064f428456f8548a32c63e3dced11d88ce43b6b97dad38"
+    },
+    "server/src/services/playerbots/playerBotColonyRuntime.js": {
+      "stock": null,
+      "native": "09b7d212293a303a3af2fbec96c7a03a1aeabf7c3995f2ed1ac4050b4c0eff07"
+    },
+    "server/src/services/playerbots/playerBotCombatDecisionRuntime.js": {
+      "stock": null,
+      "native": "c64bafcc73da8545b714753980b6699d2608b586950c20158b5c3e701efef763"
+    },
+    "server/src/services/playerbots/playerBotCombatFitRuntime.js": {
+      "stock": null,
+      "native": "b746fe6e898ec2d78380db61b6413f1f222d1aa28430ca48484d002e284fea7f"
+    },
+    "server/src/services/playerbots/playerBotCombatPolicy.js": {
+      "stock": null,
+      "native": "f350259cee7c95257d47a85b8bd934bb3125218162ed755c5c29f1f7ec7ee61a"
+    },
+    "server/src/services/playerbots/playerBotCombatProgressRuntime.js": {
+      "stock": null,
+      "native": "6554ead39594e7821c760651e88b8eaeae19bf09755f07f3e6573e7713ee04f2",
+      "previousNative": "7aea262cf7b7dbf5b9b922a123c45b09ee24891cbd222da2387c435677738649"
+    },
+    "server/src/services/playerbots/playerBotCombatRuntime.js": {
+      "stock": null,
+      "native": "20bfa5d56eb098e831c1deb4f0b7242426b636b38ddfad6cd5abe374653fd684",
+      "previousNative": "7ac71253b9928059e60706f5b73de9eeb8f6a1583728d5011619630db866fb4e"
+    },
+    "server/src/services/playerbots/playerBotConfigurationRuntime.js": {
+      "stock": null,
+      "native": "1ec43736b85183099a83d5adfc298f7aa018ef8571ca93480a1a8c03d1bdd6c4"
+    },
+    "server/src/services/playerbots/playerBotConnectionScheduleRuntime.js": {
+      "stock": null,
+      "native": "79d1a11c897a0714878904ed11c424ca061885e30e587a5684f53e9abf3c62aa"
+    },
+    "server/src/services/playerbots/playerBotCorpCommands.js": {
+      "stock": null,
+      "native": "cca24a227689a3c9cdfd443fd721b3429cee32b732af7dab855559a206796fcb"
+    },
+    "server/src/services/playerbots/playerBotCorpDepositRuntime.js": {
+      "stock": null,
+      "native": "55cf06e0bcfd65d574fdea9c95cad55497707908e5556ef0e85fa59ccb1da4b0",
+      "previousNative": "cb4bfc50489ce659a0228a6d6cd22a8ae4b3d315f5c3e6812f10848610d783ec"
+    },
+    "server/src/services/playerbots/playerBotCorpEconomyRuntime.js": {
+      "stock": null,
+      "native": "156ba92544c1d97e719eb4b76523c3bd10431cdb201399b98b379ea87823afb1",
+      "previousNative": "baf3ca23ab2c024fa2287551e05f7503608899083c87b82ab7e4227be3106a65"
+    },
+    "server/src/services/playerbots/playerBotCorporationPriorities.js": {
+      "stock": null,
+      "native": "f6717d70e8fc33fb21065917f0dfe1974a8f71e88ad807afbcbe05cbfed3a8bf"
+    },
+    "server/src/services/playerbots/playerBotDashboardRuntime.js": {
+      "stock": null,
+      "native": "a653da1fd0adb4eddfa8099395de5e2a72166be9a4da53e855a7251c4a62ad6e"
+    },
+    "server/src/services/playerbots/playerBotDefenseAssessment.js": {
+      "stock": null,
+      "native": "fd935cf5ea6defb4b3d8cac5d2c7e3e28cc4d41201f09de5e00b9c4be81629f4"
+    },
+    "server/src/services/playerbots/playerBotDefensePolicy.js": {
+      "stock": null,
+      "native": "134f32910f7b00b1d0bb89cb4f126f3c1ffb5a0d260cb83053076fd6847a00e0"
+    },
+    "server/src/services/playerbots/playerBotDirectorRuntime.js": {
+      "stock": null,
+      "native": "eaa93a2ce6306e889259d2cc5f491246204c46dddb9474ecd174efddf20ac397",
+      "previousNative": "d40070b4e8c16629d4424c2110df5703603bdfc1e3b834a9272e2e853ba2f191"
+    },
+    "server/src/services/playerbots/playerBotEconomyRuntime.js": {
+      "stock": null,
+      "native": "3b5ea672e252b48f07e425f5accb7a8e5ed2a9db55c639f60c54aae49786fd53"
+    },
+    "server/src/services/playerbots/playerBotEngagementRuntime.js": {
+      "stock": null,
+      "native": "974c7f4dd8987424caa4e81bfaee7ecc30f823601185abcf33d5c809550c4ad8",
+      "previousNative": "c887293f6c8b120a1814d75f860552b7428463ef7e3cbe909a1e52c7eacfdd00"
+    },
+    "server/src/services/playerbots/playerBotFitPlanner.js": {
+      "stock": null,
+      "native": "759c566a8c6024e4a94ad4fa2930ddfd2951ce78964c7d84533863c4062e3829"
+    },
+    "server/src/services/playerbots/playerBotFleetAttackRuntime.js": {
+      "stock": null,
+      "native": "d879d5b5dc4994ed2b1c7df807ac20baa58c0e798b2729f70c5046ebe1e3c40e"
+    },
+    "server/src/services/playerbots/playerBotIndustryCycleRuntime.js": {
+      "stock": null,
+      "native": "66c909e67181962c5cf244fd35bc22e8ddd18e1661bc7626dd9bae5519885f79"
+    },
+    "server/src/services/playerbots/playerBotIndustryRuntime.js": {
+      "stock": null,
+      "native": "8dc2b4b9f8f4ffe8f6d17404664ec2439b8f874ba9a62b753bb433e6bde6fd30"
+    },
+    "server/src/services/playerbots/playerBotInterruptRuntime.js": {
+      "stock": null,
+      "native": "d68e3d38c2bba9a0272ece908c8169aed29def9135f3227812503bb2ca6d1977"
+    },
+    "server/src/services/playerbots/playerBotInventoryRuntime.js": {
+      "stock": null,
+      "native": "1563ae64d6c12b5f929ac24b6888f860937e34f09a08c38d2dece812ead90e1e"
+    },
+    "server/src/services/playerbots/playerBotLoadController.js": {
+      "stock": null,
+      "native": "2cd56ac136026e610c7c64cf44c77a727937bbb5b51ada82881e171fcb45670a"
+    },
+    "server/src/services/playerbots/playerBotLocalDefenseAdapter.js": {
+      "stock": null,
+      "native": "c52915f6bf6614da96101f941adcf10497b9102ba12b7118c4f9b4b77ae0f331"
+    },
+    "server/src/services/playerbots/playerBotLocalDefenseCommands.js": {
+      "stock": null,
+      "native": "12a78e52a0e3881eb53037a0ebd4ef619cb393360017064b10985a2786fc00fc"
+    },
+    "server/src/services/playerbots/playerBotLocalDefenseConfig.js": {
+      "stock": null,
+      "native": "9145d735ee2d2f01f21a02bf24ac7c883b80f47c088f7abc7dc1c943137baa5d"
+    },
+    "server/src/services/playerbots/playerBotLocalDefenseRuntime.js": {
+      "stock": null,
+      "native": "0c149a9f7d2d8bfa59c0d052db1b64591d1314d801a80630451160e45050616c"
+    },
+    "server/src/services/playerbots/playerBotMarketMakerRuntime.js": {
+      "stock": null,
+      "native": "3209e2334433deead69b751c207a39b059f6503d1e6d5f69086f7fd6cfca30a2"
+    },
+    "server/src/services/playerbots/playerBotMarketPolicy.js": {
+      "stock": null,
+      "native": "9076012146d455c47a808b5dc1d5b5ed36204f0c20b84ad339ef1f53139d9793"
+    },
+    "server/src/services/playerbots/playerBotMiningEscortRuntime.js": {
+      "stock": null,
+      "native": "dd81f19f65e7d93d85b11589819199d6014748046ef5f837d5778c8b81b4f4e0"
+    },
+    "server/src/services/playerbots/playerBotNameLibraryRuntime.js": {
+      "stock": null,
+      "native": "818cd57c3b9fa7db3110351acd714badaaee80388e7a48246a94fcbde7b84914"
+    },
+    "server/src/services/playerbots/playerBotNameRuntime.js": {
+      "stock": null,
+      "native": "1383234f6e977d017ca07ea5a95e657b05585a47fe951d00982f1f7b54b53258"
+    },
+    "server/src/services/playerbots/playerBotNullsecConflictRuntime.js": {
+      "stock": null,
+      "native": "fb29a793e56cee126d07a337231c5f62fea1e028164e858c2161e5535e042c7f"
+    },
+    "server/src/services/playerbots/playerBotOperationRecords.js": {
+      "stock": null,
+      "native": "cfcf8cb4c0b51c742a23fc335ffbbd8f658192309d97896572dddb11104da3c1"
+    },
+    "server/src/services/playerbots/playerBotOperationRuntime.js": {
+      "stock": null,
+      "native": "e5a704f03f70035d33ead2d5a0b765da5f3e0d8cf7824aabc54978f2d401fd50",
+      "previousNative": "de6b4ba0e53c083d816599a86c9e5248426ae31a6b24d87941643d1cbd01dbc6"
+    },
+    "server/src/services/playerbots/playerBotOpsSummary.js": {
+      "stock": null,
+      "native": "4a2dc2510599b3bd16c83f2889f877e9c64c59f1a2f91b10ad8fec33c2bf8a3e"
+    },
+    "server/src/services/playerbots/playerBotOriginRuntime.js": {
+      "stock": null,
+      "native": "688ec2c36d7dfa8e0f64ad25eba7116032532d4c5bc019fe1ad1d28f49a327ae"
+    },
+    "server/src/services/playerbots/playerBotPatrolRotation.js": {
+      "stock": null,
+      "native": "91fadce05fee16986f618ba80fd3f535955cce7f58f360c28f2b6c9c1140a6d3"
+    },
+    "server/src/services/playerbots/playerBotPerformanceTelemetry.js": {
+      "stock": null,
+      "native": "e3f91becfa737c4209614a0d534bfb1ba9a9563b9f8430effdd33ac5fc6ca442"
+    },
+    "server/src/services/playerbots/playerBotPlanetaryRuntime.js": {
+      "stock": null,
+      "native": "a1cdeb042a4d7685bb400c89cf29545fa0e0e924593590d0196aed9da0c8449d"
+    },
+    "server/src/services/playerbots/playerBotPortraitRuntime.js": {
+      "stock": null,
+      "native": "7126bbbff33a185a3a12012fc4a9d61498501741430862ff7dbfb28c17342331",
+      "previousNative": "504c3187c5a80fbffd3a4164b1905a7fd00350b1df1c64d67b3e5eddc081e154",
+      "olderNative": [
+        "35f38a737aaf5031a9d5d3be6189c2fe23021f609aa82348e8b5349243afaefb"
+      ]
+    },
+    "server/src/services/playerbots/playerBotProvisioningRuntime.js": {
+      "stock": null,
+      "native": "03a2991e9ed72b389f703f0aeed6c9f420d43fea163314a88f580229398de0dd"
+    },
+    "server/src/services/playerbots/playerBotRecruitmentRuntime.js": {
+      "stock": null,
+      "native": "67826d077e846921b43eeab7f5114ebdefd08f9c0cfa03bebc6a2edaf9cadbf0"
+    },
+    "server/src/services/playerbots/playerBotRescueArrival.js": {
+      "stock": null,
+      "native": "5eb06bdcf7e80af2a8c115ea12b8d73e6be4b436e7e1e775197e8f9b6477cd03"
+    },
+    "server/src/services/playerbots/playerBotRosterResetRuntime.js": {
+      "stock": null,
+      "native": "90b56d02c8ef0d4296f50209ede61c38b85588b24ea54d88674228e7c1322d6a"
+    },
+    "server/src/services/playerbots/playerBotRuntime.js": {
+      "stock": null,
+      "native": "be44d24cc9c115cad69764d3b3c44e138a5ba3a0c7b8a814d5485c1fc274b8d7",
+      "previousNative": "19382617d3a32084e17e2e6596d9fe1b55480f8991f13efc38e3e2efd35ac3d0",
+      "olderNative": [
+        "0c4122ec560b9b0fe2783dcf8a73ba4c4162c2b3cff5087da044d2e5d809e599",
+        "7619f9ba9f62bbb3ad0274a3610dcba560a2b7673ebc5b2261ec95ef8276f2e7"
+      ]
+    },
+    "server/src/services/playerbots/playerBotSiteUpkeepRuntime.js": {
+      "stock": null,
+      "native": "5253c0b473a11e60310c2d1ef0924524daa15c95869e533be428fae037f95d08"
+    },
+    "server/src/services/playerbots/playerBotSovereigntyRuntime.js": {
+      "stock": null,
+      "native": "5e49780eafd52d7b4d520c45c8f49931d6bb59441c026ad6f4222cd5260d07d3"
+    },
+    "server/src/services/playerbots/playerBotSpaceRuntime.js": {
+      "stock": null,
+      "native": "0547adc49f987a6d6a4825af4057a8dcc6c6a9566f2d305890ab9bd73f631b35",
+      "previousNative": "d865c5544e2afc37e97fe93c217001e70500d4611db2fd6afa2bdef6812f0427"
+    },
+    "server/src/services/playerbots/playerBotStatusRuntime.js": {
+      "stock": null,
+      "native": "4cfded504ec37fa8697f5dff287073742737d7dac487ae0201d26480693bcd7f"
+    },
+    "server/src/services/playerbots/playerBotStructureConflictWarRuntime.js": {
+      "stock": null,
+      "native": "582ff0d8cbfd77da9084f9ca84a05738fd2197b13cb065f65fc9989b2216413b"
+    },
+    "server/src/services/playerbots/playerBotStructureRuntime.js": {
+      "stock": null,
+      "native": "c9be057fc0957a42e703425599edee9c4e6dd315a72566f5bcd99c6249397091",
+      "previousNative": "652d63422250f42fefb5d3506e347512dfe9a607cc25a4b9da5367498f3ba726"
+    },
+    "server/src/services/playerbots/playerBotSupplyRuntime.js": {
+      "stock": null,
+      "native": "5ffd58989b779aa355516806dfa07d7dd8ea02a2e6338244952aa7b7347a17dd"
+    },
+    "server/src/services/playerbots/playerBotTaskRuntime.js": {
+      "stock": null,
+      "native": "9847442e42d46ad854c4cd02a881c0596c0cbd3f9a83ac44ff8d1026ff62983a",
+      "previousNative": "e50c227a725b8ebcd8398d952317627a4be3b0e331380e66cfd95b1dfedb51b8"
+    },
+    "server/src/services/playerbots/playerBotTerritoryRuntime.js": {
+      "stock": null,
+      "native": "d8d2c0dcf568b26e0926819eff1d9618f1b2654efd952514fdb3f2960fcc03a6"
+    },
+    "server/src/services/playerbots/playerBotThreatResponseRuntime.js": {
+      "stock": null,
+      "native": "e9730105ece166fc5057d72b1f534142ceece558cf5c80656988fa2e5900f5f7"
+    },
+    "server/src/services/playerbots/playerBotTickStallWatch.js": {
+      "stock": null,
+      "native": "c3d6690dca760bde56cb746dec75241e47bb13b28d106c2bd93457c37a7d1039"
+    },
+    "server/src/services/playerbots/playerBotTradeRuntime.js": {
+      "stock": null,
+      "native": "319d37bc1c55403114c81d4f70a4fae5ae88d18681f74ac855978aa5b937565a"
+    },
+    "server/src/services/playerbots/playerBotUnobservedScenePolicy.js": {
+      "stock": null,
+      "native": "c9585249b337d5869609f4ee230156ecf6c599f03da15333cf49e03edacd2336"
+    },
+    "server/src/services/playerbots/playerBotWarMobilizationRuntime.js": {
+      "stock": null,
+      "native": "091ba4b0388d5c731749d0795b12f31d634e901815f518d4ea3d926c24cbc9a0"
+    },
+    "server/src/services/playerbots/playerBotWildfireRuntime.js": {
+      "stock": null,
+      "native": "c3f77e5d3844f864845507908f3f366020bfbfb529451f19d340eb957ce1691c"
+    },
+    "server/src/services/playerbots/playerBotWorkBudget.js": {
+      "stock": null,
+      "native": "21f2da83b9653f2cb20da9edd04bb575b07617b76e8f83f5313fba47de6f1585"
+    },
+    "server/src/services/scheduler/durableScheduler.js": {
+      "stock": "456870d45bbb4223608ca5a74bd4306d97d284c0145b669c4bee6e94051dfeb5",
+      "native": "abe87c7f6def1d82c1a58ddb9b226cf21f1a1b295341da653fe8bc157b80e4f3"
+    },
+    "server/src/services/scheduler/durableSchedulerProcess.worker.js": {
+      "stock": "3a9e931e11b729bd800550791c33bd0ee61630006f707c7a400b4349172e7575",
+      "native": "cf45f1f14a40fae23355129b5f7acf73e58ec5165bd84c7ba5b5c3af7c41434b"
+    },
+    "server/src/services/scheduler/productionSchedulerRuntime.js": {
+      "stock": "7d3677f2ffb7b336b0b245eac5bc8c63db3958d4f8bf6b992dbef8f2aea1599a",
+      "native": "bd72cc1abcf0b11aa33acf9849d77fe1c1f14622ba3dea438485084db7740bcd"
+    },
+    "server/src/services/scheduler/scheduledJobQuery.js": {
+      "stock": null,
+      "native": "ba21b71296b3ba41d252de5fdccb6bca6a75102a125df43f556d35c75fb75a6b"
+    },
+    "server/src/services/security/crimewatchState.js": {
+      "stock": "6121b05941ec4f713f3516c1e5f95ee8a563a729b81a4c40036313ce0c35367e",
+      "native": "75ec720ff2ff04fae7ab756878d520d34adc9bbccd47905a550a833a6fca3263"
+    },
+    "server/src/services/security/customsInspectionCaseStore.js": {
+      "stock": "35938330a03b9ebaa081adf7921e8bbd8b3fc263e420bbd09e85dff517f5414a",
+      "native": "88dc61f2cc2109cc01d9ad8db698b428dcdaf3adf29f1ff474a5db468ca6a0bb",
+      "previousNative": "4b5e9d92171efb5a5ab63e83b8b62e1a77609b39b6d85ace57d6961f31b53200"
+    },
+    "server/src/services/sovereignty/sovPlayerDeployment.js": {
+      "stock": "5c8c18bef342d333fce35e06a41897a7b82a8d0185c0d6fc6553438a213d51a8",
+      "native": "ca8c4f97b75217a018e7ca9a7ac2bbcf9bb564c8ed6bc4d0f7220d522a9a69f3"
+    },
+    "server/src/services/structure/structureDeploymentPlacement.js": {
+      "stock": "957390a2753b2dc8ef6ee2ff8edb8387c17e4ed075576b75cc53cf4716cc4d98",
+      "native": "adafc31d6f25a24e919c235c3a0f27dd073c84433352f623ef0f0ff2ca801080"
+    },
+    "server/src/services/structure/structureState.js": {
+      "stock": "82af65a696bc8df7e2713e4d480bff3c1259df03ccdb1ea6a282dcc9db9f0866",
+      "native": "7d09673d904bf8b997397a241a5672936205949631c025b47718e66ba7f9cf61"
+    },
+    "server/src/space/combat/killmailTracker.js": {
+      "stock": "25e5e3a28fa905f82a5ae6f8fd5a3f8bf6d632d01dab5262b896f084dfd4d5e7",
+      "native": "271b73434e595ef6bdb877a755f79b90a4934eccd8dcd8859be410d8361cd64d"
+    },
+    "server/src/space/destiny/identity/entityID.js": {
+      "stock": "ce18a8edded520fb6cb335eff0d517a3229b60ee4a2142534bcdeee5d6efb217",
+      "native": "0985c32484ff226c6350f1147e11c7284c18de060b28fa920195a6cf7b0a00b5"
+    },
+    "server/src/space/modules/entosisLinkRuntime.js": {
+      "stock": "afe03a1e9e0fa1525aa56a4d3782ef4e91ba06e509a49ce15803e3d1732e1d1d",
+      "native": "41232e18e425478828ac0a6718b1ca36e3950d84614556186cba0c87e244adf6"
+    },
+    "server/src/space/modules/hostileModuleRuntime.js": {
+      "stock": "ac6410305c27c7167c07e043168b3503c410b425101ad31579558137cb8467b4",
+      "native": "dc6bd2b89ddd8b8e83b4af8ba50bbf4b1b5d3263f97ea4a1fd9557db8df4c957"
+    },
+    "server/src/space/runtime.js": {
+      "stock": "0a2745028488d8573d17d33d479f227275e589981ed7130652592a93c45ccb9f",
+      "native": "c9b70104179bcfa4a149eaecef4b25410c04365ebeea06f751e8eece590138dc"
+    },
+    "server/src/space/runtime/playerBotThreatDamageHook.js": {
+      "stock": null,
+      "native": "06454b2f72446a3ea5f9faa37f179de39916ef2bee76197259351acfc4409149"
+    },
+    "server/src/space/runtime/scene/pilotCommands.js": {
+      "stock": "16df960bb3ee88aa3002ad281aeaacdef62c47799f10a817c6360a0ae929de0c",
+      "native": "6878a7d7335fa4989ac8363372a1152843f66127379f771ca42d33b7968e5ed0"
+    },
+    "server/src/space/runtime/scene/tick.js": {
+      "stock": "9636bb250756884e13de43a0c8ee06bf8534ead807a037d1b718fbe6958aa45c",
+      "native": "e78e513cdd637c11290e2abd971143fb65cf24d6bae7c616efe3058d303d339a"
+    },
+    "server/src/space/runtime/spaceRuntime/tick.js": {
+      "stock": "60a36fdc185824de8287c92c2116cb294e7d319abc15b3e9aab0582df00827bd",
+      "native": "7d1dc5ead5143c2830e5c29cb1be322d5bf32b98c97da3fb8dcf5d08e774963a"
+    },
+    "server/src/space/runtime/targetDamageApplication.js": {
+      "stock": "5b812dee9215d7b6551d8e6591e552ffbdd742b552dcbae8684d191798e0201e",
+      "native": "1599bb5f4c9022fe657e22511be2107bffa2efcb254084677ac476e34e064ffb"
+    },
+    "server/src/space/runtimeTickScheduler.js": {
+      "stock": null,
+      "native": "c12f26aed5582044a3d1d0a5f5956cee2bdddb905d9655e1bfddf8061f337498"
+    },
+    "server/src/space/transitions.js": {
+      "stock": "17668b3f9ca8327b9d94a5e8247761a2ce677a2cfcf7f905184cb071c87bd019",
+      "native": "53e902bb0bfe27a4a6144f4e8bc7f9f8cb4cefefad076f33e7f908eb1f45bf4c"
+    },
+    "server/src/utils/deploymentHealthcheck.js": {
+      "stock": "173711ca3fa39537a22312fc64615979320bc6f9fa062b977d114e4fcef00f13",
+      "native": "c5083405e0a18121718b7968d1dacd721e7865199e6760d8b10eec4c0f363770"
+    },
+    "server/src/services/playerbots/playerBotPlayerCorporationRecruitment.js": {
+      "stock": null,
+      "native": "b64f57e7d3c22d3ce017f24d2078a584bf7664296f41db9e902faacce9af8ecd",
+      "previousNative": "020ce97cc3fca883144ec9588a654aba66d3d642624d1f665553638da9ef5b45",
+      "olderNative": [
+        "bf341b7c7d9970f7f8b5c7f8c975b724f370dd299072d710ff62b20403b3c82d",
+        "b773cb34f72b8b816e2be7eb4003fd334e4065b1db4c04ac08a24dab383242fa"
+      ]
+    },
+    "server/playerbots-native/dashboard/app.js": {
+      "stock": null,
+      "native": "91c7982b9f08cb86d4c262b0867ba909f515d8cc1657dbcbf68a550cc189a3c1",
+      "previousNative": "54e910a35d6b76e53770531e450fae826d665bbfc4cc2f16132d0aa2b16f63c2"
+    },
+    "server/playerbots-native/dashboard/favicon.svg": {
+      "stock": null,
+      "native": "b253bad68ca8a9fbff82054eeb86dc5084ca42c3f3168144b6866a81da7c3159"
+    },
+    "server/playerbots-native/dashboard/index.html": {
+      "stock": null,
+      "native": "ecf975b5526381e973cb404acabf9aa50fd8dfa844eee8a8a6e19fd9123e0519"
+    },
+    "server/playerbots-native/dashboard/styles.css": {
+      "stock": null,
+      "native": "2808cd64990e10deb5527575c50ad282dd4563b40444cfc3c7bbeeadb9019e54"
+    },
+    "server/playerbots-native/dashboard-server.js": {
+      "stock": null,
+      "native": "4163479daca7a37bdf6e3a9b3d15ca0247846c3333c870719b672082fdd0805e",
+      "previousNative": "58d3244bf14b11c6d5aa14cabb4d1e217bad9d24c925dae3a76b1a882b509e56"
+    },
+    "server/playerbots-native/index.js": {
+      "stock": null,
+      "native": "cd894e32d66a709b6d119780ecef584a564a1a9943d079d75fbda89e0fac11f7"
+    },
+    "server/playerbots-native/native.cjs": {
+      "stock": null,
+      "native": "ce5a222e86045024da1be3fa4dc06ff90f037263e3dd1f7392d61e439eb5e215"
+    },
+    "server/playerbots-native/settings.json": {
+      "stock": null,
+      "native": "cd691b04d63045fe5bdb6bda56c7163b7ad32ed8dd72ad4c2c59f315424ff2cc",
+      "previousNative": "12f648965f9a77c3ec018c71a5ea85d13b4b9c3bb66955d71a65f0ebe15eb8da",
+      "olderNative": [
+        "80e6ef74b98e0bf13bec77ba08d4b3abab725dce3d2124ad56c6ae56c7ffc2f0",
+        "d6a7c50550dd50076de48894afad8438aff816c496fe8f7c50867caa5967e330"
+      ]
+    },
+    "server/src/services/playerbots/playerBotEngagementPolicy.js": {
+      "stock": null,
+      "native": "6bb31ad0f454f5f79dce3334902ce1099d71146a45c00ac381b3ea3805ed74a3"
+    },
+    "server/src/services/playerbots/playerBotEngagementProfile.js": {
+      "stock": null,
+      "native": "b883bdcda1fb74c1d3dcff266a98a8b4d932549f297aaa488a8854637484fa6e"
+    },
+    "server/src/services/playerbots/playerBotHeadquartersNameRuntime.js": {
+      "stock": null,
+      "native": "10f6676e268ea0f10d8597b0e3ac5be6b03fd976ecd9f5f0b85a7a3b8a931b46"
+    },
+    "server/src/services/playerbots/playerBotPiWorkPolicy.js": {
+      "stock": null,
+      "native": "78d8e8dac543bc9ae908cbda221e34b4e8a0fef009bfdc1ef3608af5776edece"
+    },
+    "server/src/services/playerbots/playerBotStructurePriorityRuntime.js": {
+      "stock": null,
+      "native": "93758ef86a3f5805e62c71ea4aeec394f64d359df738c961e11934ba420fd563"
+    },
+    "server/src/services/playerbots/playerBotStructureWorkPolicy.js": {
+      "stock": null,
+      "native": "228448ed51cebaac60de92d9752be674959b7194a78e4b2a9d2ab7f81ac9ecb2"
+    },
+    "server/src/services/corporation/corporationMemberLimit.js": {
+      "stock": "848dd2332ca8c3e966ee90f87e1435d68317c65ba1fd40f6fad9065ba35b1bb5",
+      "native": "8b897e665909c7bf5d4f2bc03e51f7764bf16f83c21751d16db7ed6ec82cfa72",
+      "adoptVerifiedStock": true
+    },
+    "server/src/services/corporation/corporationState.js": {
+      "stock": "caffc41f3aad3b6b7fa3df0e3b29523677098383201409e0d4503fa04bf431ac",
+      "native": "ee9e6b2fc98e9b35c6bbc96e55aed9b8f0ff555d154c0501ce2b42cfe48426d0",
+      "adoptVerifiedStock": true
+    },
+    "server/playerbots-native/portraits/00.jpg": {
+      "stock": null,
+      "native": "ec3d506c7a963df88aea83b13dfe1c3c7eb28960debbb368984079c0213eb30d"
+    },
+    "server/playerbots-native/portraits/01.jpg": {
+      "stock": null,
+      "native": "7ca48a2712370ae07bff05b59a477a191aa8207088e9d98abc854b0de943f998"
+    },
+    "server/playerbots-native/portraits/02.jpg": {
+      "stock": null,
+      "native": "0554d3958296e2a52792a5b0f84191d8aa7fd4f73bf45b9e199bb874cdfbf4a9"
+    },
+    "server/playerbots-native/portraits/03.jpg": {
+      "stock": null,
+      "native": "46c3a8d5624733e09eaedb725b5b9105b308e79bc9366192e8a4f1fdac1d0706"
+    },
+    "server/playerbots-native/portraits/04.jpg": {
+      "stock": null,
+      "native": "f38d94811897d742f04f596b602fea9ca84040095cd6239f12252d7761eb1bcf"
+    },
+    "server/playerbots-native/portraits/05.jpg": {
+      "stock": null,
+      "native": "55fc72f7cac301cf15e15a87933ddc56e44ba0d830f677bf2b97b9e3a5e379e4"
+    },
+    "server/playerbots-native/portraits/06.jpg": {
+      "stock": null,
+      "native": "ab917842d57f841dc1300e491bef9b817162ef16dd63c8fd69fb07524c072eb0"
+    },
+    "server/playerbots-native/portraits/07.jpg": {
+      "stock": null,
+      "native": "ad362b4ac72459a6727ee2f8d329a3fb6ce0c69b5bfbbfc21573e76522c2d8e6"
+    },
+    "server/playerbots-native/portraits/08.jpg": {
+      "stock": null,
+      "native": "fcf7caae7ca3dcaa5712afad49745e505099904d40d59d5112261eafbbf1a906"
+    },
+    "server/playerbots-native/portraits/09.jpg": {
+      "stock": null,
+      "native": "fe44b2c3d2108bc30700a7bf8f847e81b38e470941b27df2d32f824cc6ddb59b"
+    },
+    "server/playerbots-native/portraits/10.jpg": {
+      "stock": null,
+      "native": "66742feed7ec7dc6549073e2a984fe9b76af801a35e1333f16f9fb50276f551d"
+    },
+    "server/playerbots-native/portraits/11.jpg": {
+      "stock": null,
+      "native": "6170d4cbed7c47d056d5db70e5c84a982486d94183dbff401550dfd70377f0b8"
+    },
+    "server/playerbots-native/portraits/12.jpg": {
+      "stock": null,
+      "native": "c1632542556956f73c7a9b20f97ca3a15d61a6cc8408bc315ee55197850c9ace"
+    },
+    "server/playerbots-native/portraits/13.jpg": {
+      "stock": null,
+      "native": "4ab7cdd72cfa0d97e046886e54b7897270d895b86fee54b145772b0281d952ae"
+    },
+    "server/playerbots-native/portraits/14.jpg": {
+      "stock": null,
+      "native": "51ea6d19004166a25ea43fab352f71a5b0deb666fd7311dcba1264849355901e"
+    },
+    "server/playerbots-native/portraits/15.jpg": {
+      "stock": null,
+      "native": "bbea6dbecd7b9282b352e62115472da1f13277c519f82206e492a4b0a0603b22"
+    },
+    "server/playerbots-native/portraits/16.jpg": {
+      "stock": null,
+      "native": "b2fa80eb7c9645d87f4a820c546df13327163ace12bc31ab82772ca1e16dcff2"
+    },
+    "server/playerbots-native/portraits/17.jpg": {
+      "stock": null,
+      "native": "76685121dedb565be6269aea322a48474478f16eb1c1244bf3a88b57db6f554f"
+    },
+    "server/playerbots-native/portraits/18.jpg": {
+      "stock": null,
+      "native": "ffe0786e85ffe961c8b22a7325bdb5531aab04a019127a1563c8b3f6d58f8f88"
+    },
+    "server/playerbots-native/portraits/19.jpg": {
+      "stock": null,
+      "native": "88bc239662f5c3317280f0063f3336203326e30fe23568959a5f325b2a60f1fd"
+    },
+    "server/playerbots-native/portraits/20.jpg": {
+      "stock": null,
+      "native": "e0195827d3c29f0ad6c48d903f3470f7da45fbb047ef2c799dfe72ed757aec4d"
+    },
+    "server/playerbots-native/portraits/21.jpg": {
+      "stock": null,
+      "native": "b11c905a7b85e8f8206ac3f3dc6a8be5184741c3183d7252618701e927b158c3"
+    },
+    "server/playerbots-native/portraits/22.jpg": {
+      "stock": null,
+      "native": "a6522795932ba107a5a090bf52b3f3ebd0e4e181168da116e3f40c5a72825b0e"
+    },
+    "server/playerbots-native/portraits/23.jpg": {
+      "stock": null,
+      "native": "e35d2c8e080d9cfd3de393531ca60b883a4c4e1bc6b7d26b3762216a7259fe28"
+    },
+    "server/playerbots-native/portraits/24.jpg": {
+      "stock": null,
+      "native": "62d0702fdd928df951a88d7d54b7d136ed48681c0cf5ca5fcb0976a1d579855c"
+    },
+    "server/playerbots-native/portraits/25.jpg": {
+      "stock": null,
+      "native": "46062f2cf9402c567c1b859a658c96e53aeff68ba4e53a68282e9148edbbb9e7"
+    },
+    "server/playerbots-native/portraits/26.jpg": {
+      "stock": null,
+      "native": "5e1f15380540fd116f6cd969072b359aa6e4bcb4e6874f40f887b0b460f442c0"
+    },
+    "server/playerbots-native/portraits/27.jpg": {
+      "stock": null,
+      "native": "5e619342c3af7cc5d878abe1951804a677bbb37b6502e25395beee416805dd35"
+    },
+    "server/playerbots-native/portraits/28.jpg": {
+      "stock": null,
+      "native": "9f0294d2d21a6d23468284fb66a9f983314aa98e147bebd2415364727c9fcd88"
+    },
+    "server/playerbots-native/portraits/29.jpg": {
+      "stock": null,
+      "native": "c7a0a74f10ca40b0409c5390a63858f2029fa2514b01bc2a23afafb77fba3bbd"
+    },
+    "server/playerbots-native/portraits/30.jpg": {
+      "stock": null,
+      "native": "27f220f425e6608b6c1555c64e768bf19e181a4124e6a10b2556ae661a572944"
+    },
+    "server/playerbots-native/portraits/31.jpg": {
+      "stock": null,
+      "native": "09ffe5fc614a5b2b0d3796cd89585541144063542faac76e6e4f8eac0cefabc6"
+    }
+  },
+  "multicore": {
+    "tcp": {
+      "stock": "670bf4e0ea2030886421d2aa398d144ab36bee2c412c4a7ac8e2f0a4ba505075",
+      "native": "eae577af78684dd52a56043de0d5df18438d41c4e47219a4b50a3b14828257c1"
+    },
+    "dependencies": [
+      "server/src/network/inboundMarshalDecoder.js",
+      "server/src/network/marshalDecodingTasks.js",
+      "server/src/network/marshalWorkerPool.js",
+      "server/src/network/marshalWorkerPool.worker.js",
+      "server/src/network/tcp/directGameSocketTransport.js",
+      "server/src/utils/ryzen5900xCpuProfile.js"
+    ]
+  }
+}

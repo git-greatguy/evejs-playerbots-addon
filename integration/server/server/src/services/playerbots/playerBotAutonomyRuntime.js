@@ -664,6 +664,7 @@ async function runAutonomyCycle(options = {}) {
     ? roster.filter((bot) => requestedCharacterIDs.has(Number(bot.characterID)))
     : roster;
   const addonChunk = options.addonChunk === true;
+  const providerCharacterIDSet = addonChunk ? new Set(bots.map(bot => Number(bot.characterID))) : null;
   const includeGlobalMaintenance = !addonChunk || options.includeGlobalMaintenance === true;
   // The first add-on request is a preflight for the whole roster. Keep shared
   // provisioning, corporation ledgers and PI policy writes out of the parallel
@@ -825,7 +826,7 @@ async function runAutonomyCycle(options = {}) {
   for (let processed = 0; processed < bots.length; processed += 1) {
     const assignment = tasks.claimNextTask({
       supportedKinds: [taskKind],
-      ...(addonChunk ? { providerCharacterIDs: bots.map((bot) => bot.characterID) } : {}),
+      ...(addonChunk ? { providerCharacterIDSet } : {}),
       skipReconcile: true,
     });
     if (!assignment) break;
@@ -917,7 +918,7 @@ async function runAutonomyCycle(options = {}) {
   for (let processed = 0; processed < bots.length; processed += 1) {
     const assignment = tasks.claimNextTask({
       supportedKinds: ["playerbot.trade.autosell"],
-      ...(addonChunk ? { providerCharacterIDs: bots.map((bot) => bot.characterID) } : {}),
+      ...(addonChunk ? { providerCharacterIDSet } : {}),
       skipReconcile: true,
     });
     if (!assignment) break;
@@ -941,7 +942,7 @@ async function runAutonomyCycle(options = {}) {
   for (let processed = 0; processed < bots.length; processed += 1) {
     const assignment = tasks.claimNextTask({
       supportedKinds: ["playerbot.trade.autobuy"],
-      ...(addonChunk ? { providerCharacterIDs: bots.map((bot) => bot.characterID) } : {}),
+      ...(addonChunk ? { providerCharacterIDSet } : {}),
       skipReconcile: true,
     });
     if (!assignment) break;
@@ -963,7 +964,7 @@ async function runAutonomyCycle(options = {}) {
   for (let processed = 0; processed < bots.length; processed += 1) {
     const assignment = tasks.claimNextTask({
       supportedKinds: [planetaryExportRuntime.TASK_KIND],
-      ...(addonChunk ? { providerCharacterIDs: bots.map((bot) => bot.characterID) } : {}),
+      ...(addonChunk ? { providerCharacterIDSet } : {}),
       skipReconcile: true,
     });
     if (!assignment) break;
@@ -991,7 +992,7 @@ async function runAutonomyCycle(options = {}) {
     const assignment = tasks.claimNextTask({
       supportedKinds: [industryRuntime.MANUFACTURE_TASK_KIND],
       excludeTaskIDs: [...industryTasksProcessed],
-      ...(addonChunk ? { providerCharacterIDs: bots.map((bot) => bot.characterID) } : {}),
+      ...(addonChunk ? { providerCharacterIDSet } : {}),
       skipReconcile: true,
     });
     if (!assignment) break;
@@ -1021,7 +1022,7 @@ async function runAutonomyCycle(options = {}) {
     const assignment = tasks.claimNextTask({
       supportedKinds: [industryRuntime.DELIVER_TASK_KIND],
       excludeTaskIDs: [...industryTasksProcessed],
-      ...(addonChunk ? { providerCharacterIDs: bots.map((bot) => bot.characterID) } : {}),
+      ...(addonChunk ? { providerCharacterIDSet } : {}),
       skipReconcile: true,
     });
     if (!assignment) break;

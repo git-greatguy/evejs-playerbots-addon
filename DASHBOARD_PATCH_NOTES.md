@@ -214,6 +214,53 @@ gains regression tests. It changes `playerBotDirectorRuntime.js` and
 merge had no conflicts. The `dist/` ZIP comes from that branch and does not
 contain the dashboard overhaul.
 
+## Merged: Luna update and Windows package (23 Nov 2026)
+
+The Luna update by @rizonx (Windows launcher package 0.2.152.10) is merged.
+It was built on upstream 0.2.152 and changed none of the files this branch
+changed, so every file merged cleanly.
+
+- **Taken from Luna as they are**: `chatCommands.js` (`/bots corp
+  inviteall`), `corpRegistryRuntime.js`, `corporationMemberLimit.js`,
+  `corporationState.js`, `playerBotPlayerCorporationRecruitment.js`,
+  `playerBotAutonomyRuntime.js`, `playerBotCombatProgressRuntime.js`,
+  `playerBotCorpEconomyRuntime.js`, `playerBotPortraitRuntime.js`,
+  `playerBotRuntime.js`, `playerBotSpaceRuntime.js`, `playerBotTaskRuntime.js`
+  and the 32 bundled portraits (`server/playerbots-native/portraits/`). Line
+  endings follow the existing files.
+- **Adapted to work with and without the Windows driver**: `bootstrap.js`
+  starts the native driver only when `server/playerbots-native/native.cjs`
+  exists, and starts corporation recruitment in both setups;
+  `playerBotConfigurationRuntime.js` locks launcher-saved settings only when
+  the driver exists.
+- **Dashboard server**: serves saved portraits from local files when it runs
+  inside the EveJS tree (Windows), answers `HEAD` without downloading the
+  image, and when bound to `127.0.0.1` accepts only `127.0.0.1` or
+  `localhost` host names (Luna allowed only `127.0.0.1`).
+- **Add-on driver** (`index.js`): stops cleanly when run as a worker thread
+  and words its log lines for either setup.
+- **Settings page**: launcher-saved settings show locked, with "Set in EVEJS
+  Launcher", and are left out of saves. Portrait URLs carry `v=2`.
+- **Compose**: passes the recruitment, member limit, income and portrait
+  settings to the server, with Luna's defaults.
+- **Windows package**: `windows-native/` holds the launcher manifest (now
+  0.2.152.11), Luna's installer helper, native driver, settings schema,
+  multicore TCP file and the 0.2.152.10 `overlay.json`.
+  `tools/playerbots/build-windows-native.py` builds
+  `dist/evejs-playerbots-windows-v0.2.152.11.zip` from the same server files
+  as the Docker add-on and records the hashes of 0.2.152.10 so the launcher
+  upgrades it in place. Luna's old `dashboard/app.js` stays listed, unused,
+  so Disable removes it.
+- **Tests**: Luna's recruitment, corporation scale, combat progress batching
+  and portrait tests run against this repository's files; the name library
+  test stub gained `queuePortrait`.
+- **Checked**: all 112 test checks; module loads in a full EveJS tree in both
+  layouts; the Docker installer, verify and rollback on a copy of a live
+  install; the Windows helper installing fresh on stock EveJS, upgrading
+  0.2.152.10 in place and disabling back to the exact stock files; and the
+  native driver, API and dashboard started together with launcher settings
+  locked.
+
 ## Known limits
 
 - Resuming a held pilot with the `/playerbots resume` chat command does not

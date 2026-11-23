@@ -11,6 +11,9 @@ const TABLE = "playerBots";
 const PROGRESS_PATH = "/_combatProgress";
 const MAX_RECORDED_SITES = 256;
 const repo = createTableRepository("service:playerbots", { strict: true });
+const pending = new Map();
+let saveTimer;
+let shutdownRegistered = false;
 
 function readProgressMap() {
   repo.ensureTable(TABLE);
@@ -20,8 +23,29 @@ function readProgressMap() {
 
 function getProgress(characterID) {
   const id = Math.trunc(Number(characterID) || 0);
-  return id > 0 ? readProgressMap()[String(id)] || { highestClearedTier: 0, clearedSites: [] } :
+  return id > 0 ? pending.get(id) || readProgressMap()[String(id)] || { highestClearedTier: 0, clearedSites: [] } :
     { highestClearedTier: 0, clearedSites: [] };
+}
+
+function saveProgress() {
+  clearTimeout(saveTimer); saveTimer = undefined;
+  if (!pending.size) return;
+  const merged = { ...readProgressMap(), ...Object.fromEntries(pending) };
+  const result = repo.write(TABLE, PROGRESS_PATH, merged);
+  if (result?.success !== true) throw Error(result?.errorMsg || "PLAYERBOT_COMBAT_PROGRESS_WRITE_FAILED");
+  pending.clear();
+}
+
+function scheduleProgressSave() {
+  if (saveTimer) return;
+  saveTimer = setTimeout(() => {
+    try { saveProgress(); }
+    catch (error) {
+      require("../../utils/logger").warn(`[PlayerBots] Cannot save combat progress yet: ${error.message}`);
+      scheduleProgressSave();
+    }
+  }, 60_000);
+  saveTimer.unref?.();
 }
 
 function getNextSiteDifficulty(characterID, maxSiteDifficulty) {
@@ -36,8 +60,7 @@ function recordSiteClear(characterID, siteInstanceID, difficulty) {
   const tier = Math.max(1, Math.trunc(Number(difficulty) || 1));
   if (!id || !instanceID) return { success: false, reason: "invalid-site-clear" };
 
-  const progressMap = readProgressMap();
-  const previous = progressMap[String(id)] || { highestClearedTier: 0, clearedSites: [] };
+  const previous = getProgress(id);
   const clearedSites = Array.isArray(previous.clearedSites) ? previous.clearedSites : [];
   if (clearedSites.some((entry) => Number(entry && entry.siteInstanceID) === instanceID)) {
     return { success: true, duplicate: true, progress: previous };
@@ -51,13 +74,12 @@ function recordSiteClear(characterID, siteInstanceID, difficulty) {
       completedAt: new Date().toISOString(),
     }].slice(-MAX_RECORDED_SITES),
   };
-  progressMap[String(id)] = next;
-  const written = repo.write(TABLE, PROGRESS_PATH, progressMap);
-  if (!written.success) throw new Error(written.errorMsg || "PLAYERBOT_COMBAT_PROGRESS_WRITE_FAILED");
-  const flushed = repo.flushTableSync(TABLE);
-  if (!flushed || flushed.success !== true) {
-    throw new Error(flushed && flushed.errorMsg || "PLAYERBOT_COMBAT_PROGRESS_FLUSH_FAILED");
+  if (!shutdownRegistered) {
+    require("../../gameStore").registerShutdownHook("playerbots-combat-progress", saveProgress);
+    shutdownRegistered = true;
   }
+  pending.set(id, next);
+  scheduleProgressSave();
   return { success: true, duplicate: false, progress: next };
 }
 

@@ -1,0 +1,394 @@
+{
+  "schemaVersion": 3,
+  "id": "evejs-playerbots-native",
+  "displayName": "Playerbots (Windows, Luna Update)",
+  "version": "0.2.152.11",
+  "description": "Native EveJS 261115.2 Playerbots with the Luna gameplay updates, corporation recruitment, Windows multicore support and the overhauled operator dashboard.",
+  "kind": "source-integrated",
+  "supportedBackends": [
+    "native"
+  ],
+  "activation": {
+    "strategy": "package"
+  },
+  "restart": "game_server",
+  "launcherApi": {
+    "version": 1,
+    "minLauncherVersion": "1.0.91",
+    "helper": {
+      "runtime": "node",
+      "path": "helper.cjs"
+    },
+    "capabilities": [
+      "install",
+      "prepare_disable",
+      "prepare_remove",
+      "recover"
+    ]
+  },
+  "settings": {
+    "schemaVersion": 1,
+    "files": [
+      {
+        "id": "options",
+        "base": "evejs",
+        "path": "config/playerbots-native.json",
+        "format": "json"
+      }
+    ],
+    "fields": [
+      {
+        "label": "Roster target",
+        "group": "Population",
+        "type": "integer",
+        "default": 500,
+        "minimum": 30,
+        "maximum": 15000,
+        "id": "rosterTarget",
+        "file": "options",
+        "key": [
+          "rosterTarget"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Roster ceiling",
+        "group": "Population",
+        "type": "integer",
+        "default": 1500,
+        "minimum": 30,
+        "maximum": 15000,
+        "advanced": true,
+        "id": "rosterCeiling",
+        "file": "options",
+        "key": [
+          "rosterCeiling"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Maximum online bots",
+        "group": "Population",
+        "type": "integer",
+        "default": 300,
+        "minimum": 1,
+        "maximum": 5000,
+        "id": "maxOnline",
+        "file": "options",
+        "key": [
+          "maxOnline"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Maximum bots per system",
+        "group": "Population",
+        "type": "integer",
+        "default": 30,
+        "minimum": 1,
+        "maximum": 300,
+        "id": "maxPerSystem",
+        "file": "options",
+        "key": [
+          "maxPerSystem"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Gradually create roster",
+        "group": "Population",
+        "type": "boolean",
+        "default": true,
+        "id": "rosterSeedEnabled",
+        "file": "options",
+        "key": [
+          "rosterSeedEnabled"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Roster seed batch size",
+        "group": "Population",
+        "type": "integer",
+        "default": 5,
+        "minimum": 1,
+        "maximum": 10,
+        "advanced": true,
+        "id": "rosterSeedBatchSize",
+        "file": "options",
+        "key": [
+          "rosterSeedBatchSize"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Autonomous bot work",
+        "group": "Behaviour",
+        "type": "boolean",
+        "default": true,
+        "id": "autoworkEnabled",
+        "file": "options",
+        "key": [
+          "autoworkEnabled"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Bot versus bot combat",
+        "group": "Behaviour",
+        "type": "boolean",
+        "default": true,
+        "id": "botVersusBot",
+        "file": "options",
+        "key": [
+          "botVersusBot"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Engagement",
+        "group": "Behaviour",
+        "type": "boolean",
+        "default": true,
+        "advanced": true,
+        "id": "engagement",
+        "file": "options",
+        "key": [
+          "engagement"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Wildfire",
+        "group": "Behaviour",
+        "type": "boolean",
+        "default": true,
+        "advanced": true,
+        "id": "wildfire",
+        "file": "options",
+        "key": [
+          "wildfire"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Market making",
+        "group": "Behaviour",
+        "type": "boolean",
+        "default": true,
+        "id": "marketMaking",
+        "file": "options",
+        "key": [
+          "marketMaking"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Driver concurrency",
+        "group": "Performance",
+        "type": "integer",
+        "default": 16,
+        "minimum": 1,
+        "maximum": 100,
+        "advanced": true,
+        "id": "addonConcurrency",
+        "file": "options",
+        "key": [
+          "addonConcurrency"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Driver interval (ms)",
+        "group": "Performance",
+        "type": "integer",
+        "default": 300000,
+        "minimum": 30000,
+        "maximum": 86400000,
+        "advanced": true,
+        "id": "addonCycleIntervalMs",
+        "file": "options",
+        "key": [
+          "addonCycleIntervalMs"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Delay between bot actions (ms)",
+        "group": "Performance",
+        "type": "integer",
+        "default": 0,
+        "minimum": 0,
+        "maximum": 5000,
+        "advanced": true,
+        "id": "addonBotDelayMs",
+        "file": "options",
+        "key": [
+          "addonBotDelayMs"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Target corporation",
+        "description": "Enter an exact player corporation name or ticker. Use name: or ticker: to resolve an ambiguous match. Blank disables corporation recruitment.",
+        "group": "Corporation recruitment",
+        "type": "string",
+        "default": "",
+        "maxLength": 96,
+        "id": "recruitmentCorporation",
+        "file": "options",
+        "key": [
+          "recruitmentCorporation"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Automatically recruit eligible bots",
+        "description": "Periodically recruit into the target corporation while Game is running, including newly created bots. Use /bots corp inviteall to start or resume and /bots corp inviteall cancel to pause.",
+        "group": "Corporation recruitment",
+        "type": "boolean",
+        "default": false,
+        "id": "autoRecruitCorporation",
+        "file": "options",
+        "key": [
+          "autoRecruitCorporation"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Player corporation bot limit",
+        "description": "Maximum recruited bots per player corporation. Human pilots also count toward the separate total member limit.",
+        "group": "Corporation recruitment",
+        "type": "integer",
+        "default": 1000,
+        "minimum": 1,
+        "maximum": 15000,
+        "id": "playerCorporationBotLimit",
+        "file": "options",
+        "key": [
+          "playerCorporationBotLimit"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Dashboard port",
+        "description": "Open http://127.0.0.1:PORT/ after starting Game.",
+        "group": "Local dashboard",
+        "type": "integer",
+        "default": 8080,
+        "minimum": 1024,
+        "maximum": 65535,
+        "id": "dashboardPort",
+        "file": "options",
+        "key": [
+          "dashboardPort"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Private API port",
+        "description": "Local connection between Game and the bot driver.",
+        "group": "Local dashboard",
+        "type": "integer",
+        "default": 26004,
+        "minimum": 1024,
+        "maximum": 65535,
+        "advanced": true,
+        "id": "apiPort",
+        "file": "options",
+        "key": [
+          "apiPort"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Player corporation member limit",
+        "description": "Total seats for corporations with a player CEO, including the CEO. Set 0 to use the normal CEO skill limit.",
+        "group": "Corporation recruitment",
+        "type": "integer",
+        "default": 15000,
+        "minimum": 0,
+        "maximum": 15000,
+        "id": "playerCorporationMemberLimit",
+        "file": "options",
+        "key": [
+          "playerCorporationMemberLimit"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Bots processed per recruitment batch",
+        "description": "Process 1 to 16 candidates per batch. Smaller batches keep tick work low.",
+        "group": "Corporation recruitment",
+        "type": "integer",
+        "default": 4,
+        "minimum": 1,
+        "maximum": 16,
+        "id": "recruitmentBatchSize",
+        "file": "options",
+        "key": [
+          "recruitmentBatchSize"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Player corporation bot profit share (%)",
+        "description": "Share of each bot\u2019s cumulative net profit paid to its player-led corporation. Set 0 to disable new contributions.",
+        "group": "Corporation income",
+        "type": "integer",
+        "default": 60,
+        "minimum": 0,
+        "maximum": 100,
+        "id": "playerCorpProfitSharePercent",
+        "file": "options",
+        "key": [
+          "playerCorpProfitSharePercent"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Bot-led corporation operation share (%)",
+        "description": "Share of successful operation profit paid to corporations with a bot CEO.",
+        "group": "Corporation income",
+        "type": "integer",
+        "default": 20,
+        "minimum": 0,
+        "maximum": 100,
+        "id": "botCorpOperationSharePercent",
+        "file": "options",
+        "key": [
+          "botCorpOperationSharePercent"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Minimum corporation payout (ISK)",
+        "description": "Accumulate small player-corporation contributions until the owed amount reaches this minimum.",
+        "group": "Corporation income",
+        "type": "integer",
+        "default": 1,
+        "minimum": 1,
+        "maximum": 1000000,
+        "id": "corpMinProfitShareISK",
+        "file": "options",
+        "key": [
+          "corpMinProfitShareISK"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Refresh existing bot portraits once",
+        "description": "On Game startup, back up existing bot portraits and replace them with the bundled avatars. Runs once per GameStore. Turn off before starting Game to keep existing bot portraits.",
+        "group": "Portraits",
+        "type": "boolean",
+        "default": true,
+        "id": "refreshExistingPortraits",
+        "file": "options",
+        "key": [
+          "refreshExistingPortraits"
+        ],
+        "restart": "game_server"
+      }
+    ]
+  }
+}

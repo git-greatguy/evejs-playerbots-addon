@@ -16,9 +16,201 @@
     },
     "server/bootstrap.js": {
       "baseSha256": "5a1722b1129b717f020b5dcf74e40324871351134d244877a275847d3b337fcb",
-      "sourceSha256": "a3e942bf2488e3f5ba7a9158aac06743e5fe49d996b08aabe65d36692a53eca0",
-      "overlaySha256": "a3e942bf2488e3f5ba7a9158aac06743e5fe49d996b08aabe65d36692a53eca0",
+      "sourceSha256": "0d8562859cc0bc6ca62b9513722f692d565bd90a24a6198312e88f39cc1a6d43",
+      "overlaySha256": "0d8562859cc0bc6ca62b9513722f692d565bd90a24a6198312e88f39cc1a6d43",
       "subsystem": "platform"
+    },
+    "server/playerbots-native/portraits/00.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "ec3d506c7a963df88aea83b13dfe1c3c7eb28960debbb368984079c0213eb30d",
+      "overlaySha256": "ec3d506c7a963df88aea83b13dfe1c3c7eb28960debbb368984079c0213eb30d",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/01.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "7ca48a2712370ae07bff05b59a477a191aa8207088e9d98abc854b0de943f998",
+      "overlaySha256": "7ca48a2712370ae07bff05b59a477a191aa8207088e9d98abc854b0de943f998",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/02.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "0554d3958296e2a52792a5b0f84191d8aa7fd4f73bf45b9e199bb874cdfbf4a9",
+      "overlaySha256": "0554d3958296e2a52792a5b0f84191d8aa7fd4f73bf45b9e199bb874cdfbf4a9",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/03.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "46c3a8d5624733e09eaedb725b5b9105b308e79bc9366192e8a4f1fdac1d0706",
+      "overlaySha256": "46c3a8d5624733e09eaedb725b5b9105b308e79bc9366192e8a4f1fdac1d0706",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/04.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "f38d94811897d742f04f596b602fea9ca84040095cd6239f12252d7761eb1bcf",
+      "overlaySha256": "f38d94811897d742f04f596b602fea9ca84040095cd6239f12252d7761eb1bcf",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/05.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "55fc72f7cac301cf15e15a87933ddc56e44ba0d830f677bf2b97b9e3a5e379e4",
+      "overlaySha256": "55fc72f7cac301cf15e15a87933ddc56e44ba0d830f677bf2b97b9e3a5e379e4",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/06.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "ab917842d57f841dc1300e491bef9b817162ef16dd63c8fd69fb07524c072eb0",
+      "overlaySha256": "ab917842d57f841dc1300e491bef9b817162ef16dd63c8fd69fb07524c072eb0",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/07.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "ad362b4ac72459a6727ee2f8d329a3fb6ce0c69b5bfbbfc21573e76522c2d8e6",
+      "overlaySha256": "ad362b4ac72459a6727ee2f8d329a3fb6ce0c69b5bfbbfc21573e76522c2d8e6",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/08.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "fcf7caae7ca3dcaa5712afad49745e505099904d40d59d5112261eafbbf1a906",
+      "overlaySha256": "fcf7caae7ca3dcaa5712afad49745e505099904d40d59d5112261eafbbf1a906",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/09.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "fe44b2c3d2108bc30700a7bf8f847e81b38e470941b27df2d32f824cc6ddb59b",
+      "overlaySha256": "fe44b2c3d2108bc30700a7bf8f847e81b38e470941b27df2d32f824cc6ddb59b",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/10.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "66742feed7ec7dc6549073e2a984fe9b76af801a35e1333f16f9fb50276f551d",
+      "overlaySha256": "66742feed7ec7dc6549073e2a984fe9b76af801a35e1333f16f9fb50276f551d",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/11.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "6170d4cbed7c47d056d5db70e5c84a982486d94183dbff401550dfd70377f0b8",
+      "overlaySha256": "6170d4cbed7c47d056d5db70e5c84a982486d94183dbff401550dfd70377f0b8",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/12.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "c1632542556956f73c7a9b20f97ca3a15d61a6cc8408bc315ee55197850c9ace",
+      "overlaySha256": "c1632542556956f73c7a9b20f97ca3a15d61a6cc8408bc315ee55197850c9ace",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/13.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "4ab7cdd72cfa0d97e046886e54b7897270d895b86fee54b145772b0281d952ae",
+      "overlaySha256": "4ab7cdd72cfa0d97e046886e54b7897270d895b86fee54b145772b0281d952ae",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/14.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "51ea6d19004166a25ea43fab352f71a5b0deb666fd7311dcba1264849355901e",
+      "overlaySha256": "51ea6d19004166a25ea43fab352f71a5b0deb666fd7311dcba1264849355901e",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/15.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "bbea6dbecd7b9282b352e62115472da1f13277c519f82206e492a4b0a0603b22",
+      "overlaySha256": "bbea6dbecd7b9282b352e62115472da1f13277c519f82206e492a4b0a0603b22",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/16.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "b2fa80eb7c9645d87f4a820c546df13327163ace12bc31ab82772ca1e16dcff2",
+      "overlaySha256": "b2fa80eb7c9645d87f4a820c546df13327163ace12bc31ab82772ca1e16dcff2",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/17.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "76685121dedb565be6269aea322a48474478f16eb1c1244bf3a88b57db6f554f",
+      "overlaySha256": "76685121dedb565be6269aea322a48474478f16eb1c1244bf3a88b57db6f554f",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/18.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "ffe0786e85ffe961c8b22a7325bdb5531aab04a019127a1563c8b3f6d58f8f88",
+      "overlaySha256": "ffe0786e85ffe961c8b22a7325bdb5531aab04a019127a1563c8b3f6d58f8f88",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/19.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "88bc239662f5c3317280f0063f3336203326e30fe23568959a5f325b2a60f1fd",
+      "overlaySha256": "88bc239662f5c3317280f0063f3336203326e30fe23568959a5f325b2a60f1fd",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/20.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "e0195827d3c29f0ad6c48d903f3470f7da45fbb047ef2c799dfe72ed757aec4d",
+      "overlaySha256": "e0195827d3c29f0ad6c48d903f3470f7da45fbb047ef2c799dfe72ed757aec4d",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/21.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "b11c905a7b85e8f8206ac3f3dc6a8be5184741c3183d7252618701e927b158c3",
+      "overlaySha256": "b11c905a7b85e8f8206ac3f3dc6a8be5184741c3183d7252618701e927b158c3",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/22.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "a6522795932ba107a5a090bf52b3f3ebd0e4e181168da116e3f40c5a72825b0e",
+      "overlaySha256": "a6522795932ba107a5a090bf52b3f3ebd0e4e181168da116e3f40c5a72825b0e",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/23.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "e35d2c8e080d9cfd3de393531ca60b883a4c4e1bc6b7d26b3762216a7259fe28",
+      "overlaySha256": "e35d2c8e080d9cfd3de393531ca60b883a4c4e1bc6b7d26b3762216a7259fe28",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/24.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "62d0702fdd928df951a88d7d54b7d136ed48681c0cf5ca5fcb0976a1d579855c",
+      "overlaySha256": "62d0702fdd928df951a88d7d54b7d136ed48681c0cf5ca5fcb0976a1d579855c",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/25.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "46062f2cf9402c567c1b859a658c96e53aeff68ba4e53a68282e9148edbbb9e7",
+      "overlaySha256": "46062f2cf9402c567c1b859a658c96e53aeff68ba4e53a68282e9148edbbb9e7",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/26.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "5e1f15380540fd116f6cd969072b359aa6e4bcb4e6874f40f887b0b460f442c0",
+      "overlaySha256": "5e1f15380540fd116f6cd969072b359aa6e4bcb4e6874f40f887b0b460f442c0",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/27.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "5e619342c3af7cc5d878abe1951804a677bbb37b6502e25395beee416805dd35",
+      "overlaySha256": "5e619342c3af7cc5d878abe1951804a677bbb37b6502e25395beee416805dd35",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/28.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "9f0294d2d21a6d23468284fb66a9f983314aa98e147bebd2415364727c9fcd88",
+      "overlaySha256": "9f0294d2d21a6d23468284fb66a9f983314aa98e147bebd2415364727c9fcd88",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/29.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "c7a0a74f10ca40b0409c5390a63858f2029fa2514b01bc2a23afafb77fba3bbd",
+      "overlaySha256": "c7a0a74f10ca40b0409c5390a63858f2029fa2514b01bc2a23afafb77fba3bbd",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/30.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "27f220f425e6608b6c1555c64e768bf19e181a4124e6a10b2556ae661a572944",
+      "overlaySha256": "27f220f425e6608b6c1555c64e768bf19e181a4124e6a10b2556ae661a572944",
+      "subsystem": "playerbots-core"
+    },
+    "server/playerbots-native/portraits/31.jpg": {
+      "baseSha256": null,
+      "sourceSha256": "09ffe5fc614a5b2b0d3796cd89585541144063542faac76e6e4f8eac0cefabc6",
+      "overlaySha256": "09ffe5fc614a5b2b0d3796cd89585541144063542faac76e6e4f8eac0cefabc6",
+      "subsystem": "playerbots-core"
     },
     "server/src/_secondary/express/gatewayServices/careerGoalGatewayService.js": {
       "baseSha256": "3d4dfb6ae03c2d119101b25f3ee68958226caebedac44f415587dfba529436a9",
@@ -82,8 +274,8 @@
     },
     "server/src/services/chat/chatCommands.js": {
       "baseSha256": "344e9c97bbeeb1714ded4124c6ff4d2b030cf9ec1d9b2d9e1825836b571c9530",
-      "sourceSha256": "04715352907b87a027b4ade7139e20c4c78b92fd487ca811ef83986385ee18c5",
-      "overlaySha256": "04715352907b87a027b4ade7139e20c4c78b92fd487ca811ef83986385ee18c5",
+      "sourceSha256": "d32c37d7df534e87d4126df632c399775ef7f3ac178697c7c382a610808af80e",
+      "overlaySha256": "d32c37d7df534e87d4126df632c399775ef7f3ac178697c7c382a610808af80e",
       "subsystem": "chat-commands"
     },
     "server/src/services/chat/commandSessionEffects.js": {
@@ -148,8 +340,20 @@
     },
     "server/src/services/corporation/corpRegistryRuntime.js": {
       "baseSha256": "d3a0dfba93f0e0b7998c53f7c81a767d26749690cc04852a29fe7988757f8a5d",
-      "sourceSha256": "2455eeae4cff09d0784a36174ebdb9a31215e476c9f55f8b71d308025de30361",
-      "overlaySha256": "2455eeae4cff09d0784a36174ebdb9a31215e476c9f55f8b71d308025de30361",
+      "sourceSha256": "b7ac691f3de4eda13241f2625a5d888ee49d9e1695f2a126ae5112557bbf96c3",
+      "overlaySha256": "b7ac691f3de4eda13241f2625a5d888ee49d9e1695f2a126ae5112557bbf96c3",
+      "subsystem": "corporation-sovereignty-structures"
+    },
+    "server/src/services/corporation/corporationMemberLimit.js": {
+      "baseSha256": "848dd2332ca8c3e966ee90f87e1435d68317c65ba1fd40f6fad9065ba35b1bb5",
+      "sourceSha256": "8b897e665909c7bf5d4f2bc03e51f7764bf16f83c21751d16db7ed6ec82cfa72",
+      "overlaySha256": "8b897e665909c7bf5d4f2bc03e51f7764bf16f83c21751d16db7ed6ec82cfa72",
+      "subsystem": "corporation-sovereignty-structures"
+    },
+    "server/src/services/corporation/corporationState.js": {
+      "baseSha256": "caffc41f3aad3b6b7fa3df0e3b29523677098383201409e0d4503fa04bf431ac",
+      "sourceSha256": "ee9e6b2fc98e9b35c6bbc96e55aed9b8f0ff555d154c0501ce2b42cfe48426d0",
+      "overlaySha256": "ee9e6b2fc98e9b35c6bbc96e55aed9b8f0ff555d154c0501ce2b42cfe48426d0",
       "subsystem": "corporation-sovereignty-structures"
     },
     "server/src/services/corporation/warDeclarationState.js": {
@@ -274,8 +478,8 @@
     },
     "server/src/services/playerbots/playerBotAutonomyRuntime.js": {
       "baseSha256": null,
-      "sourceSha256": "e3d29d396025dea4b6c84e4279d1bbdbd545466e1384fd9e5ba29b8848f87c25",
-      "overlaySha256": "e3d29d396025dea4b6c84e4279d1bbdbd545466e1384fd9e5ba29b8848f87c25",
+      "sourceSha256": "91186ed1950d1e0889b73ba84770c24910c70271efb37dc2caba9b22ad3ac2fe",
+      "overlaySha256": "91186ed1950d1e0889b73ba84770c24910c70271efb37dc2caba9b22ad3ac2fe",
       "subsystem": "playerbots-core"
     },
     "server/src/services/playerbots/playerBotCapacityRuntime.js": {
@@ -310,8 +514,8 @@
     },
     "server/src/services/playerbots/playerBotCombatProgressRuntime.js": {
       "baseSha256": null,
-      "sourceSha256": "7aea262cf7b7dbf5b9b922a123c45b09ee24891cbd222da2387c435677738649",
-      "overlaySha256": "7aea262cf7b7dbf5b9b922a123c45b09ee24891cbd222da2387c435677738649",
+      "sourceSha256": "6554ead39594e7821c760651e88b8eaeae19bf09755f07f3e6573e7713ee04f2",
+      "overlaySha256": "6554ead39594e7821c760651e88b8eaeae19bf09755f07f3e6573e7713ee04f2",
       "subsystem": "playerbots-core"
     },
     "server/src/services/playerbots/playerBotCombatRuntime.js": {
@@ -322,8 +526,8 @@
     },
     "server/src/services/playerbots/playerBotConfigurationRuntime.js": {
       "baseSha256": null,
-      "sourceSha256": "138e7dab2f3eeb0142b7051e1287c34b1f6d0af32c3cfca6ce1636333effecaa",
-      "overlaySha256": "138e7dab2f3eeb0142b7051e1287c34b1f6d0af32c3cfca6ce1636333effecaa",
+      "sourceSha256": "1536e52c1fb49c783f3a4c4efa796ce584520d628f07f912a1ab4cb759f6c53b",
+      "overlaySha256": "1536e52c1fb49c783f3a4c4efa796ce584520d628f07f912a1ab4cb759f6c53b",
       "subsystem": "playerbots-core"
     },
     "server/src/services/playerbots/playerBotConnectionScheduleRuntime.js": {
@@ -346,8 +550,8 @@
     },
     "server/src/services/playerbots/playerBotCorpEconomyRuntime.js": {
       "baseSha256": null,
-      "sourceSha256": "baf3ca23ab2c024fa2287551e05f7503608899083c87b82ab7e4227be3106a65",
-      "overlaySha256": "baf3ca23ab2c024fa2287551e05f7503608899083c87b82ab7e4227be3106a65",
+      "sourceSha256": "156ba92544c1d97e719eb4b76523c3bd10431cdb201399b98b379ea87823afb1",
+      "overlaySha256": "156ba92544c1d97e719eb4b76523c3bd10431cdb201399b98b379ea87823afb1",
       "subsystem": "playerbots-core"
     },
     "server/src/services/playerbots/playerBotCorporationPriorities.js": {
@@ -566,10 +770,16 @@
       "overlaySha256": "a1cdeb042a4d7685bb400c89cf29545fa0e0e924593590d0196aed9da0c8449d",
       "subsystem": "playerbots-core"
     },
+    "server/src/services/playerbots/playerBotPlayerCorporationRecruitment.js": {
+      "baseSha256": null,
+      "sourceSha256": "b64f57e7d3c22d3ce017f24d2078a584bf7664296f41db9e902faacce9af8ecd",
+      "overlaySha256": "b64f57e7d3c22d3ce017f24d2078a584bf7664296f41db9e902faacce9af8ecd",
+      "subsystem": "playerbots-core"
+    },
     "server/src/services/playerbots/playerBotPortraitRuntime.js": {
       "baseSha256": null,
-      "sourceSha256": "35f38a737aaf5031a9d5d3be6189c2fe23021f609aa82348e8b5349243afaefb",
-      "overlaySha256": "35f38a737aaf5031a9d5d3be6189c2fe23021f609aa82348e8b5349243afaefb",
+      "sourceSha256": "686261905605082d512c142d3d6f9b55c3a0a86ec9567772cd726363886e231a",
+      "overlaySha256": "686261905605082d512c142d3d6f9b55c3a0a86ec9567772cd726363886e231a",
       "subsystem": "playerbots-core"
     },
     "server/src/services/playerbots/playerBotProvisioningRuntime.js": {
@@ -598,8 +808,8 @@
     },
     "server/src/services/playerbots/playerBotRuntime.js": {
       "baseSha256": null,
-      "sourceSha256": "6eb041d62f2447675b9e1e4e702ab8279ff950b399b4cfe041132c808660963e",
-      "overlaySha256": "6eb041d62f2447675b9e1e4e702ab8279ff950b399b4cfe041132c808660963e",
+      "sourceSha256": "be44d24cc9c115cad69764d3b3c44e138a5ba3a0c7b8a814d5485c1fc274b8d7",
+      "overlaySha256": "be44d24cc9c115cad69764d3b3c44e138a5ba3a0c7b8a814d5485c1fc274b8d7",
       "subsystem": "playerbots-core"
     },
     "server/src/services/playerbots/playerBotSiteUpkeepRuntime.js": {
@@ -616,8 +826,8 @@
     },
     "server/src/services/playerbots/playerBotSpaceRuntime.js": {
       "baseSha256": null,
-      "sourceSha256": "d865c5544e2afc37e97fe93c217001e70500d4611db2fd6afa2bdef6812f0427",
-      "overlaySha256": "d865c5544e2afc37e97fe93c217001e70500d4611db2fd6afa2bdef6812f0427",
+      "sourceSha256": "0547adc49f987a6d6a4825af4057a8dcc6c6a9566f2d305890ab9bd73f631b35",
+      "overlaySha256": "0547adc49f987a6d6a4825af4057a8dcc6c6a9566f2d305890ab9bd73f631b35",
       "subsystem": "playerbots-core"
     },
     "server/src/services/playerbots/playerBotStatusRuntime.js": {
@@ -658,8 +868,8 @@
     },
     "server/src/services/playerbots/playerBotTaskRuntime.js": {
       "baseSha256": null,
-      "sourceSha256": "e50c227a725b8ebcd8398d952317627a4be3b0e331380e66cfd95b1dfedb51b8",
-      "overlaySha256": "e50c227a725b8ebcd8398d952317627a4be3b0e331380e66cfd95b1dfedb51b8",
+      "sourceSha256": "9847442e42d46ad854c4cd02a881c0596c0cbd3f9a83ac44ff8d1026ff62983a",
+      "overlaySha256": "9847442e42d46ad854c4cd02a881c0596c0cbd3f9a83ac44ff8d1026ff62983a",
       "subsystem": "playerbots-core"
     },
     "server/src/services/playerbots/playerBotTerritoryRuntime.js": {
@@ -849,26 +1059,26 @@
     "addons/playerbots/LICENSE": "ce3fb82d9ee80a1cb0e548f9b0560ead52378ee2b4e826fd9459b4acf7075d89",
     "addons/playerbots/LOCAL_DEFENSE.md": "212bc0e1fe6447aba93b1794327bc1fc3e475445f19809d67a04624e2d3ebd3a",
     "addons/playerbots/OPERATIONS.md": "8bc83285f866dd259ba39bc5d6779bb1c9de21629260a05e89166be307270970",
-    "addons/playerbots/README.md": "b1099078b88a4f84bc71833f657c15d947739ec61fd245928dbf36d704eac1b5",
+    "addons/playerbots/README.md": "77288455e9d4d6994182d903cdf96c7af0acde2f21027000d0443cc6e89d6518",
     "addons/playerbots/THIRD_PARTY_NOTICES.md": "4e53a2b31f3965241b9d182b7764420e4f121213267ebc3936682544204c34dc",
     "addons/playerbots/TROUBLESHOOTING.md": "d3af657f4ee93a2a3c93e53e7e3f2dba321f492d1e85f6e6c9a569d250085191",
-    "addons/playerbots/compose.override.yaml": "a274ce9a224779a7a194b44a243c56366deacd489620f1f85d3dca47731dc032",
+    "addons/playerbots/compose.override.yaml": "489a84b6cc0f5d78211d2d2c1c5c40d366ff557c0438aed79dfe66f4fabeac56",
     "addons/playerbots/dashboard/favicon.svg": "b253bad68ca8a9fbff82054eeb86dc5084ca42c3f3168144b6866a81da7c3159",
     "addons/playerbots/dashboard/index.html": "c973a13dfcc1cda964216a842114a9da23506efc02cf25b5bef109d6007d555d",
     "addons/playerbots/dashboard/js/api.js": "dcb7c40bbeed47b6ed5279bc1c013b693e7a308fd321aa4676101f0f9dd99fa9",
     "addons/playerbots/dashboard/js/app.js": "3bf00fbd46152281e537c525b7423c76a63ad7a5b5b558b574900f4b0fe38a9c",
     "addons/playerbots/dashboard/js/drawer.js": "4b35755ce9c2b7ade656a714d9195464b16bd7aa50dcd6e3bbd0e7c36d5eba8f",
     "addons/playerbots/dashboard/js/roster.js": "70f62be1c70780a60664cc5a847a6b678105c44297d49070b1dea3255920fff0",
-    "addons/playerbots/dashboard/js/ui.js": "38ec24bf7388cbd07d849651bc87addb3ac0c578b61c986ed0f288a7f1e4658f",
+    "addons/playerbots/dashboard/js/ui.js": "d49ebde39fbfe61310f9203d300117e80a33002a5bff4f5010d3a9844f892e1b",
     "addons/playerbots/dashboard/js/view-activity.js": "5afc0b9ad773077abc675b2d781fbad7add9a4c5a92cf5d84ca068b4debaa72c",
     "addons/playerbots/dashboard/js/view-corporations.js": "41a773b33c76a43acf43464af6fce278d0204c9a1d1994676442af565761293e",
     "addons/playerbots/dashboard/js/view-history.js": "0d3660d82ec740c4ab98fba29d961722b95d911dde10f09049a602e10fcd1ba2",
     "addons/playerbots/dashboard/js/view-performance.js": "8607388b654b9d91b03f577233569b714321d6219fca07a674fc091dabd6221e",
-    "addons/playerbots/dashboard/js/view-settings.js": "89004392170fc8e6d3296733e902495d10fa815c8a7180d318321183438180d9",
+    "addons/playerbots/dashboard/js/view-settings.js": "85036f819a575cab7504619337885d25ffc48938a18db7d829bc6ad0e82cbbc6",
     "addons/playerbots/dashboard/js/view-world.js": "fd50e5ae48ce00652e91c94916f5d749705c0c276fc9f36a279a2363a135bb45",
     "addons/playerbots/dashboard/styles.css": "1e0a158d3c6529b5b42ad8dd36f1755f3fd379538973e049eb03bca0257de29d",
-    "addons/playerbots/dashboard-server.js": "aa2ccaafc2efd4d343cb3b86aad9daed02cbc9be60bd7d2a3c45aae352a1e02c",
-    "addons/playerbots/index.js": "8b73fbf55e1d63bb233cf26362f2e8881066271f4304da4a543e687b35cea893",
+    "addons/playerbots/dashboard-server.js": "b37c72487dfcc9e042abfc3e278f8da5b1de3a611bf36958e92af9ff55333003",
+    "addons/playerbots/index.js": "2b087cf854c063875e1ac20d601934bf36ba4277cbb80f2a85e423745a0ef878",
     "addons/playerbots/manifest.json": "d482e20dc9afc59f02a8808f447d76d4825387ecf4faeb6f67c9d8f3d8da85df"
   }
 }

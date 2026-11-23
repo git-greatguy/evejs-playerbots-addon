@@ -52,7 +52,8 @@ export function when(value) {
 export function portrait(characterID, size = 64) {
   const id = Math.trunc(Number(characterID) || 0);
   if (id <= 0) return `<span class="ph">?</span>`;
-  return `<img src="/api/character-portrait?characterID=${id}&amp;size=${size}" alt="" loading="lazy">`;
+  // v=2: portraits were repaired in 0.2.152.9; skip blank images browsers cached before.
+  return `<img src="/api/character-portrait?characterID=${id}&amp;size=${size}&amp;v=2" alt="" loading="lazy">`;
 }
 
 export function pilotCell(row) {

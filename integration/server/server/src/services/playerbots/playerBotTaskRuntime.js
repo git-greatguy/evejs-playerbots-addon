@@ -279,18 +279,20 @@ function claimNextTask(options = {}) {
   if (!supportedKinds.size) return null;
   const excludedTaskIDs = new Set((Array.isArray(options.excludeTaskIDs) ? options.excludeTaskIDs : [])
     .map((taskID) => String(taskID || "").trim().toUpperCase()));
-  const allowedProviderIDs = Array.isArray(options.providerCharacterIDs)
+  const allowedProviderIDs = options.providerCharacterIDSet instanceof Set ? options.providerCharacterIDSet : Array.isArray(options.providerCharacterIDs)
     ? new Set(options.providerCharacterIDs.map((characterID) => Math.trunc(Number(characterID) || 0)))
     : null;
   if (options.skipReconcile !== true) reconcileLeases();
   const queue = readQueue();
-  const bots = require("./playerBotRuntime").listBots();
   const tasks = Object.values(queue.tasks)
     .filter((task) => task && task.status === "queued" && supportedKinds.has(task.kind) &&
       !excludedTaskIDs.has(String(task.taskID || "").toUpperCase()) &&
       (!options.taskID || task.taskID === String(options.taskID).trim().toUpperCase()) &&
       (!Number(task.nextAttemptAtMs) || Number(task.nextAttemptAtMs) <= Date.now()))
     .sort((left, right) => Number(right.priority) - Number(left.priority) || Date.parse(left.createdAt) - Date.parse(right.createdAt));
+  if (!tasks.length) return null;
+  const runtime = require("./playerBotRuntime");
+  const bots = allowedProviderIDs ? Array.from(allowedProviderIDs, id => runtime.getBotByCharacterID(id)).filter(Boolean) : runtime.listBots();
   for (const task of tasks) {
     const provider = getAvailableProviders(task, bots).find((candidate) =>
       (!allowedProviderIDs || allowedProviderIDs.has(Number(candidate.characterID))) &&
@@ -325,9 +327,7 @@ function claimNextTask(options = {}) {
 
 function releaseProvider(task) {
   if (!task || !task.providerCharacterID) return;
-  const provider = require("./playerBotRuntime").listBots().find((bot) =>
-    Number(bot.characterID) === Number(task.providerCharacterID),
-  );
+  const provider = require("./playerBotRuntime").getBotByCharacterID(task.providerCharacterID);
   if (!provider) return;
   if (String(provider.currentTask || "") === String(task.taskID)) {
     require("./playerBotRuntime").setBotAutonomyState(provider.characterID, {
