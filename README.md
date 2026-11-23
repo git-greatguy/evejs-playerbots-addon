@@ -142,6 +142,7 @@ This package is distributed under the repository's AGPL-3.0-only license. See
 
 - [@gzy40347](https://github.com/gzy40347)
 - [@ChaosRemnant](https://github.com/ChaosRemnant)
+- [@ubermidas](https://github.com/ubermidas)
 
 ## Acknowledgements
 
