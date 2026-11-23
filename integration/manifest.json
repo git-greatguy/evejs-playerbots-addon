@@ -845,11 +845,11 @@
   },
   "addonFiles": {
     "addons/playerbots/GUIDE.md": "0ac5d654a1abe4adb6551c3fa2f6b658c494f1d2de43e26f08528a874c2f1e71",
-    "addons/playerbots/INSTALLATION.md": "770cad554ed2bfa84914277d091f7d3ef0faad29040b6a546e20b8cbdbe0876c",
+    "addons/playerbots/INSTALLATION.md": "3e173ff5e4ca3403410fb1549f48f006617feca0a00e477be42a79d7c7e5058a",
     "addons/playerbots/LICENSE": "ce3fb82d9ee80a1cb0e548f9b0560ead52378ee2b4e826fd9459b4acf7075d89",
     "addons/playerbots/LOCAL_DEFENSE.md": "212bc0e1fe6447aba93b1794327bc1fc3e475445f19809d67a04624e2d3ebd3a",
     "addons/playerbots/OPERATIONS.md": "8bc83285f866dd259ba39bc5d6779bb1c9de21629260a05e89166be307270970",
-    "addons/playerbots/README.md": "d68b019b1ac81535903b61964bd5d7721e30a3b2761403558c1b7912b15c15ac",
+    "addons/playerbots/README.md": "7ae2a14615a316e1c06223b31d334a49d2b2420df9a537d31a6309bca35e5bc7",
     "addons/playerbots/THIRD_PARTY_NOTICES.md": "4e53a2b31f3965241b9d182b7764420e4f121213267ebc3936682544204c34dc",
     "addons/playerbots/TROUBLESHOOTING.md": "d3af657f4ee93a2a3c93e53e7e3f2dba321f492d1e85f6e6c9a569d250085191",
     "addons/playerbots/compose.override.yaml": "a274ce9a224779a7a194b44a243c56366deacd489620f1f85d3dca47731dc032",

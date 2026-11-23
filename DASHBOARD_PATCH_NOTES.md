@@ -194,6 +194,14 @@ Fixes from that pass:
   ships (the old `dashboard/app.js`) into the install backup, and
   `rollback.py` puts them back. Before, an upgrade left the old file in place.
 
+## README rewrite (23 Nov 2026)
+
+- `README.md` reorganized for server operators: what the bots do, install,
+  running, the dashboard, chat commands (most-used first, the rest folded by
+  topic), settings, data and safety, then patches and developer notes at the
+  end. Long reference tables are folded so the page stays short.
+- `INSTALLATION.md`: the Compose roster default is 500, not 1,000.
+
 ## Known limits
 
 - Resuming a held pilot with the `/playerbots resume` chat command does not

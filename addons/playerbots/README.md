@@ -1,546 +1,662 @@
-# EveJS Playerbots Add-on
+# EveJS Playerbots
 
-Autonomous player characters for an [EveJS](https://discord.gg/qrdfam8Mz)
-server. Bots are real EveJS characters in real corporations: they mine, run
-industry and planetary interaction, trade, patrol, fight wars, deploy
-structures and fly in fleets with human players, all through the server's own
-game services.
+**A living population for your EveJS server.** Playerbots are real EveJS
+characters, in real corporations, who play the game on their own. They mine,
+build, trade, run planetary colonies, patrol, fight wars and claim space, and
+they will join your corporation or fleet and fly with you when asked.
 
-The add-on runs the playerbot director as a separate Node.js process. The game
-server stays authoritative for characters, corporations, wallets, market
-orders, inventory, planetary colonies, ships, contracts, sovereignty and
-movement. The add-on talks to a private HTTP API inside the Docker network and
-has no database connection.
+The add-on is a companion process that sits next to your EveJS server. The
+server stays in charge of every character, wallet, ship, market order and
+item; the add-on only decides what each bot should do next, through a private
+API inside Docker. It never opens the game database itself.
 
 | | |
 | --- | --- |
-| Add-on version | **0.2.152**, experimental public test build |
-| Targets | EveJS source version `261115.2` |
-| Runtime | Node.js 24 or later, Docker Compose |
-| Dashboard | `http://127.0.0.1:8080`, no login |
-| License | AGPL-3.0-only |
+| **Version** | 0.2.152, experimental test build |
+| **Works with** | EveJS `261115.2` (source checkout, run with Docker Compose) |
+| **Dashboard** | `http://127.0.0.1:8080` on the server machine |
+| **License** | AGPL-3.0-only |
 
-> **This branch (`dashboard-overhaul`)** replaces the operator dashboard with
-> an activity board, direct corporation control and per-pilot orders, makes
-> dashboard and `/bots corp` orders survive restarts, and publishes the
-> dashboard on `127.0.0.1` by default. It is a local build that has not yet
-> been proposed upstream. See [`DASHBOARD_PATCH_NOTES.md`](DASHBOARD_PATCH_NOTES.md)
-> for the full list of changes, tests and known limits.
+This is a test build. Most of what is listed below works today; a few large
+systems are built but still waiting for proof on a live server, and those are
+marked. The [roadmap](PLAYERBOTS_ROADMAP.md) tracks what is done and what is
+next.
 
-This is a test build, not a finished product. The
-[roadmap](PLAYERBOTS_ROADMAP.md) is the source of truth for features still
-being built or still waiting for live evidence; the features below note where
-that applies.
+**Contents:** [What the bots do](#what-the-bots-do) ·
+[Install](#install) · [Run it](#run-it) · [The dashboard](#the-dashboard) ·
+[Chat commands](#chat-commands) · [Settings](#settings) ·
+[Your data and safety](#your-data-and-safety) · [Patches](#patches) ·
+[For developers](#for-developers) · [Credits](#credits)
 
-## Contents
+---
 
-- [Quick start](#quick-start)
-- [Features](#features)
-- [Operator dashboard](#operator-dashboard)
-- [Commands](#commands)
-- [Options](#options)
-- [Safety and persistence](#safety-and-persistence)
-- [Package contents](#package-contents)
-- [Distribution contract](#distribution-contract)
-- [Credits, license and contributors](#credits-and-provenance)
+## What the bots do
 
-## Quick start
+### A population that grows on its own
 
-1. Start from a clean EveJS `261115.2` source checkout (an existing deployment
-   also works; its databases are not touched).
-2. Unpack `dist/evejs-playerbots-addon-v0.2.152.zip` and run the installer
-   against the checkout:
+- The roster grows gradually to the size you choose, from 30 up to 15,000
+  pilots, a few at a time. Seeding slows or pauses by itself whenever the
+  server is busy, so it never floods the game.
+- Pilots are born across all four empires with names from their own race,
+  start in their race's starter system and work from their empire's trade
+  hub.
+- Only some of them are online at once (300 by default). The rest take turns,
+  so a large roster costs far less than the same number of live players.
+- Each pilot has a **specialty** (industry, trade, planetary, security, piracy
+  or sovereignty) and joins a bot corporation for it. Corporations split into
+  new ones as they fill up.
+- Every pilot starts with 1 billion ISK, kept back so routine work cannot
+  spend it all.
+- Portraits work offline. Corporation and alliance names can come from a name
+  list you edit on the dashboard.
+
+### Work they do without being told
+
+A **director** looks over the roster every few minutes and gives idle pilots
+something useful to do, a limited number at a time so the server stays
+responsive. Their work is saved as it goes and picks up where it left off
+after a restart.
+
+- **Mining**: belt mining, then refining and selling, or delivering the ore to
+  the corporation's headquarters. Security pilots can escort miners.
+- **Industry**: manufacturing runs paid from a personal or corporation wallet,
+  with spending limits. *(The full chain from mined ore to finished ships
+  still needs live proof.)*
+- **Planetary interaction**: setting up colonies, keeping extractors running,
+  collecting and exporting goods. *(Profit from advanced P2+ products still
+  needs live proof.)*
+- **Trade**: buying and selling, standing auto-buy and auto-sell rules,
+  courier contracts, and mineral buy orders outside Jita that give hubs a
+  real market.
+- **Ships**: upgrading along a ship ladder for their role, fitted from a
+  bundled catalog of 5,353 community fits.
+- **Combat**: security patrols and combat sites, pirate roams, war patrols
+  and null-sec conflict.
+- **Corporations and alliances**: CEOs found alliances, corporations declare
+  wars on each other and fund their fleets, and alliances move goods between
+  members.
+- **Structures and sovereignty**: deploying Upwell structures in null-sec,
+  capturing neutral hubs and running sovereignty campaigns. *(Sovereignty
+  results still need live proof.)*
+
+### Things you can do with them
+
+- **Fly with them.** Invite bots to your corporation or fleet; in fleet chat
+  tell them to follow you, escort you or attack your target.
+- **Give them orders.** Send any bot you control to mine, haul, travel, fit a
+  ship from your saved fittings, run industry or trade, all from chat.
+- **Command whole corporations.** Recall a corporation to its headquarters and
+  hold it there, send it back to work, choose where its output goes, or pick
+  out individual pilots. These orders survive a server restart.
+- **Watch and steer everything** from the [dashboard](#the-dashboard) in your
+  browser.
+
+### Optional extras
+
+- **Local defense** (off by default): chosen bots respond when chosen systems
+  are attacked. See [`LOCAL_DEFENSE.md`](LOCAL_DEFENSE.md).
+- **Wildfire Protocol** (on by default): after you delete all bots and start
+  over, about one new pilot in a hundred is born into a pirate corporation
+  that hunts the systems human players use, and says "burn" in Local when it
+  opens fire. Normal Crimewatch and war rules still apply.
+- **Bots fighting bots** (on by default): pirate and war patrols can target
+  other bots, not only humans.
+
+### Built to keep the server healthy
+
+The add-on also ships server-side improvements that help any busy EveJS
+server: a steadier space tick, a log of any tick that holds the server for a
+second or more, slower upkeep in systems nobody is watching, cleanup of sites
+in long-empty systems, and a Performance page that shows where time goes.
+
+On a clean test server, 500 bots were seeded and all 500 held online at once
+in about 3 GiB of server memory. See
+[`PLAYERBOTS_CAPACITY_MODEL.md`](PLAYERBOTS_CAPACITY_MODEL.md) for the
+measurements.
+
+---
+
+## Install
+
+### You need
+
+- An EveJS **`261115.2`** source checkout, set up with Docker (a fresh one or
+  your existing server; existing game data is kept).
+- **Docker** with the Compose v2 plugin.
+- **Python 3.10** or newer, to run the installer.
+- A running, healthy EveJS **Market** service. The add-on does not create the
+  market; EveJS's own market tools do (see `doc/SETUP.md` in EveJS).
+
+### Steps
+
+1. **Get the add-on.** Unpack `dist/evejs-playerbots-addon-v0.2.152.zip`, or
+   clone this repository to install straight from its source. *(This branch's
+   dashboard changes are not in that ZIP yet; install from the repository to
+   get them. See [Patches](#patches).)*
+
+2. **Check first.** This reads your EveJS checkout and reports what would
+   change, without writing anything:
 
    ```sh
-   python3 install.py --dry-run /path/to/evejs   # check only, writes nothing
-   python3 install.py /path/to/evejs             # install the overlay and .env settings
+   python3 install.py --dry-run /path/to/evejs
    ```
 
-3. Run EveJS's normal first-run setup and seed the Jita market with EveJS's own
-   market tools. The add-on seeds bot characters, not the market.
-4. Build and start the server and the add-on (or pass `--start` to the
-   installer):
+   On Windows use `python .\install.py --dry-run "C:\path\to\evejs"`. Keep
+   the quotes if the path has spaces.
+
+3. **Install.**
+
+   ```sh
+   python3 install.py /path/to/evejs
+   ```
+
+   The installer copies the add-on into `addons/playerbots`, updates the EveJS
+   server files it needs, and writes a private API token into `.env`. It backs
+   up every file it replaces and never touches the game database. If a file
+   was changed by an earlier manual install, it stops and lists it; re-run
+   with `--replace-conflicts` once you have looked.
+
+4. **Build and start.** Rebuild the EveJS image, start the server, wait until
+   `docker compose ps` shows it **healthy**, then start the add-on:
 
    ```sh
    docker compose -f compose.yaml -f addons/playerbots/compose.override.yaml build init
-   docker compose -f compose.yaml -f addons/playerbots/compose.override.yaml up -d --no-deps server playerbots-addon
+   docker compose -f compose.yaml -f addons/playerbots/compose.override.yaml up -d --no-deps server
+   docker compose -f compose.yaml -f addons/playerbots/compose.override.yaml ps server
+   docker compose -f compose.yaml -f addons/playerbots/compose.override.yaml up -d --no-deps playerbots-addon
    ```
 
-5. Open the dashboard at `http://127.0.0.1:8080`. The roster seeds gradually
-   toward the target (500 by default) while load stays under the seeding
-   limits.
+   If your setup uses extra Compose files (for example the EveJS launcher's),
+   add the same `-f` files to every command. `install.py --start` does the
+   build and start for you.
 
-Full steps, upgrades and rollback: [`INSTALLATION.md`](INSTALLATION.md).
-Day-to-day running: [`OPERATIONS.md`](OPERATIONS.md). Problems:
-[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md). Every chat command in detail:
+5. **Open the dashboard** at `http://127.0.0.1:8080`. Seeding starts after the
+   server has taken two load readings, and the roster grows toward 500 pilots
+   by default.
+
+More detail, including launcher setups and every installer option:
+[`INSTALLATION.md`](INSTALLATION.md).
+
+### Check, update or remove
+
+| To | Run |
+| --- | --- |
+| Check an install matches this release | `python3 verify.py /path/to/evejs` (read-only) |
+| Update to a newer release | Run its `install.py` against the same checkout, then rebuild and restart as in step 4 |
+| Undo the latest install | `python3 rollback.py /path/to/evejs`, then rebuild |
+
+The installer also clears out add-on files an older release used but this one
+no longer ships (they go into the install backup, and rollback puts them
+back).
+
+---
+
+## Run it
+
+### Everyday control
+
+| To | Do |
+| --- | --- |
+| Stop the bots, keep the server up for players | `docker compose … stop playerbots-addon` |
+| Start them again | `docker compose … start playerbots-addon` |
+| Restart the server cleanly | Stop the add-on, restart `server`, wait for **healthy**, start the add-on |
+| See what the add-on is doing | `docker compose … logs -f playerbots-addon` |
+| Apply new add-on or server files | `build init`, then recreate `server` and `playerbots-addon` |
+
+`…` stands for `-f compose.yaml -f addons/playerbots/compose.override.yaml`
+plus any extra Compose files you use. Don't restart the server and the add-on
+in the same command: the add-on may try to work before the server has
+finished loading.
+
+### Pausing work while the roster grows
+
+To let a large roster seed without the bots starting work, turn **Autonomous
+work** off on the Settings page (or `/playerbots autowork off`). Pilots then
+show as **Standing by** with the seeding progress. Turn it back on when
+seeding is done and the director starts handing out work.
+
+Seeding puts new pilots in their race's starter system without checking the
+per-system limit. The Activity page warns when a system is over it, and the
+director moves pilots out once work is on.
+
+### Common tasks
+
+| I want to | Where |
+| --- | --- |
+| See what every bot is doing, and why idle ones are idle | Dashboard → **Activity** |
+| Recall a corporation home and hold it there | Dashboard → **Corporations** → the corporation → **Recall all**, or `/bots corp recall` |
+| Send it back to work | **Send to work**, or `/bots corp work` |
+| Order just a few pilots | Tick them in the corporation's pilot list, then pick an order |
+| Change roster size or online limit | Dashboard → **Settings** (takes effect without a restart) |
+| Start over with a new roster | Settings → **Delete all bots** (type `DELETE ALL BOTS`) |
+| Find out why something failed | [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) |
+
+Everything else, from war mobilization to structure investment, is in
+[`OPERATIONS.md`](OPERATIONS.md).
+
+---
+
+## The dashboard
+
+Open `http://127.0.0.1:8080` in a browser on the server machine. There is no
+login, because the dashboard can command every bot; that is why it only
+listens on the local machine by default. To use it from another computer,
+see [Dashboard and network](#dashboard-and-network) and do so only on a
+network you trust.
+
+| Page | What you get |
+| --- | --- |
+| **Activity** | The whole roster at a glance: how many pilots are working, travelling, holding, queued, cooling down, paused, standing by, idle or offline; what they are working on; why the others are not; and a searchable pilot list. |
+| **Pilot panel** | Click any pilot to see what it is doing and why, where it is, its ship, the current job step by step, and its recent jobs with ISK in and out. From here you can pause, resume, stop, recall, or start mining, a PI colony, a patrol or a ship upgrade. |
+| **Corporations** | Every bot corporation and what its pilots are doing. Each corporation has its own page with whole-corporation orders and live progress, its headquarters, where mined and PI goods go, its work priorities, a pilot list with checkboxes for orders to chosen pilots, and a log of every order. |
+| **History** | Every finished and running job, newest first, with filters. **Details** shows a plain summary and the step-by-step timeline. |
+| **World** | Systems (security, how many bots, over-limit warnings), territory (fleets, wars, structures, sovereignty) and the killboard. |
+| **Performance** | Server load, how long the director takes, and long server ticks. |
+| **Settings** | Autonomous work and seeding, population and work limits, advanced timings, the name library, and Delete all bots. |
+
+The dashboard refreshes every 15 seconds and keeps your filters, selections
+and unsaved edits. If something goes wrong it says so in plain words. For
+example, if the dashboard is newer than the server it asks you to rebuild the
+server, then recovers by itself once you have.
+
+---
+
+## Chat commands
+
+Type these in game chat. `/bots` works as a short form of `/playerbots`.
+`<bot>` is a bot's name or character ID.
+
+**Who can use them:** you can command bots in your own corporation or fleet.
+Server staff and admins can command any bot. A few server-wide switches are
+staff-only (marked below). Every command, with examples:
 [`GUIDE.md`](GUIDE.md).
 
-## Features
+### The ones you'll use most
 
-### Population
-
-- **Gradual roster seeding** to a target of 30–15,000 pilots, in small batches
-  that back off when the EveJS event loop, CPU or a single pilot creation gets
-  slow. Seeding waits for load samples before it starts and while the first
-  human client of a bot-only server logs in. It never bulk-inserts.
-- **All four empires.** New pilots are born across Amarr, Caldari, Gallente
-  and Minmatar with names from their own race, and work from their empire's
-  hub. Relocating pilots prefer the least crowded nearby system.
-- **Online rotation.** At most 300 bots are online at once by default; the rest
-  stay in the roster and take turns on a configurable window. A per-system
-  limit (30 by default) keeps crowds out of single systems.
-- **Six specialties**, each with its own bot corporations (shards of up to 300
-  pilots, 250 targeted): industry (mining and manufacturing), trade,
-  planetary, security, piracy and sovereignty.
-- **Starting capital** of 1B ISK per pilot by default, protected from being
-  spent on routine work.
-- **Portraits work offline**, from the optional CCP agent image pool or a
-  locally generated image; the dashboard streams them through the same origin.
-- **Corporation and alliance names** can come from a name library edited in
-  the dashboard.
-- **Delete all bots** from the dashboard to start the roster over, optionally
-  seeding a new one.
-
-### The director
-
-- A roster-wide **director** gives idle pilots work in bounded waves (at most
-  20 starts per pass), spreads think time across the roster, and hands control
-  back to EveJS between pilots once a pass has used its slice budget.
-- Work is **durable**: operations and tasks are stored and resume after a
-  restart, with retries for travel stages and wallet/inventory reconciliation
-  before a task is retried.
-- **Corporation priorities** decide which pilots in a corporation the director
-  serves first.
-- A failed or finished assignment does not strand a pilot: combat pilots with
-  no reachable target get mining or a mining-hull upgrade, stale cooldowns are
-  released, and capacity-paused jobs resume.
-- **Autonomous work can be switched off** (from the dashboard or
-  `/playerbots autowork off`), for example while a large roster seeds; pilots
-  then show as *Standing by*.
-
-### Economy
-
-- **Mining** from asteroid belts with refining and selling, or deposit of the
-  output at the corporation HQ, Corporation Deliveries or a hangar division.
-  Security pilots can escort miners in belts.
-- **Industry**: durable manufacturing cycles on a personal or corporation
-  wallet and hangar, with spend caps and a price floor, plus a narrower
-  automatic in-place policy. The complete bot-mined ship chain still needs
-  live proof.
-- **Planetary interaction**: colony setup, extractor maintenance, scheduled
-  collection and export. The planner supports P0-to-P4 networks; live P2+
-  profitability still needs proof.
-- **Trade**: quotes, immediate buys and sells, recurring auto-sell and
-  auto-buy policies, ISK transfers and private courier contracts. Trade pilots
-  keep real mineral buy and sell orders outside Jita (market making).
-- **Ship upgrades** along role ladders (mining, logistics, security, piracy,
-  sovereignty) using the bundled FitALL catalog of 5,353 community fits, and
-  `/fitbot` to fit a bot from a saved fitting.
-
-### Corporations, alliances and war
-
-- **Corporation orders**: recall a whole corporation (or chosen pilots) to its
-  HQ and hold it there, send it back to work (mining, PI or the director),
-  pause and resume. Orders survive a restart.
-- **Headquarters** can be the corporation's NPC station or a corporation-owned
-  structure with docking online.
-- **Alliances**: qualifying bot CEOs found alliances; alliance couriers move
-  goods between members.
-- **Wars**: bot corporations with a war headquarters declare normal wars on
-  each other and mobilize (war grant, stipends, cross-training, a
-  Algos → Vexor → Myrmidon → Dominix ladder). Playerbots can be legal targets
-  for each other's piracy and war patrols.
-- **Sovereignty and structures**: neutral hub capture, sovereignty campaigns,
-  Upwell structure deployment from a package into claimable null-sec, and
-  security patrols during null-sec structure rivalries. Live sovereignty
-  results still need evidence.
-
-### Combat and safety
-
-- **Security patrols and combat anomalies**, **piracy** patrols that rotate
-  between destinations (capped at six patrols per system), **war** and
-  **null-sec conflict** patrols.
-- **Engagement handling** for pilots in active fights (approach, orbit,
-  drones, target locks), threat responses, and capsule recovery.
-- **Fleet play with humans**: bots join your corporation or fleet, follow you,
-  escort you and attack your locked target on command.
-- **Local defense** (opt-in, off by default): chosen responders defend chosen
-  systems. See [`LOCAL_DEFENSE.md`](LOCAL_DEFENSE.md).
-- **Wildfire Protocol** (on by default): after a *Delete all bots*, about one
-  new pilot in a hundred is born into a piracy corporation that hunts the
-  systems human players use and says "burn" in Local when it opens fire.
-  Normal Crimewatch, war and security rules still decide who may be attacked.
-
-### Performance
-
-- **Fixed-deadline space tick** (100 ms grid) so a late tick does not push
-  later ticks back, and a **stall watch** that records any tick holding the
-  server for a second or more, with the systems it spent the time in.
-- **Unobserved systems** run dungeon and incursion upkeep every ten seconds
-  instead of every second, and seeded sites are pruned from systems no human
-  has visited for thirty days.
-- **Load controller**: the add-on lowers its own concurrency under load.
-- **Performance page and telemetry endpoint**: event loop, CPU, memory, garbage
-  collection, scheduled playerbot work, time per subsystem, tick stalls.
-
-Measured so far: a clean remote test seeded 500 bots and held all 500 online at
-once (2.6–3.2 GiB server memory, usually 96–426 ms event-loop p95, with one
-18-second spike during the first connection wave). That validates the session
-count, not sustained work throughput. See
-[`PLAYERBOTS_CAPACITY_MODEL.md`](PLAYERBOTS_CAPACITY_MODEL.md).
-
-## Operator dashboard
-
-Served by the add-on on port 8080. It needs no login, so it is published on
-`127.0.0.1` only; see [Options](#dashboard-and-network) to change that.
-
-| Page | What it shows and does |
+| Command | What it does |
 | --- | --- |
-| **Activity** | Every pilot's state (Working, Travelling, Holding, Queued, Cooling down, Paused, Standing by, Idle, Offline) as a clickable bar; what pilots are working on and why the rest are not; the director's last pass; starter systems over the per-system limit; a filterable pilot list. |
-| **Pilot panel** | Opens from any pilot: what it is doing and why, location, ship, operation timeline, queued tasks, recent operations with ISK in and out. Orders: pause, resume, stop or resume the operation, recall to HQ, mine, PI colony, combat patrol, ship upgrade. |
-| **Corporations** | Every bot corporation with its state bar, top job, priorities and recall status. Each corporation's page has whole-corporation orders with live progress, headquarters and output delivery settings, an ordered priority list, a pilot roster with checkboxes for orders to selected pilots, and a command log. |
-| **History** | The operation archive, newest first, filterable by status, type and text. **Details** opens a summary of one operation (pilot, job, status, place, ship, ISK, last step) with its step timeline; the full raw record is folded underneath. |
-| **World** | Systems (security, share of the roster, over-limit flags), territory (fleets, wars, structures, sovereignty) and the killboard. |
-| **Performance** | Server load, director timing, tick stalls and telemetry. |
-| **Settings** | Autonomous work and seeding with live seeding status, population and work limits, advanced director and seeding-safety values, the name library, and Delete all bots. Saved settings show their defaults and take effect without a restart. |
+| `/playerbots status` | Roster size, target and corporation counts |
+| `/playerbots inspect <bot>` | Everything about one bot: where it is, its wallet, ships and current job |
+| `/botlocal` | Which bots are in your system (`/botlocal all` for everywhere) |
+| `/playerbots invite <bot>` | Invite a bot into your corporation |
+| `/playerbots fleet add <bot>` | Add a bot to your fleet |
+| `/follow`, `/escort`, `/attack` | In fleet chat: follow you, escort you, attack your target |
+| `/playerbots mine <bot>` | Send a bot mining |
+| `/playerbots pause <bot>` / `resume <bot>` | Stop or restart one bot's own decisions |
+| `/bots corp recall` / `corp work` | Recall your corporation home / send it back to work |
 
-The page refreshes every 15 seconds without losing filters, selections or
-unsaved edits. Errors from EveJS are shown in plain words: a pilot,
-corporation or operation that no longer exists says so and links back to its
-list instead of retrying, and a dashboard newer than the EveJS server says the
-server needs rebuilding (the page recovers by itself once it is).
+<details>
+<summary><strong>Roster and status</strong></summary>
 
-## Commands
-
-Commands are typed in game chat. `/bots` is an alias for `/playerbots`.
-`<bot>` is a bot's name or character ID. You can control bots in your own
-corporation or fleet; staff and admin accounts can control any bot. The full
-reference with examples is in [`GUIDE.md`](GUIDE.md).
-
-### Roster and status
-
-| Command | Does |
+| Command | What it does |
 | --- | --- |
-| `/playerbots` or `/playerbots status` | Roster target, total and specialty corporation counts. |
-| `/playerbots list [filter]` | Pilots with specialty and corporation. |
-| `/playerbots inspect <bot>` | Corporation, fleet, location, wallet, ships, PI colonies, current operation and queued work. |
-| `/playerbots ops [page]` | Live roster pages, 10 pilots per page. |
-| `/playerbots ops systems [page]` | Totals per solar system. |
-| `/playerbots ops [page] system <systemID>` | Pilots in one system. |
-| `/playerbots tasks [queued\|leased\|completed\|failed\|canceled]` | Durable work tasks. |
-| `/playerbots orders` | Player buy orders the bots can fill, and which bot has each. |
-| `/botlocal` or `/botlocali` | Count and locate bots in your system. |
-| `/botlocal all` | Bot locations across all systems. |
-| `/playerbots seed [30-15000]` | Staff: set the roster target and start gradual seeding. |
+| `/playerbots` or `/playerbots status` | Roster target, total and specialty corporation counts |
+| `/playerbots list [filter]` | Pilots with specialty and corporation |
+| `/playerbots inspect <bot>` | Corporation, fleet, location, wallet, ships, PI colonies, current job and queued work |
+| `/playerbots ops [page]` | Live roster, 10 pilots per page |
+| `/playerbots ops systems [page]` | Totals per solar system |
+| `/playerbots ops [page] system <systemID>` | Pilots in one system |
+| `/playerbots tasks [queued\|leased\|completed\|failed\|canceled]` | Saved work tasks |
+| `/playerbots orders` | Player buy orders the bots can fill, and which bot has each |
+| `/botlocal` or `/botlocali` | Count and locate bots in your system |
+| `/botlocal all` | Bot locations across all systems |
+| `/playerbots seed [30-15000]` | *Staff:* set the roster target and start seeding |
 
-### Autonomous work and operations
+</details>
 
-| Command | Does |
+<details>
+<summary><strong>Directing work</strong></summary>
+
+| Command | What it does |
 | --- | --- |
-| `/playerbots autowork [status\|on\|off]` | Show or switch the director (on/off: staff). |
-| `/playerbots pause <bot>` / `resume <bot>` | Pause or resume one bot's autonomous work. |
-| `/playerbots corp pause` / `corp resume` | Pause or resume the bots in your current corporation. |
-| `/playerbots op status\|stop\|resume <bot>` | Inspect, stop or resume a bot's current operation. |
-| `/playerbots mine <bot> [trips] [station <id>] [norefine] [nosell]` | Mine belts and unload, refine and sell. |
-| `/playerbots colony <bot>` | Set up a PI colony. |
-| `/playerbots haul <bot> <itemID\|typeID> <from> <to> [quantity]` | Haul hangar goods between stations. |
-| `/playerbots upgrade <bot> [mining\|logistics\|security\|piracy\|sovereignty] [force]` | Buy and fit the next ship on a role ladder. |
-| `/playerbots route <bot> <systemID\|system name>` | Travel by stargate route. |
-| `/playerbots undock <bot>` / `warp <bot> <entityID>` / `dock <bot> <stationID>` | Direct movement. |
-| `/playerbots task cancel <taskID>` / `task retry <taskID>` | Cancel a queued task or retry a failed one. |
+| `/playerbots autowork [status\|on\|off]` | Show or switch automatic work (*on/off: staff*) |
+| `/playerbots pause <bot>` / `resume <bot>` | Pause or resume one bot's automatic work |
+| `/playerbots corp pause` / `corp resume` | The same for every bot in your current corporation |
+| `/playerbots op status\|stop\|resume <bot>` | Check, stop or resume a bot's current job |
+| `/playerbots mine <bot> [trips] [station <id>] [norefine] [nosell]` | Mine, then unload, refine and sell |
+| `/playerbots colony <bot>` | Set up a PI colony |
+| `/playerbots haul <bot> <itemID\|typeID> <from> <to> [quantity]` | Move hangar goods between stations |
+| `/playerbots upgrade <bot> [mining\|logistics\|security\|piracy\|sovereignty] [force]` | Buy and fit the next ship for a role |
+| `/playerbots route <bot> <systemID\|system name>` | Travel by stargate |
+| `/playerbots undock <bot>` · `warp <bot> <entityID>` · `dock <bot> <stationID>` | Move a bot directly |
+| `/playerbots task cancel <taskID>` · `task retry <taskID>` | Cancel a queued task or retry a failed one |
 
-### Corporations
+</details>
 
-Members of the corporation and staff can use these; only the CEO or staff can
-change the saved HQ or deposit settings. Omit the corporation ID to use your
-own corporation. Recall and work orders are saved and re-issued after a
-server restart.
+<details>
+<summary><strong>Corporation orders</strong></summary>
 
-| Command | Does |
+Members of the corporation and staff can give these. Only the CEO or staff can
+change the saved headquarters or where goods are delivered. Leave out the
+corporation ID to mean your own. Recall and work orders are saved and carried
+on after a server restart.
+
+| Command | What it does |
 | --- | --- |
-| `/bots corp recall [corpID] [station\|structure <id>]` | Stop every pilot's work, send it to the HQ, dock and hold it there. |
-| `/bots corp work [corpID] [auto\|mine\|pi\|director] [trips <n>] [station\|structure <id>]` | Lift the hold and start work. `auto`: planetary pilots set up PI, combat specialties return to the director, everyone else mines. |
-| `/bots corp status [corpID]` | Pilots at the HQ, held, travelling, working and idle, with recall progress. |
-| `/bots corp hq [corpID] [list \| set <id> \| clear]` | Show, list or change the HQ the orders use. |
-| `/bots corp deposit [corpID] [status\|on\|off\|auto\|deliveries\|hangar <1-7>]` | Deliver mining and PI output to the HQ instead of selling it. |
-| `/bots corp help` | Full corporation help. |
+| `/bots corp recall [corpID] [station\|structure <id>]` | Stop all work, fly everyone to headquarters, dock and hold |
+| `/bots corp work [corpID] [auto\|mine\|pi\|director] [trips <n>] [station\|structure <id>]` | Lift the hold and start work. `auto`: planetary pilots run PI, combat pilots go back to the director, everyone else mines |
+| `/bots corp status [corpID]` | Who is home, held, travelling, working or idle |
+| `/bots corp hq [corpID] [list \| set <id> \| clear]` | Show, list or change the headquarters |
+| `/bots corp deposit [corpID] [status\|on\|off\|auto\|deliveries\|hangar <1-7>]` | Deliver mined and PI goods to headquarters instead of selling them |
+| `/bots corp help` | Full corporation help in game |
 
-### Industry, PI and trade
+</details>
 
-| Command | Does |
+<details>
+<summary><strong>Industry, planets and trade</strong></summary>
+
+| Command | What it does |
 | --- | --- |
-| `/playerbots industry cycle start <bot> <blueprintTypeID> <runs> <maxISK> [station <id>] [floor <ISK>] [corp <hangar 1-7> <wallet 1-7>]` | Run a durable manufacturing cycle, personal or corporate. |
-| `/playerbots industry cycle status\|stop\|resume <bot>` | Inspect, stop or resume the cycle. |
-| `/playerbots industry list\|blueprints\|jobs <bot>` | Blueprints and industry jobs. |
-| `/playerbots industry auto set <bot> <blueprintItemID> <runs> <maxISK>` / `auto status\|off <bot>` | In-place automatic industry policy. |
-| `/playerbots task pi <bot>` | Queue PI extractor maintenance. |
-| `/playerbots pi export set <bot> <planetID> <maxUnits> <maxTaxISK>` / `export status\|off <bot> <planetID>` | Recurring PI exports. |
-| `/playerbots trade quote <bot> <typeID>` | Best local buy and sell quotes. |
-| `/playerbots trade buy <bot> <typeID> <qty> <maxUnitPrice>` | Buy from local stock. |
-| `/playerbots trade sell <bot> <itemID> [qty] <minUnitPrice>` | Sell hangar goods into local buy orders. |
-| `/playerbots trade autosell set <bot> <typeID> <minUnitPrice> <maxUnits>` / `autosell status\|off <bot>` | Recurring sales. |
-| `/playerbots trade autobuy set <bot> <typeID> <maxUnitPrice> <targetStock> <maxSpendPerCycle>` / `autobuy status\|off <bot>` | Recurring restocking. |
-| `/playerbots fund <bot> <ISK>` | Give your own ISK to a bot you control (up to 1B per transfer). |
-| `/playerbots courier post <issuer> <carrier> <from> <to> <itemID> <qty> <reward> <collateral>` | Private courier contract between two bots. |
+| `/playerbots industry cycle start <bot> <blueprintTypeID> <runs> <maxISK> [station <id>] [floor <ISK>] [corp <hangar 1-7> <wallet 1-7>]` | Run a saved manufacturing cycle, personal or for the corporation |
+| `/playerbots industry cycle status\|stop\|resume <bot>` | Check, stop or resume it |
+| `/playerbots industry list\|blueprints\|jobs <bot>` | Blueprints and industry jobs |
+| `/playerbots industry auto set <bot> <blueprintItemID> <runs> <maxISK>` · `auto status\|off <bot>` | Automatic in-place manufacturing |
+| `/playerbots task pi <bot>` | Queue PI extractor upkeep |
+| `/playerbots pi export set <bot> <planetID> <maxUnits> <maxTaxISK>` · `export status\|off <bot> <planetID>` | Recurring PI exports |
+| `/playerbots trade quote <bot> <typeID>` | Best local buy and sell prices |
+| `/playerbots trade buy <bot> <typeID> <qty> <maxUnitPrice>` | Buy from local sellers |
+| `/playerbots trade sell <bot> <itemID> [qty] <minUnitPrice>` | Sell hangar goods to local buyers |
+| `/playerbots trade autosell set <bot> <typeID> <minUnitPrice> <maxUnits>` · `autosell status\|off <bot>` | Keep selling |
+| `/playerbots trade autobuy set <bot> <typeID> <maxUnitPrice> <targetStock> <maxSpendPerCycle>` · `autobuy status\|off <bot>` | Keep restocking |
+| `/playerbots fund <bot> <ISK>` | Give a bot you control some of your own ISK (up to 1B at a time) |
+| `/playerbots courier post <issuer> <carrier> <from> <to> <itemID> <qty> <reward> <collateral>` | Courier contract between two bots |
 
-### Combat, sovereignty and structures
+</details>
 
-| Command | Does |
+<details>
+<summary><strong>Combat, sovereignty and structures</strong></summary>
+
+| Command | What it does |
 | --- | --- |
-| `/playerbots combat <bot> [security\|war\|piracy\|nullsec-conflict]` | Start a combat assignment. |
-| `/playerbots sovereignty <bot>` | Start sovereignty work. |
-| `/playerbots build <bot> <structurePackageItemID> [nullSystemID]` | Carry a structure package to claimable null-sec and deploy it. |
-| `/playerbots alliance found <CEO bot>` | Found an alliance with a qualifying bot CEO. |
-| `/playerbots defense status\|events\|set <json>\|off\|cancel <id>` | Opt-in local defense (see [`LOCAL_DEFENSE.md`](LOCAL_DEFENSE.md)). |
+| `/playerbots combat <bot> [security\|war\|piracy\|nullsec-conflict]` | Send a bot on a combat patrol |
+| `/playerbots sovereignty <bot>` | Start sovereignty work |
+| `/playerbots build <bot> <structurePackageItemID> [nullSystemID]` | Carry a structure package to null-sec and deploy it |
+| `/playerbots alliance found <CEO bot>` | Found an alliance with a qualifying bot CEO |
+| `/playerbots defense status\|events\|set <json>\|off\|cancel <id>` | Optional local defense (see [`LOCAL_DEFENSE.md`](LOCAL_DEFENSE.md)) |
 
-### Fleets, corporations and fittings
+</details>
 
-| Command | Does |
+<details>
+<summary><strong>Corporations, fleets and fittings</strong></summary>
+
+| Command | What it does |
 | --- | --- |
-| `/playerbots invite <bot>` | Invite the bot to your corporation; it accepts eligible invitations. |
-| `/playerbots join <bot>` | Ask the bot's corporation to invite you. |
-| `/playerbots fleet add <bot>` | Add the bot to your fleet. |
-| `/playerbots fleet join <bot>` | Ask the bot to form a fleet and invite you. |
-| `/playerbots fit <bot> <fittingID\|link> [maxISK]` | Fit a bot from a saved fitting. |
-| `/fitbot <fittingID\|link> [maxISK]` | The same, typed in a private chat with the bot. |
+| `/playerbots invite <bot>` | Invite the bot to your corporation; it accepts if eligible |
+| `/playerbots join <bot>` | Ask the bot's corporation to invite you |
+| `/playerbots fleet add <bot>` | Add the bot to your fleet |
+| `/playerbots fleet join <bot>` | Ask the bot to form a fleet and invite you |
+| `/playerbots fit <bot> <fittingID\|link> [maxISK]` | Fit a bot from one of your saved fittings |
+| `/fitbot <fittingID\|link> [maxISK]` | The same, typed in a private chat with the bot |
 
 In fleet chat:
 
-| Command | Does |
+| Command | What it does |
 | --- | --- |
-| `/follow [me\|<fleet member>\|stop]` | Fleet bots follow you or another fleet member. |
-| `/escort [me\|<fleet member>\|stop]` | Fitted security bots escort at close range. |
-| `/attack [all\|<bot>]` | Fleet bots attack your most recently locked target. |
-| `/attack stop [all\|<bot>]` | Recall drones and withdraw attack orders. |
+| `/follow [me\|<fleet member>\|stop]` | Fleet bots follow you or someone else |
+| `/escort [me\|<fleet member>\|stop]` | Combat-fitted bots stay close and protect |
+| `/attack [all\|<bot>]` | Attack the target you locked most recently |
+| `/attack stop [all\|<bot>]` | Call off the attack and recall drones |
 
-## Options
+</details>
 
-### Dashboard settings
+---
 
-Set on the dashboard's **Settings** page; they are stored in the game store,
-take effect without a restart, and override the environment values below.
-Seeding safety values cannot go above the hard caps.
+## Settings
 
-| Setting | Default | Range |
+### On the dashboard
+
+Most things you'd want to change are on the **Settings** page. Changes apply
+straight away, survive restarts, and win over any `.env` value.
+
+| Setting | Default | Allowed |
 | --- | --- | --- |
 | Autonomous work | on | on / off |
-| Gradual roster seeding | on (Compose) | on / off |
-| Roster target | 500 | 30–15,000 |
-| Roster ceiling | 1,500 (Compose) | 30–15,000 |
-| Most pilots online | 300 | 1–5,000 |
-| Online rotation | 8 hours | 5 minutes–7 days |
-| Most pilots per system | 30 | 1–300 |
-| Work slots | 5,000 (Compose) | 1–5,000 |
-| Relocations at once | 100 | 1–1,000 |
-| PI colony setups at once | 10 | 1–500 |
-| Director think min / max | 90 s / 210 s | 15 s–1 h |
-| Director initial spread | 90 s | 1 s–1 h |
-| Director slice budget | 8 ms | 0–100 ms (0 never yields) |
-| Bot steps in parallel | 16 | 1–100 |
-| Cycle interval | 300 s | 30 s–24 h |
-| Delay per bot | 0 ms | 0–5,000 ms |
-| EveJS request timeout | 120 s | 10 s–10 min |
-| Seed batch size | 5 | 1–10 |
-| Time between seed batches | 15 s | 5 s–5 min |
-| Pause seeding above event-loop p95 | 100 ms | 25–250 ms |
-| Pause seeding above EveJS CPU | 85% | 25–95% |
-| Slowest allowed pilot creation | 1,000 ms | 25–1,000 ms |
+| Gradual roster seeding | on | on / off |
+| Roster target | 500 | 30 – 15,000 |
+| Roster ceiling | 1,500 | 30 – 15,000 |
+| Most pilots online at once | 300 | 1 – 5,000 |
+| Online rotation | 8 hours | 5 minutes – 7 days |
+| Most bots per system | 30 | 1 – 300 |
+| Work slots | 5,000 | 1 – 5,000 |
+| Relocations at once | 100 | 1 – 1,000 |
+| PI colony setups at once | 10 | 1 – 500 |
 
-"(Compose)" marks values set by the bundled `compose.override.yaml`; without
-it the code defaults are seeding off, a ceiling of 15,000 and work slots equal
-to the smaller of the target and the online limit.
+<details>
+<summary><strong>Advanced settings</strong> (director timing, cycle and seeding safety)</summary>
 
-### Environment variables
-
-Set in the EveJS `.env` file (the installer writes the required ones) and read
-at container start. All names start with `EVEJS_PLAYER_BOTS_` unless shown in
-full. The population, work, director and seeding values in the table above can
-also be set here (`TARGET`, `ROSTER_CEILING`, `MAX_ONLINE`,
-`CONNECTION_WINDOW_MS`, `MAX_PER_SYSTEM`, `MAX_CONCURRENT_WORK`,
-`MAX_CONCURRENT_CAPACITY_RELOCATIONS`, `MAX_CONCURRENT_COLONY_SETUPS`,
-`DIRECTOR_THINK_MIN_MS`, `DIRECTOR_THINK_MAX_MS`, `DIRECTOR_INITIAL_SPREAD_MS`,
-`DIRECTOR_SLICE_BUDGET_MS`, `ADDON_CONCURRENCY`, `ADDON_INTERVAL_MS`,
-`ADDON_BOT_DELAY_MS`, `ADDON_REQUEST_TIMEOUT_MS`, `ROSTER_SEED_ENABLED`,
-`ROSTER_SEED_BATCH_SIZE`, `ROSTER_SEED_INTERVAL_MS`,
-`ROSTER_SEED_MAX_EVENT_LOOP_P95_MS`, `ROSTER_SEED_MAX_PROCESS_CPU_PERCENT`,
-`ROSTER_SEED_MAX_SINGLE_BOT_MS`); saved dashboard settings take precedence.
-
-#### Startup and work
-
-| Variable | Default | Effect |
+| Setting | Default | Allowed |
 | --- | --- | --- |
-| `AUTOWORK` | on | `0` starts with autonomous work off. |
-| `AUTOSTART` | on | `0` turns off the startup seeding path. |
-| `STARTUP_SEED_BATCH_SIZE` | off | 1–25 creates that many pilots during startup. |
-| `STARTING_CAPITAL` | 1,000,000,000 | ISK given to each new pilot. |
-| `ORDER_RESTORE_DELAY_MS` | 60000 | Delay before saved corporation orders are re-issued after a start. |
+| Director think time, min / max | 90 s / 210 s | 15 s – 1 h |
+| Director initial spread | 90 s | 1 s – 1 h |
+| Director slice budget | 8 ms | 0 – 100 ms (0 never yields) |
+| Bot steps in parallel | 16 | 1 – 100 (lowered automatically under load) |
+| Cycle interval | 300 s | 30 s – 24 h |
+| Delay per bot | 0 ms | 0 – 5,000 ms |
+| EveJS request timeout | 120 s | 10 s – 10 min |
+| Seed batch size | 5 | 1 – 10 |
+| Time between seed batches | 15 s | 5 s – 5 min |
+| Pause seeding above event-loop p95 | 100 ms | 25 – 250 ms |
+| Pause seeding above server CPU | 85% | 25 – 95% |
+| Slowest allowed pilot creation | 1,000 ms | 25 – 1,000 ms |
+
+The seeding, ceiling and work-slot defaults come from the bundled Compose
+file. Without it, seeding is off, the ceiling is 15,000 and work slots equal
+the smaller of the target and the online limit.
+
+</details>
+
+**Limits no setting can raise:** 15,000 pilots, 5,000 online, 300 per system;
+seeding at most 10 pilots per batch, pausing above 250 ms event-loop p95 or
+95% CPU, and skipping any pilot that takes over a second to create.
+
+### In `.env`
+
+Server-level switches live in the EveJS `.env` file and are read when the
+containers start, so recreate `server` and `playerbots-addon` after changing
+them. Every name below starts with `EVEJS_PLAYER_BOTS_` unless written in
+full. The dashboard settings above can also be given starting values here
+(`TARGET`, `MAX_ONLINE`, `MAX_PER_SYSTEM` and so on; see
+[`OPERATIONS.md`](OPERATIONS.md#configure-bot-count-and-connection-rotation)).
 
 #### Dashboard and network
 
-| Variable | Default | Effect |
+| Variable | Default | What it does |
 | --- | --- | --- |
-| `DASHBOARD_BIND` | `127.0.0.1` | Host address the dashboard port is published on. Use `0.0.0.0` only on a trusted network: the dashboard can command bots without a login. |
-| `DASHBOARD_PORT` | 8080 | Host port. |
-| `DASHBOARD_HOST` / `DASHBOARD_CONTAINER_PORT` | `0.0.0.0` / 8080 | Listen address inside the container. |
-| `DASHBOARD_API_TIMEOUT_MS` | 30000 | Timeout for dashboard reads, 10000–30000; the dashboard uses the request timeout setting, capped at 30 s. |
-| `ADDON_MODE` | `auto` | `disabled` turns off the external add-on process mode. |
-| `ADDON_TOKEN` | generated | 256-bit API token shared by server and add-on (at least 32 characters). Keep it private. |
-| `ADDON_API_HOST` / `ADDON_API_PORT` | `0.0.0.0` / 26004 | Private API listener inside the Docker network. |
-| `ADDON_URL` | `http://server:26004` | Where the add-on reaches the API. |
-| `IMAGE_SERVER_URL` | `http://server:26001/` | Where the dashboard fetches portraits. |
-| `EVEJS_IMAGE_SERVER_BIND_HOST` | `0.0.0.0` | EveJS image server listen address. |
+| `DASHBOARD_BIND` | `127.0.0.1` | Address the dashboard is published on. `0.0.0.0` opens it to your network; only do that on a network you trust, since there is no login. |
+| `DASHBOARD_PORT` | `8080` | Port on the host. |
+| `ADDON_TOKEN` | generated | Private key the server and add-on share. The installer creates it; never post it. |
+| `ADDON_MODE` | `auto` | `disabled` makes the EveJS server run the bot cycle itself instead of the add-on process (the dashboard needs the add-on). |
 
-#### Behaviour switches
+<details>
+<summary><strong>All other variables</strong></summary>
 
-| Variable | Default | Effect |
+**Startup**
+
+| Variable | Default | What it does |
 | --- | --- | --- |
-| `BOT_VERSUS_BOT` | on | Bots can be legal targets for each other's piracy and war patrols. |
-| `ENGAGEMENT` | on | Playerbot engagement handling; `0` uses the original host combat paths. |
-| `ENGAGEMENT_FAST_MS` / `ENGAGEMENT_FAST_SLOTS` | 2000 / 12 | Step interval for pilots in an active fight, and how many pilots get it at once. |
-| `WILDFIRE` | on | Wildfire Protocol after a roster reset. |
-| `MARKET_MAKING` | on | Trade pilots keep mineral buy orders outside Jita. |
-| `PATROL_ROTATION` | on | Piracy destinations rotate instead of all going to the nearest. |
-| `SITE_PRUNE` | on | Remove seeded sites from long-unvisited systems. |
-| `UNOBSERVED_SITE_TICK_MS` | 10000 | Site upkeep interval in systems with no human in space; `0` restores every-tick upkeep. |
-| `WAR_TEST_CORPORATION_ID` | empty | Test only: picks this human-CEO corporation first for the first-war grant. |
+| `AUTOWORK` | on | `0` starts with autonomous work off |
+| `AUTOSTART` | on | `0` turns off seeding at startup |
+| `STARTUP_SEED_BATCH_SIZE` | off | 1–25: create that many pilots while starting |
+| `STARTING_CAPITAL` | 1,000,000,000 | ISK each new pilot starts with |
+| `ORDER_RESTORE_DELAY_MS` | 60000 | Wait after start-up before saved corporation orders are re-issued |
 
-#### Diagnostics and scheduler
+**Behaviour**
 
-| Variable | Default | Effect |
+| Variable | Default | What it does |
 | --- | --- | --- |
-| `TICK_STALL_WATCH` / `TICK_STALL_MS` | on / 1000 | Record space ticks longer than this. |
-| `TELEMETRY_FILE` | off | `1` also writes telemetry to a file. |
-| `TELEMETRY_QUEUE_SCAN` | off | `1` adds a task-queue scan to telemetry. |
-| `TELEMETRY_BACKLOG_INTERVAL_MS` | 60000 | Backlog sampling interval. |
-| `EVEJS_SPACE_TICK_SCHEDULER` | `deadline` | `interval` restores the plain interval timer. |
-| `EVEJS_SCHEDULER_MAX_CONCURRENT_DISPATCH` | 24 (Compose), max 128 | Durable scheduler parallelism. |
-| `EVEJS_SCHEDULER_DEAD_LETTER_ATTEMPTS` | 25 | Attempts before a scheduled job is dead-lettered. |
+| `BOT_VERSUS_BOT` | on | Pirate and war patrols may target bots |
+| `ENGAGEMENT` | on | Bot combat handling; `0` uses EveJS's original combat paths |
+| `ENGAGEMENT_FAST_MS` / `ENGAGEMENT_FAST_SLOTS` | 2000 / 12 | How often, and how many, bots in a fight get a quick update |
+| `WILDFIRE` | on | Wildfire Protocol after a roster reset |
+| `MARKET_MAKING` | on | Trade pilots keep mineral orders outside Jita |
+| `PATROL_ROTATION` | on | Pirates spread across destinations |
+| `SITE_PRUNE` | on | Clear sites from long-unvisited systems |
+| `UNOBSERVED_SITE_TICK_MS` | 10000 | Site upkeep interval where no human is in space; `0` = every tick |
+| `WAR_TEST_CORPORATION_ID` | empty | Testing only: favour this human-led corporation for the first war |
 
-### Hard limits
+**Connections inside Docker**
 
-These cannot be raised by settings: 15,000 pilots in the roster, 5,000 online,
-300 per system; seeding at most 10 pilots per batch, pausing above 250 ms
-event-loop p95 or 95% EveJS CPU, and rejecting pilot creations slower than
-1,000 ms.
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `DASHBOARD_HOST` / `DASHBOARD_CONTAINER_PORT` | `0.0.0.0` / 8080 | Where the dashboard listens inside its container |
+| `DASHBOARD_API_TIMEOUT_MS` | 30000 | Dashboard read timeout (10–30 s) |
+| `ADDON_API_HOST` / `ADDON_API_PORT` | `0.0.0.0` / 26004 | The server's private API, inside the Docker network only |
+| `ADDON_URL` | `http://server:26004` | Where the add-on finds that API |
+| `IMAGE_SERVER_URL` | `http://server:26001/` | Where the dashboard gets portraits |
+| `EVEJS_IMAGE_SERVER_BIND_HOST` | `0.0.0.0` | EveJS image server address |
 
-### Installer and tools
+**Diagnostics**
 
-| Command | Does |
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `TICK_STALL_WATCH` / `TICK_STALL_MS` | on / 1000 | Log space ticks longer than this |
+| `TELEMETRY_FILE` | off | `1` also writes telemetry to a file |
+| `TELEMETRY_QUEUE_SCAN` | off | `1` adds a task-queue scan to telemetry |
+| `TELEMETRY_BACKLOG_INTERVAL_MS` | 60000 | How often the backlog is sampled |
+| `EVEJS_SPACE_TICK_SCHEDULER` | `deadline` | `interval` brings back the old tick timer |
+| `EVEJS_SCHEDULER_MAX_CONCURRENT_DISPATCH` | 24 | Scheduler parallelism (max 128) |
+| `EVEJS_SCHEDULER_DEAD_LETTER_ATTEMPTS` | 25 | Retries before a scheduled job is set aside |
+
+</details>
+
+---
+
+## Your data and safety
+
+- **Your game database is never touched by install, update or rollback.** The
+  installer only changes source files and `.env`, and checks every file
+  against known versions before writing. Anything it replaces goes into a
+  dated `.playerbots-install-backup-*` folder.
+- **Nothing starts on its own.** The installer leaves services stopped (unless
+  you pass `--start`), never creates pilots itself, and the containers do not
+  start when the machine boots.
+- **Bot data lives with your game data**: pilots, jobs, corporation orders and
+  the order log are in the EveJS game store, and the name library sits next to
+  it. Back them up together.
+- **Keep the token private.** The API token in `.env` lets anything on the
+  Docker network command the server's bots. Don't paste it in logs, screenshots
+  or support requests.
+- **Keep the dashboard local** unless your network is trusted. It has no
+  login by design.
+
+---
+
+## Patches
+
+### Dashboard overhaul (`dashboard-overhaul` branch)
+
+This copy of the add-on carries an unreleased set of changes on top of
+0.2.152, built for a local server and intended to be offered upstream later.
+Full details, tests and known limits:
+[`DASHBOARD_PATCH_NOTES.md`](DASHBOARD_PATCH_NOTES.md).
+
+**What changes for you**
+
+- A new dashboard: six pages instead of ten, an **Activity** board that shows
+  what every bot is doing and why idle ones are idle, a **pilot panel** with
+  orders, and a **Corporations** page for commanding whole corporations or
+  chosen pilots.
+- Corporation recall and work orders, from the dashboard or `/bots corp`, now
+  **survive a server restart**. They are re-issued about a minute after
+  start-up.
+- The dashboard is published on **127.0.0.1** by default, since it can
+  command bots without a login.
+- Clearer messages throughout: names instead of ID numbers, plain-language
+  errors, and a prompt to rebuild when the dashboard is newer than the server.
+- `/bots corp help` now lists every corporation command.
+- The installer removes files older releases left behind, and rollback puts
+  them back.
+
+**Known limits**
+
+- `/playerbots resume` in chat does not release a pilot from a corporation
+  recall; after a restart it is recalled again. The dashboard's **Resume**
+  does release it.
+- A recall that times out (after 6 hours) is re-issued after the next restart
+  unless you cancel it on the corporation page.
+- These changes are tested against a mock server and a full EveJS source
+  tree, but not yet on a long-running live server.
+
+### Installing a patch
+
+Patches like this one arrive as source changes before a new release ZIP
+exists. To apply one:
+
+1. Get the patched source (for example `git pull` on this branch).
+2. Run `python3 install.py --dry-run /path/to/evejs`, then
+   `python3 install.py /path/to/evejs` from the repository folder. If it stops
+   on files a previous patch changed, check the list and re-run with
+   `--replace-conflicts`.
+3. Rebuild and restart both the server and the add-on (step 4 of
+   [Install](#install)). A patch that changes server files does nothing until
+   the server is rebuilt.
+4. Run `python3 verify.py /path/to/evejs` to confirm the install matches.
+
+To go back, run `python3 rollback.py /path/to/evejs` and rebuild.
+
+---
+
+## For developers
+
+<details>
+<summary><strong>What's in the repository</strong></summary>
+
+| Path | What it is |
 | --- | --- |
-| `install.py [--dry-run] [--replace-conflicts] [--start] [target]` | Install into an EveJS checkout (default: current directory). `--dry-run` checks without writing; `--replace-conflicts` backs up and replaces modified managed files; `--start` builds and starts only the server and add-on. Add-on files that earlier releases installed but this one no longer uses (the old single-file `dashboard/app.js`) are moved into the install backup. `install.sh` runs the same thing. |
-| `verify.py [--json] [--strict] [--subsystem <name>] [target]` | Check an installed tree against this release without changing anything. |
-| `rollback.py [target]` | Roll back the latest installation from its backup, including any files the install moved aside. |
+| `addons/playerbots/index.js` | The add-on process that drives the bots |
+| `addons/playerbots/dashboard-server.js`, `dashboard/` | The dashboard: plain HTML, CSS and ES modules in `dashboard/js/`, no build step |
+| `addons/playerbots/compose.override.yaml` | The add-on's Docker Compose service and settings |
+| `integration/server/` | The EveJS server files the add-on installs |
+| `integration/manifest.json` | Supported EveJS version and checksums for every managed file |
+| `install.py`, `install.sh`, `verify.py`, `rollback.py` | Installer, checker and rollback |
+| `dist/` | The release ZIP |
+| `tests/` | Node test suites (`node --test tests/*.test.cjs`; some need an EveJS checkout in `EVEJS_ROOT`) |
+| `GUIDE.md` | Every chat command with examples |
+| `INSTALLATION.md`, `OPERATIONS.md`, `TROUBLESHOOTING.md` | Installing, running and fixing |
+| `LOCAL_DEFENSE.md`, `COMMUNITY_FITTINGS.md` | Local defense and the fitting catalog |
+| `PLAYERBOTS_ROADMAP.md`, `PLAYERBOTS_CAPACITY_MODEL.md` | What is planned and proven, and load measurements |
+| `DASHBOARD_PATCH_NOTES.md` | Changes on this branch |
 
-## Safety and persistence
+</details>
 
-The installer validates the source version and every managed source-file hash
-before it writes anything. Existing modified files that match neither the
-supported original nor this release cause installation to stop. Before it
-replaces source files, the installer backs them up to a timestamped
-`.playerbots-install-backup-*` directory in the EveJS source tree.
+<details>
+<summary><strong>Building a release</strong></summary>
 
-Installation and rollback do not read, write, migrate, move, or delete EveJS
-databases. By default, installation only updates source files and `.env`,
-checks the Compose configuration, and leaves services stopped. The optional
-`--start` switch rebuilds the image and starts the EveJS server and add-on; it
-does not start, stop, or rebuild the Market service. EveJS server and add-on
-containers use `restart: "no"`, so Docker does not start them at machine boot.
-The install step itself never creates pilots or begins roster seeding. If
-`--start` is used, the add-on waits for load telemetry and then seeds gradually
-under the hard caps above; it never performs a bulk roster insert.
-
-Bot state, operations, tasks, corporation orders and the command log are kept
-in the EveJS game store (`playerBots` table); the name library is
-`playerbots-name-library.json` in the same store root. Back them up with the
-server's data.
-
-The API token is generated locally with 256 bits of randomness and stored in
-the EveJS `.env` file with owner-only permissions on Linux. It is passed only
-between the server and add-on containers. Do not publish it in logs,
-screenshots, or support bundles.
-
-## Package contents
-
-- `addons/playerbots/index.js`: standalone roster-cycle driver.
-- `addons/playerbots/dashboard-server.js` and `dashboard/`: the operator
-  dashboard (`index.html`, `styles.css`, and ES modules in `dashboard/js/`, no
-  build step), served by the add-on process on container port 8080. Portraits
-  load through a same-origin proxy to EveJS's image service.
-- `addons/playerbots/compose.override.yaml`: private sidecar service and API
-  settings for Docker Compose.
-- `integration/server/`: the exact EveJS server source files this release
-  needs, and `integration/manifest.json` with the supported EveJS version and
-  SHA-256 guards for the original source and the overlay.
-- `integration/server/server/assets/fittings/fitall.json`: the bundled FitALL
-  community fitting catalog.
-- `install.py`, `install.sh`, `rollback.py`, `verify.py`: guarded installer,
-  rollback and verification.
-- `dist/`: the versioned installation ZIP.
-- `tests/`: Node test suites (`node --test tests/*.test.cjs`); some need an
-  EveJS checkout in `EVEJS_ROOT`.
-- Documentation:
-  - [`INSTALLATION.md`](INSTALLATION.md), [`OPERATIONS.md`](OPERATIONS.md),
-    [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md), [`GUIDE.md`](GUIDE.md):
-    installation, running, recovery and the full command reference.
-  - [`LOCAL_DEFENSE.md`](LOCAL_DEFENSE.md): the opt-in local defense service.
-  - [`COMMUNITY_FITTINGS.md`](COMMUNITY_FITTINGS.md): the fitting catalog and
-    the server fitting endpoint.
-  - [`PLAYERBOTS_CAPACITY_MODEL.md`](PLAYERBOTS_CAPACITY_MODEL.md): population
-    definitions, measurements and load gates.
-  - [`PLAYERBOTS_ROADMAP.md`](PLAYERBOTS_ROADMAP.md): the feature register,
-    acceptance criteria and open evidence gaps.
-  - [`DASHBOARD_PATCH_NOTES.md`](DASHBOARD_PATCH_NOTES.md): changes on this
-    branch.
-  - [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md): EveJS project and
-    community fitting credits.
-
-## Distribution contract
-
-The repository is the editable source; the versioned ZIP in `dist/` is the
-standard installation and redistribution artifact. Every playerbots release
-must include that ZIP in Git alongside the source changes. Build it with
-`tools/playerbots/build-addon-package.py` and pass the local path of the
-supported EveJS checkout explicitly, for example:
+The repository is the editable source; the versioned ZIP in `dist/` is what
+people install. Every release must commit that ZIP alongside its source
+changes. Build it against a supported EveJS checkout:
 
 ```sh
 EVEJS_COMPAT_ROOT="/path/to/your EveJS 261115.2 checkout"
 python tools/playerbots/build-addon-package.py --compat-root "$EVEJS_COMPAT_ROOT"
 ```
 
-Validate the resulting ZIP before distribution. Do not describe a source-only
-commit as an installable release. (The ZIP currently in `dist/` is the
-upstream 0.2.152 build and does not contain this branch's dashboard changes.)
+Check the ZIP before sharing it, and don't call a source-only commit an
+installable release. The ZIP now in `dist/` is the upstream 0.2.152 build
+without this branch's patches.
 
-## Credits and provenance
+</details>
 
-This add-on is built for the original EveJS server and uses its native game
-services. EveJS project information and community support are available on the
-[official EveJS Discord](https://discord.gg/qrdfam8Mz). See
-`THIRD_PARTY_NOTICES.md` for the source and license notes.
+---
 
-The bundled fitting data comes from the EveJS Discord post titled
-“[EveJS v12.3.1] 400+ Saved Fittings,” attributed by the maintainer to John
-Elysian (the exact Discord display name and spelling have not been verified).
-The source was supplied as XML and converted into the static catalog; no
-message permalink was included with the supplied files. The package contains
-5,353 usable fits after excluding 11 entries without a usable fit. See
-`COMMUNITY_FITTINGS.md` for the data provenance note.
+## Credits
 
-## License
+Built for the original EveJS server and its game services. EveJS news and
+community support: the [official EveJS Discord](https://discord.gg/qrdfam8Mz).
 
-This package is distributed under the repository's AGPL-3.0-only license. See
-`LICENSE`.
+The bundled fittings come from the EveJS Discord post "[EveJS v12.3.1] 400+
+Saved Fittings", attributed by the maintainer to John Elysian (exact display
+name not verified). It was supplied as XML and converted into the catalog:
+5,353 usable fits, after leaving out 11 that could not be used. See
+[`COMMUNITY_FITTINGS.md`](COMMUNITY_FITTINGS.md).
 
-## Contributors
+Playerbots and the Living Universe project share code in both directions.
+Playerbots adapts Living Universe's performance helpers, patrol rotation,
+space tick timer and stall watch, and Living Universe builds on parts of
+Playerbots. Thanks to them for the collaboration.
 
-- [@gzy40347](https://github.com/gzy40347)
-- [@ChaosRemnant](https://github.com/ChaosRemnant)
+**Contributors:** [@gzy40347](https://github.com/gzy40347),
+[@ChaosRemnant](https://github.com/ChaosRemnant)
 
-## Acknowledgements
-
-Playerbots and the Living Universe project share code in both directions in
-an open, collaborative spirit: Living Universe builds on parts of Playerbots,
-and Playerbots adapts some of Living Universe's work, including the
-performance helpers, the patrol rotation helpers, the space tick timer and the
-stall watch. Thanks to the Living Universe project for the collaboration. See
-`THIRD_PARTY_NOTICES.md` for the details and licenses.
+**License:** AGPL-3.0-only (see `LICENSE`). Source and license notes for
+EveJS and the fittings are in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

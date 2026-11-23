@@ -174,7 +174,7 @@ on an orderly container stop. The same overlay sets the optional
 `EVEJS_PLAYER_BOTS_WAR_TEST_CORPORATION_ID` to empty unless an operator
 explicitly sets it for a human-CEO corporation war test. It supplies these
 population defaults when the corresponding `.env` variables are absent: roster
-target 1,000, gradual seeding
+target 500, gradual seeding
 enabled, roster ceiling 1,500, online limit 300, 30 autonomous bots per solar
 system, and an eight-hour connection
 rotation. The code hard limits are 15,000 persistent pilots and 5,000 online
