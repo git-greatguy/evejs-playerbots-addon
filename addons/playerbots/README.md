@@ -546,7 +546,8 @@ full. The dashboard settings above can also be given starting values here
 ### Dashboard overhaul (`dashboard-overhaul` branch)
 
 This copy of the add-on carries an unreleased set of changes on top of
-0.2.152, built for a local server and intended to be offered upstream later.
+0.2.152 by [@ubermidas](https://github.com/ubermidas), built for a local
+server and intended to be offered upstream later.
 Full details, tests and known limits:
 [`DASHBOARD_PATCH_NOTES.md`](DASHBOARD_PATCH_NOTES.md).
 
@@ -656,7 +657,8 @@ space tick timer and stall watch, and Living Universe builds on parts of
 Playerbots. Thanks to them for the collaboration.
 
 **Contributors:** [@gzy40347](https://github.com/gzy40347),
-[@ChaosRemnant](https://github.com/ChaosRemnant)
+[@ChaosRemnant](https://github.com/ChaosRemnant),
+[@ubermidas](https://github.com/ubermidas)
 
 **License:** AGPL-3.0-only (see `LICENSE`). Source and license notes for
 EveJS and the fittings are in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

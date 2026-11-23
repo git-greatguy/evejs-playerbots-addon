@@ -1,6 +1,7 @@
 # Dashboard overhaul — patch notes
 
-Branch `dashboard-overhaul` on top of add-on 0.2.152 (upstream commit 139c2c3).
+Branch `dashboard-overhaul` on top of add-on 0.2.152 (upstream commit 139c2c3),
+by [@ubermidas](https://github.com/ubermidas).
 Local test build; not yet proposed upstream.
 
 ## What changes for the operator
