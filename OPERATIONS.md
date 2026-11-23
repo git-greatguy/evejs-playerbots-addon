@@ -108,8 +108,24 @@ so stopping the add-on does not wait for its five-minute cycle interval.
 ## Playerbot dashboard
 
 The add-on serves the playerbot dashboard without login on port
-`8080`. Docker publishes it on `0.0.0.0:8080`; open
-`http://<evejs-host-ip>:8080` from a machine that can reach the EveJS host.
+`8080`. Docker publishes it on `127.0.0.1:8080`; open `http://127.0.0.1:8080`
+on the EveJS host, or use the SSH tunnel below. The dashboard can command
+pilots and corporations, so publish it more widely
+(`EVEJS_PLAYER_BOTS_DASHBOARD_BIND=0.0.0.0`) only on a trusted network.
+
+The dashboard has six pages. **Activity** shows one state per pilot (working,
+travelling, holding, queued, cooling down, paused, standing by, idle,
+offline), what each pilot is doing in plain words, and why the rest are not
+working, with a pilot panel that gives per-pilot orders (pause, resume, stop
+or resume an operation, mine, PI colony, combat patrol, ship upgrade, recall
+to the corporation HQ). **Corporations** lists bot corporations and opens a
+page per corporation with its HQ, output deposit, priorities, orders (recall,
+send to work, pause, resume, cancel), a selectable pilot roster for orders to
+chosen pilots, and a command log. Recall and work orders, from the dashboard
+or `/bots corp`, are saved and re-issued about a minute after a restart
+(`EVEJS_PLAYER_BOTS_ORDER_RESTORE_DELAY_MS`). **History** is the operation
+archive, **World** holds systems, territory and the killboard, and
+**Performance** and **Settings** are as described below.
 
 Killboard ship renders are fetched from the official EVE image service by a
 size-limited same-origin dashboard proxy. This avoids mixed-origin and
@@ -150,13 +166,11 @@ existing one has planned bot seats. This applies to managed corporations whose
 CEO is human as well; monitor the Corporation view to confirm existing corps
 receive the growing roster.
 
-The overview reports connected playerbots and human pilots separately from
+Activity reports connected playerbots and human pilots separately from
 actors in space. The Territory view summarizes fleets and bot/human membership,
 active wars, structures missing Quantum Cores or running low-power, and claimed
 sovereignty systems. Pilot tables are paginated at 100 rows per request, and
-the aggregate snapshot is cached for 30 seconds. The dashboard refreshes live views automatically while visible. It binds to
-`0.0.0.0:8080`; use a firewall or SSH tunnel when the EveJS host is not on a
-trusted network.
+the aggregate snapshot is cached for 30 seconds. The dashboard refreshes live views every 15 seconds while visible.
 
 ## Null-sec war mobilization
 

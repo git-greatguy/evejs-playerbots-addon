@@ -12,10 +12,11 @@ use the bot's own wallet and inventory unless a command explicitly selects
 corporation assets. The initial 1,000,000,000 ISK grant is protected from
 manual fitting and structure spending.
 
-The web dashboard is available at `http://<evejs-host>:8080` without a login.
-It provides searchable current and archived operations, operation details, and
-editable runtime settings alongside the overview, pilot, corporation, system,
-fleet, war, structure, and sovereignty views. See `OPERATIONS.md` for access.
+The web dashboard is available at `http://127.0.0.1:8080` on the EveJS host
+without a login. Activity shows what every pilot is doing and why the rest are
+not working; Corporations gives recall, work, HQ, deposit, priority and
+per-pilot orders; History, World (systems, territory, killboard), Performance
+and Settings cover the rest. See `OPERATIONS.md` for access.
 
 ## Inspect the roster and work
 

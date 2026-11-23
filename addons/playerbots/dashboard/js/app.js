@@ -2,6 +2,7 @@
 
 import { getJSON } from "./api.js";
 import { $, esc, rel } from "./ui.js";
+import { closeDrawer } from "./drawer.js";
 import * as activity from "./view-activity.js";
 import * as corporations from "./view-corporations.js";
 import * as history from "./view-history.js";
@@ -78,7 +79,7 @@ async function show(force = false) {
   }
 }
 
-window.addEventListener("hashchange", () => void show(true));
+window.addEventListener("hashchange", () => { closeDrawer(); void show(true); });
 $("refresh").addEventListener("click", async () => {
   store.summaryAt = 0;
   await show(true);
