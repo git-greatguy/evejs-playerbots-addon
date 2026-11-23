@@ -89,7 +89,7 @@ function pageHtml(effectiveAutowork, roster) {
   </form>
   <div class="panel"><div class="panel-head"><div><h2>Corporation and alliance names</h2><p>Applies to organizations created from now on. Empty lists keep the original naming.</p></div></div>
     <div class="panel-body"><textarea id="names-text" class="name-library-editor" rows="12" spellcheck="false"></textarea>
-    <div class="save-bar"><span class="muted" id="names-status">Loading…</span><span class="actions"><button type="button" class="btn ghost" id="names-template">Load template</button><button type="button" class="btn primary" id="names-save">Save names</button></span></div></div></div>
+    <div class="save-bar"><span class="muted" id="names-status">Loading…</span><span class="actions"><button type="button" class="btn ghost" id="names-template">Load template</button><button type="button" class="btn primary" id="names-save">Save name library</button></span></div></div></div>
   <div class="panel danger-zone"><div class="panel-head"><div><h2>Delete all bots</h2><p>Cancels every playerbot's market orders, stops its work and deletes the character. Assets go to its corporation. Human characters are untouched. This cannot be undone.</p></div></div>
     <div class="panel-body"><div class="toolbar"><label class="stack">Type DELETE ALL BOTS to confirm<input class="field" id="reset-confirm" autocomplete="off" spellcheck="false"></label><label class="check"><input type="checkbox" id="reset-reseed" checked> Seed a new roster afterwards</label><button type="button" class="btn danger" id="reset-start">Delete all bots</button></div>
     <p class="muted" id="reset-status" style="margin:10px 0 0">Loading…</p></div></div>`;

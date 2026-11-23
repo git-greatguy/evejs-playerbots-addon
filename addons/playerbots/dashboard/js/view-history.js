@@ -51,17 +51,37 @@ const draw = coalesce(async () => {
   }
 });
 
+// The archive row (names and labels) plus the full record from EveJS: a
+// readable summary first, the raw record folded underneath for debugging.
 async function showOperation(operationID) {
+  const row = (state.data?.rows || []).find((candidate) => String(candidate.operationID) === String(operationID)) || {};
   try {
     const data = await getJSON(`/api/operation?operationID=${encodeURIComponent(operationID)}`);
     const op = data.operation || {};
+    const raw = (v) => v === null || v === undefined || v === "" ? "—" : typeof v === "object" ? JSON.stringify(v, null, 2) : String(v);
     const fields = Object.keys(op).filter((key) => key !== "history" && !key.startsWith("_") && op[key] !== undefined);
-    const value = (v) => v === null || v === undefined || v === "" ? "—" : typeof v === "object" ? JSON.stringify(v, null, 2) : String(v);
     const history = Array.isArray(op.history) ? op.history : [];
-    showDialog(`${op.kind || "Operation"} · ${op.operationID || operationID}`, `
-      <div class="detail-grid">${fields.map((key) => `<div class="detail-row"><span>${esc(key.replace(/([A-Z])/g, " $1"))}</span><strong>${esc(value(op[key]))}</strong></div>`).join("")}</div>
+    const spent = Number(row.spent ?? op.spent) || 0;
+    const proceeds = Number(row.proceeds ?? op.proceeds) || 0;
+    const pilotName = row.characterName || op.characterName || (op.characterID ? `Pilot ${op.characterID}` : "—");
+    const summary = [
+      ["Pilot", `${pilotName}${row.corporationName ? ` · ${row.corporationTicker ? `[${row.corporationTicker}] ` : ""}${row.corporationName}` : ""}`],
+      ["Job", row.kindLabel || op.kind || "—"],
+      ["Status", `${op.status || row.status || "—"}${row.stageLabel || op.stage ? ` · ${row.stageLabel || op.stage}` : ""}`],
+      ["Where", row.systemName || (op.systemID ? `System ${op.systemID}` : "—")],
+      ["Ship", row.shipName || "—"],
+      ["Started", op.createdAt || op.startedAt ? when(op.createdAt || op.startedAt) : "—"],
+      ["Updated", op.updatedAt ? when(op.updatedAt) : "—"],
+      ["ISK", spent || proceeds ? `${spent ? `−${isk(spent)}` : ""}${spent && proceeds ? " / " : ""}${proceeds ? `+${isk(proceeds)}` : ""}` : "—"],
+      ["Last step", row.lastAction || op.lastAction || "—"],
+      ...(op.lastError || row.lastError ? [["Last error", op.lastError || row.lastError]] : []),
+    ];
+    showDialog(`${row.kindLabel || op.kind || "Operation"} · ${pilotName}`, `
+      <div class="detail-grid">${summary.map(([label, value]) => `<div class="detail-row"><span>${esc(label)}</span><strong>${label === "Started" || label === "Updated" ? value : esc(value)}</strong></div>`).join("")}</div>
       <h3 style="margin:16px 0 8px">Steps (${num(history.length)})</h3>
-      <ol class="timeline">${history.slice().reverse().map((h) => `<li><time>${esc(h.at ? new Date(h.at).toLocaleString() : "")}</time> <strong>${esc(h.stage || "")}</strong><div>${esc(h.message || "")}</div></li>`).join("") || "<li class='muted'>No steps recorded.</li>"}</ol>`);
+      <ol class="timeline">${history.slice().reverse().map((h) => `<li><time>${esc(h.at ? new Date(h.at).toLocaleString() : "")}</time> <strong>${esc(h.stage || "")}</strong><div>${esc(h.message || "")}</div></li>`).join("") || "<li class='muted'>No steps recorded.</li>"}</ol>
+      <details style="margin-top:14px"><summary class="muted">Full record (${esc(op.operationID || operationID)})</summary>
+        <div class="detail-grid" style="margin-top:8px">${fields.map((key) => `<div class="detail-row"><span>${esc(key)}</span><strong>${esc(raw(op[key]))}</strong></div>`).join("")}</div></details>`);
   } catch (error) {
     showDialog("Operation", `<div class="notice error">${esc(error.message)}</div>`);
   }

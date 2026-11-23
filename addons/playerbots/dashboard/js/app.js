@@ -63,6 +63,13 @@ async function show(force = false) {
     await view.render({ param: route.param, fresh, store, loadSummary, setCrumbs });
     if (!fresh) $("view").querySelector(".refresh-failed")?.remove();
   } catch (error) {
+    // A missing pilot, corporation or operation will not appear by retrying.
+    if (error.status === 404) {
+      $("view").querySelector(".refresh-failed")?.remove();
+      const back = route.param ? ` <a href="#${esc(route.view)}">Back to ${esc(TITLES[route.view])}</a>` : "";
+      $("view").innerHTML = `<div class="notice error load-failed">${esc(error.message)}${back}</div>`;
+      return;
+    }
     const message = `${error.message || String(error)} Retrying every ${REFRESH_MS / 1000} seconds.`;
     // A failed background refresh keeps the page the operator is looking at.
     if (!fresh && $("view").children.length && !$("view").querySelector(".load-failed")) {

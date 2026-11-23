@@ -20,6 +20,10 @@ INTEGRATION_ROOT = PACKAGE_ROOT / "integration" / "server"
 ADDON_SOURCE = PACKAGE_ROOT / "addons" / "playerbots"
 OVERRIDE_SOURCE = PACKAGE_ROOT / "compose.override.yaml"
 STATE_NAME = ".playerbots-install-state.json"
+# Add-on files earlier releases installed that this release no longer ships.
+# They are moved into the install backup (rollback puts them back) so an
+# upgrade does not leave stale files behind.
+OBSOLETE_ADDON_FILES = ("addons/playerbots/dashboard/app.js",)
 
 
 def sha256(path: Path) -> str:
@@ -147,12 +151,13 @@ def update_env(path: Path) -> tuple[bool, bool, bool]:
     return token_created, mode_created
 
 
-def install(target: Path, overlay_files: list[str]) -> Path:
+def install(target: Path, overlay_files: list[str]) -> tuple[Path, list[str]]:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     backup = target / f".playerbots-install-backup-{stamp}"
     backup.mkdir(mode=0o700)
     managed: list[str] = []
     existed: list[str] = []
+    removed: list[str] = []
 
     def copy_managed(source: Path, relative: str) -> None:
         destination = target / relative
@@ -186,6 +191,15 @@ def install(target: Path, overlay_files: list[str]) -> Path:
             copy_managed(source, relative)
         copy_managed(OVERRIDE_SOURCE, "addons/playerbots/compose.override.yaml")
 
+        for relative in OBSOLETE_ADDON_FILES:
+            obsolete = target / relative
+            if obsolete.is_file() and relative not in managed:
+                backup_path = backup / relative
+                backup_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(obsolete, backup_path)
+                obsolete.unlink()
+                removed.append(relative)
+
         env_path = target / ".env"
         env_existed = env_path.is_file()
         if env_existed:
@@ -200,6 +214,7 @@ def install(target: Path, overlay_files: list[str]) -> Path:
             "managedFiles": managed,
             "installedSha256": {relative: sha256(target / relative) for relative in managed},
             "preExistingFiles": existed,
+            "removedFiles": removed,
             "envExisted": env_existed,
             "tokenCreated": token_created,
             "modeCreated": mode_created,
@@ -210,8 +225,13 @@ def install(target: Path, overlay_files: list[str]) -> Path:
             state_path.chmod(0o600)
 
         docker_compose(target, "config", "--quiet")
-        return backup
+        return backup, removed
     except Exception:
+        for relative in removed:
+            saved = backup / relative
+            if saved.is_file():
+                (target / relative).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(saved, target / relative)
         for relative in reversed(managed):
             destination = target / relative
             saved = backup / relative
@@ -248,10 +268,12 @@ def main() -> int:
             print(f"Dry run passed for EveJS {manifest['evejsVersion']} at {target}{note}; no files were changed.")
             return 0
 
-        backup = install(target, overlay_files)
+        backup, removed = install(target, overlay_files)
         print(f"Playerbots add-on installed for EveJS {manifest['evejsVersion']}.")
         if conflicts:
             print(f"Replaced {len(conflicts)} modified managed server files after saving them in the backup.")
+        if removed:
+            print(f"Moved {len(removed)} file(s) this release no longer uses into the backup: {', '.join(removed)}")
         print(f"Source backups: {backup}")
         print("No database files were read, written, moved, or deleted.")
         print("Server and add-on processes were not started.")

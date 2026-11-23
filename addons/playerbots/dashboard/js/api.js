@@ -1,11 +1,31 @@
 // Same-origin JSON helpers for the dashboard's /api routes.
 
+// Plain-language text for the EveJS API's error codes.
+const ERROR_TEXT = {
+  PLAYERBOT_NOT_FOUND: "This character is not a playerbot, or it has been deleted.",
+  PLAYERBOT_CORPORATION_NOT_FOUND: "No bot corporation has this ID. It may have been emptied or dissolved.",
+  PLAYERBOT_OPERATION_NOT_FOUND: "This operation is no longer in the archive.",
+  PLAYERBOTS_ADDON_ROUTE_NOT_FOUND: "The EveJS server does not offer this dashboard feature yet. Rebuild and restart the server so it runs this version of the add-on's integration files.",
+  PLAYERBOTS_ADDON_UNAUTHORIZED: "EveJS refused the dashboard's API token. Check that the server and the add-on use the same EVEJS_PLAYER_BOTS_ADDON_TOKEN.",
+  PLAYERBOTS_ADDON_API_ERROR: "EveJS reported an internal error. Check the server log.",
+  PLAYERBOT_SETTINGS_INVALID: "EveJS rejected these settings.",
+};
+
+export function errorText(code, fallback) {
+  const text = String(code || "");
+  return ERROR_TEXT[text] || text || fallback;
+}
+
+// Throws an Error with a readable message, the HTTP status and the raw code.
 export async function getJSON(path) {
   const response = await fetch(path, { headers: { accept: "application/json" }, cache: "no-store" });
   if (!response.ok) {
-    let message = `Request failed (${response.status}).`;
-    try { message = (await response.json()).error || message; } catch { /* keep generic */ }
-    throw new Error(message);
+    let code = "";
+    try { code = (await response.json()).error || ""; } catch { /* keep generic */ }
+    const error = new Error(errorText(code, `Request failed (${response.status}).`));
+    error.status = response.status;
+    error.code = code;
+    throw error;
   }
   return response.json();
 }
@@ -20,7 +40,7 @@ export async function postJSON(path, body) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(data.message || data.error || `Request failed (${response.status}).`);
+    const error = new Error(data.message || errorText(data.error, `Request failed (${response.status}).`));
     error.data = data;
     error.status = response.status;
     throw error;

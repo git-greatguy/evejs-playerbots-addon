@@ -165,6 +165,35 @@ Local test build; not yet proposed upstream.
   Resume all lifting a recall, restoring orders saved by the first build of
   this branch, and dashboard messages without chat hints.
 
+## Smoke-test pass (23 Nov 2026)
+
+Checked against a full EveJS 261115.2 tree with this branch installed: every
+module loads, the add-on API, dashboard server and add-on process start and
+talk to each other, every dashboard page renders at desktop and phone width
+with no script errors, every pilot and corporation order was clicked through,
+install, verify and rollback were run on a copy of a live install, and HQ and
+output-delivery settings were saved and read back from a real game store.
+Fixes from that pass:
+
+- **Readable errors.** `api.js` maps EveJS error codes to plain sentences
+  (`errorText()`); `getJSON()` errors carry `status` and `code`.
+- **Missing pilots, corporations and operations** show what happened and a
+  link back to the list, instead of a raw code and "retrying every 15
+  seconds" (`app.js`).
+- **Old server, new dashboard.** If the EveJS server has not been rebuilt, the
+  dashboard says so instead of showing `PLAYERBOTS_ADDON_ROUTE_NOT_FOUND`, and
+  recovers by itself after the rebuild. New entry in `TROUBLESHOOTING.md`.
+- **Operation details** (History → Details) lead with a readable summary;
+  the raw record is folded underneath.
+- **Corporation order messages** on the dashboard no longer repeat the
+  corporation ID or append station and system IDs after names
+  (`runCorporationCommand()`).
+- The name library button is labelled **Save name library** again, as the
+  docs say.
+- **Installer**: `install.py` moves add-on files that this release no longer
+  ships (the old `dashboard/app.js`) into the install backup, and
+  `rollback.py` puts them back. Before, an upgrade left the old file in place.
+
 ## Known limits
 
 - Resuming a held pilot with the `/playerbots resume` chat command does not

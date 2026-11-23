@@ -199,13 +199,16 @@ Served by the add-on on port 8080. It needs no login, so it is published on
 | **Activity** | Every pilot's state (Working, Travelling, Holding, Queued, Cooling down, Paused, Standing by, Idle, Offline) as a clickable bar; what pilots are working on and why the rest are not; the director's last pass; starter systems over the per-system limit; a filterable pilot list. |
 | **Pilot panel** | Opens from any pilot: what it is doing and why, location, ship, operation timeline, queued tasks, recent operations with ISK in and out. Orders: pause, resume, stop or resume the operation, recall to HQ, mine, PI colony, combat patrol, ship upgrade. |
 | **Corporations** | Every bot corporation with its state bar, top job, priorities and recall status. Each corporation's page has whole-corporation orders with live progress, headquarters and output delivery settings, an ordered priority list, a pilot roster with checkboxes for orders to selected pilots, and a command log. |
-| **History** | The operation archive, newest first, filterable by status, type and text. |
+| **History** | The operation archive, newest first, filterable by status, type and text. **Details** opens a summary of one operation (pilot, job, status, place, ship, ISK, last step) with its step timeline; the full raw record is folded underneath. |
 | **World** | Systems (security, share of the roster, over-limit flags), territory (fleets, wars, structures, sovereignty) and the killboard. |
 | **Performance** | Server load, director timing, tick stalls and telemetry. |
 | **Settings** | Autonomous work and seeding with live seeding status, population and work limits, advanced director and seeding-safety values, the name library, and Delete all bots. Saved settings show their defaults and take effect without a restart. |
 
 The page refreshes every 15 seconds without losing filters, selections or
-unsaved edits.
+unsaved edits. Errors from EveJS are shown in plain words: a pilot,
+corporation or operation that no longer exists says so and links back to its
+list instead of retrying, and a dashboard newer than the EveJS server says the
+server needs rebuilding (the page recovers by itself once it is).
 
 ## Commands
 
@@ -424,9 +427,9 @@ event-loop p95 or 95% EveJS CPU, and rejecting pilot creations slower than
 
 | Command | Does |
 | --- | --- |
-| `install.py [--dry-run] [--replace-conflicts] [--start] [target]` | Install into an EveJS checkout (default: current directory). `--dry-run` checks without writing; `--replace-conflicts` backs up and replaces modified managed files; `--start` builds and starts only the server and add-on. `install.sh` runs the same thing. |
+| `install.py [--dry-run] [--replace-conflicts] [--start] [target]` | Install into an EveJS checkout (default: current directory). `--dry-run` checks without writing; `--replace-conflicts` backs up and replaces modified managed files; `--start` builds and starts only the server and add-on. Add-on files that earlier releases installed but this one no longer uses (the old single-file `dashboard/app.js`) are moved into the install backup. `install.sh` runs the same thing. |
 | `verify.py [--json] [--strict] [--subsystem <name>] [target]` | Check an installed tree against this release without changing anything. |
-| `rollback.py [target]` | Roll back the latest installation from its backup. |
+| `rollback.py [target]` | Roll back the latest installation from its backup, including any files the install moved aside. |
 
 ## Safety and persistence
 

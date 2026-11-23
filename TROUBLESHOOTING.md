@@ -8,6 +8,21 @@ The dashboard binds to `127.0.0.1:8080` by default (`EVEJS_PLAYER_BOTS_DASHBOARD
 through a paginated API; settings updates require a same-origin request. The
 private server API token is never sent to the browser.
 
+## The dashboard says EveJS does not offer a feature yet
+
+The message "The EveJS server does not offer this dashboard feature yet"
+means the add-on container runs a newer dashboard than the EveJS server. The
+server answers the new pages' requests with `PLAYERBOTS_ADDON_ROUTE_NOT_FOUND`
+until it is rebuilt with the same release's integration files. Rebuild and
+restart both, for example:
+
+```sh
+docker compose -f compose.yaml -f addons/playerbots/compose.override.yaml build init
+docker compose -f compose.yaml -f addons/playerbots/compose.override.yaml up -d --no-deps --force-recreate server playerbots-addon
+```
+
+The page recovers by itself on its next refresh once the server is back.
+
 ## Recreate only the add-on container (launcher or modded Compose setups)
 
 If the dashboard or the bot driver stops answering, or after editing the

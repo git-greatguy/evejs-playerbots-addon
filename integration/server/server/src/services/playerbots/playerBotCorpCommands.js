@@ -1252,8 +1252,9 @@ function runCorporationCommand(corporationID, action, args = {}) {
     const message = String(rawMessage || "")
       .replace(/ (Progress|Release them with)[^.]*\/bots corp[^.]*\./g, "")
       .replace(/; a summary follows\./, ".")
-      .replace(/ of corporation \d+/, "")
-      .replace(/ \(system \d+\)/, "")
+      .replace(/ (of|for) corporation \d+/g, "")
+      .replace(/ \((system|station|structure) \d+\)/g, "")
+      .replace(/^Deposit: /, "Mining and PI output: ")
       .replace(/\n?Mining and PI collection jobs started from now on[\s\S]*$/, "")
       .replace(/ \(no usable HQ right now; see \/bots corp hq\)/, " (no usable HQ right now)")
       .replace(/ \(automatic: an HQ is saved with \/bots corp hq set\)/, " (automatic: an HQ is saved)")
@@ -1282,7 +1283,7 @@ function runCorporationCommand(corporationID, action, args = {}) {
   if (name === "cancel") {
     cancelOrders(id);
     saveStandingOrder(id, null);
-    return done(true, `Orders cancelled for corporation ${id}. Pilots keep their current pause state; use Send to work or Resume to release them.`);
+    return done(true, `Orders cancelled. Pilots keep their current pause state; use Send to work or Resume to release them.`);
   }
   const bots = selectBots(id, args.characterIDs);
   if (!bots.length) return { success: false, message: `Corporation ${id} has no matching playerbots.` };
