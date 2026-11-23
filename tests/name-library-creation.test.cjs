@@ -146,6 +146,7 @@ test("the unchanged director makes the same six specialty decisions when only th
     "../corporation/warRuntimeState": { hasActiveWarForCharacter: () => true },
     "./playerBotAllianceRuntime": { getAllianceFoundingPlan: () => null },
     "./playerBotSovereigntyRuntime": { findSovereigntyObjective: () => ({ systemID: 42 }) },
+    "./playerBotPiWorkPolicy": require(path.join(root, "playerBotPiWorkPolicy")),
   });
   for (const [specialty, expected] of [["trade", "mine"], ["industry", "industry"], ["planetary", "colony"],
     ["security", "combat"], ["piracy", "combat"], ["sovereignty", "sovereignty"]]) {

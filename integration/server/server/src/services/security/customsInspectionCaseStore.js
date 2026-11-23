@@ -72,16 +72,12 @@ function listCases({ characterID, activeOnly = false } = {}) {
 function saveCase(record) {
   if (!record || !record.caseID) throw new Error("CUSTOMS_CASE_ID_REQUIRED");
   const caseID = String(record.caseID);
-  // Only the root map needs a shallow copy: records are immutable snapshots
-  // here, and the new record is cloned before it is installed. Deep-cloning
-  // every historical customs case for each new or updated case is wasteful.
-  const root = { ...readCachedRoot() };
-  root[caseID] = cloneValue(record);
-  const written = repository.write(TABLE_NAME, "/", { version: 1, byCaseID: root });
+  const snapshot = cloneValue(record);
+  const written = repository.write(TABLE_NAME, `/byCaseID/${caseID}`, snapshot);
   if (!written || !written.success) throw new Error("CUSTOMS_CASE_WRITE_FAILED");
   if (caseIndexByID) {
     removeCaseIndexEntry(caseID);
-    addCaseIndexEntry(caseID, root[caseID]);
+    addCaseIndexEntry(caseID, snapshot);
   }
   const flushed = database.flushTableSync(TABLE_NAME);
   if (!flushed || !flushed.success) throw new Error("CUSTOMS_CASE_FLUSH_FAILED");
