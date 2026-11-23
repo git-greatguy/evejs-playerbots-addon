@@ -578,6 +578,19 @@ Full details, tests and known limits:
 - These changes are tested against a mock server and a full EveJS source
   tree, but not yet on a long-running live server.
 
+### Headquarters upkeep (`feat/corp-headquarters-structures` branch)
+
+A follow-up to the corporation headquarters work merged upstream in 0.2.152,
+also by [@ubermidas](https://github.com/ubermidas), merged into this copy:
+
+- A corporation's structure caretaker keeps its structures fuelled and
+  powered before it goes mining around headquarters, so a mining-fitted
+  caretaker can no longer let them run dry.
+- Every structure a corporation owns and has cored is maintained again, with
+  headquarters first, including structures placed with `/playerbots build`.
+- Newly deployed headquarters get a generated name instead of a fixed
+  "<Corp> Headquarters".
+
 ### Installing a patch
 
 Patches like this one arrive as source changes before a new release ZIP
@@ -633,8 +646,8 @@ python tools/playerbots/build-addon-package.py --compat-root "$EVEJS_COMPAT_ROOT
 ```
 
 Check the ZIP before sharing it, and don't call a source-only commit an
-installable release. The ZIP now in `dist/` is the upstream 0.2.152 build
-without this branch's patches.
+installable release. The ZIP now in `dist/` is the 0.2.152 build with the
+headquarters upkeep patch, but without the dashboard overhaul.
 
 </details>
 

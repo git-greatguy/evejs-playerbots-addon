@@ -203,6 +203,17 @@ Fixes from that pass:
   end. Long reference tables are folded so the page stays short.
 - `INSTALLATION.md`: the Compose roster default is 500, not 1,000.
 
+## Merged: headquarters upkeep (23 Nov 2026)
+
+Branch `feat/corp-headquarters-structures` (commit d9bb4d2, not yet upstream)
+is merged in: structure maintenance runs ahead of the caretaker's HQ mining,
+every owned and cored structure is maintained with the HQ first, deployed
+headquarters use the name generator, and `tests/headquarters-priority.test.cjs`
+gains regression tests. It changes `playerBotDirectorRuntime.js` and
+`playerBotStructureRuntime.js`, which the dashboard files do not touch; the
+merge had no conflicts. The `dist/` ZIP comes from that branch and does not
+contain the dashboard overhaul.
+
 ## Known limits
 
 - Resuming a held pilot with the `/playerbots resume` chat command does not

@@ -1915,27 +1915,14 @@ async function runDirectorInternal(bots = [], options = {}) {
         require("./playerBotCorpCommands").getHeadquarters(corporationID),
       )
       : null;
-    const localStructureBase = !humanControlled && corporationHeadquarters &&
-      operationRuntime.hasRoleShipFit(bot, "mining")
-      ? {
-        kind: "mine",
-        territorialBase: {
-          stationID: Number(corporationHeadquarters.structureID || corporationHeadquarters.itemID),
-          systemID: Number(corporationHeadquarters.solarSystemID),
-          structureID: Number(corporationHeadquarters.structureID || corporationHeadquarters.itemID),
-          baseKind: "corporation-structure",
-        },
-      }
-      : null;
     const headquartersOperation = operationRuntime.getOperation(bot.characterID);
     const headquartersWorkCanStart = headquartersStructure &&
       !headquartersOperation?.pending &&
       !["combat", "sovereignty", "alliance-courier", "fleet-attack"].includes(headquartersOperation?.kind) &&
       !(headquartersOperation?.kind === "pi-collect" &&
         (Number(headquartersOperation.containerID) > 0 || headquartersOperation.exportAttempt));
-    const structurePriorityRuntime = require("./playerBotStructurePriorityRuntime");
     const corporateHQDepot = headquartersWorkCanStart
-      ? structurePriorityRuntime.getHQHaulDepot(
+      ? corpStructureRuntime.getHQHaulDepot(
         corporationID,
         corporationHeadquarters,
         (id) => require("./playerBotCorpCommands").getHeadquarters(id),
@@ -1977,12 +1964,14 @@ async function runDirectorInternal(bots = [], options = {}) {
       ? null : nextPlayerOrder(state, bot);
     let assignment = escortAssignment || (coreInstallPlan
       ? { kind: "structure-core-install", plan: coreInstallPlan }
+      // Fuel and power upkeep comes before the caretaker's HQ mining loop so a
+      // mining-fitted caretaker cannot starve its own structures.
+      : structureMaintenanceAssignment
+      ? structureMaintenanceAssignment
       : localHQMiningAssignment
       ? localHQMiningAssignment
       : headquartersWorkCanStart
       ? chooseAssignment(bot, { skipColony: true, skipUpgrade: false, prioritizeHeadquarters: true })
-      : structureMaintenanceAssignment
-      ? structureMaintenanceAssignment
       : hasLaunch
       ? { kind: "pi-collect" }
       : courier

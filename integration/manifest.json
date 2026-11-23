@@ -382,8 +382,8 @@
     },
     "server/src/services/playerbots/playerBotDirectorRuntime.js": {
       "baseSha256": null,
-      "sourceSha256": "eaa93a2ce6306e889259d2cc5f491246204c46dddb9474ecd174efddf20ac397",
-      "overlaySha256": "eaa93a2ce6306e889259d2cc5f491246204c46dddb9474ecd174efddf20ac397",
+      "sourceSha256": "e9541818fe7e960a7ade121ce53e5738cfab6b9468608aeb328d552843bc34f8",
+      "overlaySha256": "e9541818fe7e960a7ade121ce53e5738cfab6b9468608aeb328d552843bc34f8",
       "subsystem": "playerbots-core"
     },
     "server/src/services/playerbots/playerBotEconomyRuntime.js": {
@@ -640,8 +640,8 @@
     },
     "server/src/services/playerbots/playerBotStructureRuntime.js": {
       "baseSha256": null,
-      "sourceSha256": "c9be057fc0957a42e703425599edee9c4e6dd315a72566f5bcd99c6249397091",
-      "overlaySha256": "c9be057fc0957a42e703425599edee9c4e6dd315a72566f5bcd99c6249397091",
+      "sourceSha256": "3710e37b026ff824af3f0bb4406c2e5ded25a076690c444fb91420089aacc4e5",
+      "overlaySha256": "3710e37b026ff824af3f0bb4406c2e5ded25a076690c444fb91420089aacc4e5",
       "subsystem": "playerbots-core"
     },
     "server/src/services/playerbots/playerBotStructureWorkPolicy.js": {
@@ -849,7 +849,7 @@
     "addons/playerbots/LICENSE": "ce3fb82d9ee80a1cb0e548f9b0560ead52378ee2b4e826fd9459b4acf7075d89",
     "addons/playerbots/LOCAL_DEFENSE.md": "212bc0e1fe6447aba93b1794327bc1fc3e475445f19809d67a04624e2d3ebd3a",
     "addons/playerbots/OPERATIONS.md": "8bc83285f866dd259ba39bc5d6779bb1c9de21629260a05e89166be307270970",
-    "addons/playerbots/README.md": "d59a7e2fa5ab0875af3e93ffc47f24c3963fcaed49882f0429d1b6ad4f26afa9",
+    "addons/playerbots/README.md": "b1099078b88a4f84bc71833f657c15d947739ec61fd245928dbf36d704eac1b5",
     "addons/playerbots/THIRD_PARTY_NOTICES.md": "4e53a2b31f3965241b9d182b7764420e4f121213267ebc3936682544204c34dc",
     "addons/playerbots/TROUBLESHOOTING.md": "d3af657f4ee93a2a3c93e53e7e3f2dba321f492d1e85f6e6c9a569d250085191",
     "addons/playerbots/compose.override.yaml": "a274ce9a224779a7a194b44a243c56366deacd489620f1f85d3dca47731dc032",
