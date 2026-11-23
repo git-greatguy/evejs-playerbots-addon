@@ -128,13 +128,31 @@ function updateSettings(corporationID, patch) {
 }
 
 function isEnabled(corporationID) {
-  const settings = getSettings(corporationID);
+  const id = positive(corporationID);
+  const settings = getSettings(id);
   if (settings.enabled !== null) return settings.enabled;
-  return Boolean(state.deps.headquarters().hasSavedHeadquarters(positive(corporationID)));
+  return Boolean(resolveDepot(id));
 }
 
 function resolveDepot(corporationID) {
-  const headquarters = state.deps.headquarters().getHeadquarters(positive(corporationID));
+  const id = positive(corporationID);
+  try {
+    const structures = load("services/structure/structureState").listStructures();
+    const { getCorporationHeadquartersStructure } = require("./playerBotStructurePriorityRuntime");
+    const structure = getCorporationHeadquartersStructure(id, structures, state.deps.headquarters().getHeadquarters(id));
+    if (structure) {
+      return {
+        kind: "structure",
+        stationID: positive(structure.structureID || structure.itemID),
+        systemID: positive(structure.solarSystemID),
+        name: String(structure.itemName || structure.name || ""),
+        hasQuantumCore: structure.hasQuantumCore === true,
+      };
+    }
+  } catch (error) {
+    // Keep the saved NPC/structure HQ fallback if structure metadata is unavailable.
+  }
+  const headquarters = state.deps.headquarters().getHeadquarters(id);
   return headquarters && !headquarters.error && positive(headquarters.stationID) ? headquarters : null;
 }
 

@@ -66,6 +66,10 @@ const { createWorkBudget } = require(path.join(base, "playerBotWorkBudget"));
           return { getOperation: () => null, hasActiveOperation: () => false };
         if (id === "./playerBotIndustryCycleRuntime")
           return { getCycle: () => null };
+        if (id === "./playerBotStructureRuntime")
+          return { getHeadquartersPriority: () => 1 };
+        if (id === "./playerBotRuntime")
+          return { getBotByCharacterID: () => bot, listBots: () => [bot] };
         throw Error(id);
       },
     };

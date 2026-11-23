@@ -4866,6 +4866,14 @@ function startMining(botQuery, maxTrips = 1, options = {}) {
     homeStationID = currentStationID && !economy.isJitaStation(currentStationID) &&
       stationSystemID(currentStationID) === nearest.systemID ? currentStationID : nearest.stationID;
   }
+  const isOwnedStructureBase = !worldData.getStationByID(homeStationID) &&
+    Number(worldData.getStructureByID(homeStationID)?.ownerCorpID || worldData.getStructureByID(homeStationID)?.ownerID) ===
+      Number(character.corporationID || bot.corporationID) &&
+    worldData.getStructureByID(homeStationID)?.hasQuantumCore === true;
+  if (isOwnedStructureBase) {
+    options.structureHeadquarters = true;
+    options.sell = false;
+  }
   if (!worldData.getStationByID(homeStationID)) {
     const structure = typeof worldData.getStructureByID === "function"
       ? worldData.getStructureByID(homeStationID)
@@ -4918,6 +4926,11 @@ function startMining(botQuery, maxTrips = 1, options = {}) {
     miningPhaseKey: null,
   });
   corpDepositDecorate(operation, bot);
+  if (options.structureHeadquarters === true) {
+    require("./playerBotStructurePriorityRuntime").prepareCorporationDeposit(
+      operation, bot, homeStationID, Number(bot.corporationID),
+    );
+  }
   record(operation, `Mining from ${homeStationID}: ${trips} trip(s)${operation.refine ? "; ore will be reprocessed" : ""}${operation.sell ? "; output will be sold or listed" : "; output will stay in the personal hangar"}.`);
   saveOperation(operation);
   return { success: true, operation, message: `${bot.characterName} will mine from ${homeStationID} for ${trips} trip(s)${operation.refine ? " and reprocess the ore" : ""}${operation.sell ? " and sell or list the output" : "; output will remain in the personal hangar"} (operation ${operation.operationID}).` };

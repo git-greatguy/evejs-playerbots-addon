@@ -13,6 +13,7 @@ const POSITION_DIRECTIONS = 16;
 const MAX_DEPLOYMENT_REPOSITION_TARGETS = 32;
 const MIN_DEPLOYMENT_REPOSITION_DISTANCE = 150_000;
 const DEPLOYMENT_GRID_CLEARANCE_METERS = 1_250_000;
+const DEFAULT_HEADQUARTERS_STRUCTURE_TYPE_ID = 35832; // Astrahus citadel
 const AUTONOMOUS_STRUCTURE_TYPE_BY_SPECIALTY = Object.freeze({
   mining: 35835,       // Athanor
   industry: 35825,     // Raitaru
@@ -35,6 +36,7 @@ const STRUCTURE_MAINTENANCE_FUEL_DAYS = 7;
 const STRUCTURE_CARETAKER_ROLE = 2048n;
 const STRUCTURE_CARETAKER_CACHE_MS = 30_000;
 const structureCaretakerCache = new Map();
+const missingHeadquartersCache = new Map();
 
 function positiveID(value) {
   const number = Math.trunc(Number(value));
@@ -122,11 +124,60 @@ function decideServiceProvisionFunding(maintenance, maxSpend, profit, balance) {
   return { allowed: false, fundingSource: null, reserve: maintenance ? reserve : 0 };
 }
 
+function isMissingCorporationHeadquarters(bot) {
+  const characterID = positiveID(bot && bot.characterID);
+  const corporationID = positiveID(
+    (characterID ? require("../character/characterState").getCharacterRecord(characterID) : {}).corporationID ||
+      bot && bot.corporationID,
+  );
+  if (!corporationID) return false;
+  const cached = missingHeadquartersCache.get(corporationID);
+  if (cached && cached.expiresAt > Date.now()) return cached.missing;
+  const missing = !require("../structure/structureState").listStructures().some((structure) =>
+    Number(structure && (structure.ownerCorpID || structure.ownerID)) === corporationID &&
+    !structure.destroyedAt && !structure.unanchoring &&
+    getStructureType(structure.typeID)?.dockable === true,
+  );
+  missingHeadquartersCache.set(corporationID, {
+    missing,
+    expiresAt: Date.now() + STRUCTURE_CARETAKER_CACHE_MS,
+  });
+  return missing;
+}
+
+function isCorporationHeadquartersStructure(structure, corporationID) {
+  const id = positiveID(corporationID);
+  if (!id) return false;
+  if (require("./playerBotStructureWorkPolicy").isOperationalHeadquarters(structure, id)) return true;
+  try {
+    const configured = require("./playerBotCorpCommands").getHeadquarters(id);
+    return !configured.error && configured.kind === "structure" &&
+      Number(configured.stationID) === positiveID(structure && structure.structureID);
+  } catch (_) {
+    return false;
+  }
+}
+
+function getHeadquartersPriority(bot) {
+  if (!bot) return 1;
+  const corporationID = positiveID(
+    (require("../character/characterState").getCharacterRecord(bot.characterID) || {}).corporationID || bot.corporationID,
+  );
+  if (!corporationID || !isStructureManager(bot)) return 1;
+  if (isMissingCorporationHeadquarters(bot)) return 0;
+  const caretaker = getStructureCaretakerAssignment(corporationID);
+  if (caretaker && caretaker.characterID === positiveID(bot.characterID)) return 0;
+  return 1;
+}
+
 function findAutonomousPurchasePlan(bot) {
   if (!bot || !isStructureManager(bot)) return null;
   const corporationID = positiveID((require("../character/characterState").getCharacterRecord(bot.characterID) || {}).corporationID || bot.corporationID);
   if (!corporationID) return null;
-  const typeID = positiveID(AUTONOMOUS_STRUCTURE_TYPE_BY_SPECIALTY[String(bot.specialty || "").toLowerCase()]);
+  const typeID = positiveID(
+    AUTONOMOUS_STRUCTURE_TYPE_BY_SPECIALTY[String(bot.specialty || "").toLowerCase()] ||
+      DEFAULT_HEADQUARTERS_STRUCTURE_TYPE_ID,
+  );
   const type = getStructureType(typeID);
   if (!type || type.dockable !== true) return null;
   const packageNeeds = getStructureProcurementNeeds(typeID, type);
@@ -201,11 +252,21 @@ function findAutonomousPurchasePlan(bot) {
     fundingSource = "seed-capital";
   }
 
+  const corporation = require("../corporation/corporationState").getCorporationRecord(corporationID) || {};
+  const existingNames = new Set(require("../structure/structureState").listStructures()
+    .map((structure) => String(structure && (structure.name || structure.itemName) || "").trim().toLowerCase())
+    .filter(Boolean));
+  const structureName = require("./playerBotHeadquartersNameRuntime").generateHeadquartersName({
+    corporationName: corporation.corporationName || bot.corporationName || type.name,
+    random: bot.headquartersNameRandom,
+    isAvailable: (candidate) => !existingNames.has(candidate.toLowerCase()),
+  });
   return {
     typeID,
     coreTypeID: positiveID(type.defaultQuantumCoreTypeID),
     packageNeeds,
-    structureName: `${type.name} ${bot.characterName}`.slice(0, 200),
+    structureName,
+    headquarters: true,
     marketStationID,
     estimatedCost,
     maxSpend,
@@ -327,6 +388,7 @@ function startProcurement(bot, plan, tools = {}) {
     }),
     packageItemIDs: {},
     structureName: String(plan.structureName || type.name).slice(0, 200),
+    headquarters: plan.headquarters === true,
     marketStationID: positiveID(plan.marketStationID),
     destinationSystemID: positiveID(plan.destinationSystemID),
     estimatedCost: Number(plan.estimatedCost) || 0,
@@ -754,6 +816,7 @@ function findStructureMaintenancePlan(bot) {
     .filter((structure) => Number(structure && (structure.ownerCorpID || structure.ownerID)) === corporationID)
     .filter((structure) => !structure.destroyedAt && !structure.unanchoring && structure.hasQuantumCore === true)
     .filter((structure) => structureState.isDockingServiceOnline(structure))
+    .filter((structure) => isCorporationHeadquartersStructure(structure, corporationID))
     .filter((structure) => !activeTargets.has(positiveID(structure.structureID)))
     .sort((left, right) => {
       const lowPowerFirst = Number(Number(right.upkeepState) === constants.STRUCTURE_UPKEEP_STATE.LOW_POWER) -
@@ -1699,6 +1762,23 @@ function getExistingDeployment(itemID, systemID = 0) {
   ) || null;
 }
 
+function markCorporationHeadquarters(operation, bot, structure) {
+  if (!operation || operation.headquarters !== true || !structure) return structure;
+  const corporationID = positiveID(operation.corporationID || bot && bot.corporationID);
+  if (!corporationID || Number(structure.ownerCorpID || structure.ownerID) !== corporationID) return structure;
+  const structureState = require("../structure/structureState");
+  const { headquartersStructureDevFlags } = require("./playerBotPiWorkPolicy");
+  const result = structureState.updateStructureRecord(Number(structure.structureID), (current) => ({
+    ...current,
+    devFlags: headquartersStructureDevFlags(current.devFlags, corporationID),
+  }));
+  if (!result || result.success !== true) {
+    throw new Error(result && result.errorMsg || "PLAYERBOT_HEADQUARTERS_MARK_FAILED");
+  }
+  missingHeadquartersCache.delete(corporationID);
+  return structureState.getStructureByID(Number(structure.structureID)) || structure;
+}
+
 function isStructureManager(bot) {
   const session = require("./playerBotSpaceRuntime").getActorSession(bot);
   const authority = require("../corporation/corporationAuthority").getPersistedCorporationAuthority(session);
@@ -2009,18 +2089,29 @@ function start(bot, itemID, systemID = null, options = {}) {
   }
   let objective = positiveID(systemID) ? reachableNullSystems(bot).find((candidate) => candidate.systemID === positiveID(systemID)) : findDeploymentObjective(bot, item.typeID);
   if (!objective) return { success: false, message: positiveID(systemID) ? `System ${systemID} is not a reachable claimable null-sec system within ${MAX_DEPLOYMENT_ROUTE_HOPS} jumps.` : "No reachable null-sec structure deployment system is available." };
+  const character = require("../character/characterState").getCharacterRecord(bot.characterID) || {};
+  const corporationID = positiveID(character.corporationID || bot.corporationID);
+  const corporation = corporationID
+    ? require("../corporation/corporationState").getCorporationRecord(corporationID) || {}
+    : {};
+  const corporationHasStructure = corporationID && !isMissingCorporationHeadquarters(bot);
+  const headquarters = options.headquarters === true || !corporationHasStructure;
   const operation = tools.baseOperation("structure-deployment", bot, {
     stage: inCargo ? "to-system" : "to-source",
     itemID: Number(item.itemID),
     coreTypeID,
     coreItemID: core ? Number(core.itemID) : null,
     typeID: Number(item.typeID),
-    structureName: String(item.itemName || type.name || `Structure ${item.typeID}`).slice(0, 200),
+    corporationID,
+    structureName: headquarters
+      ? `${corporation.corporationName || bot.corporationName || type.name} Headquarters`.slice(0, 200)
+      : String(item.itemName || type.name || `Structure ${item.typeID}`).slice(0, 200),
+    headquarters,
     sourceStationID: inHangar ? sourceStationID : null,
     destinationSystemID: objective.systemID,
     plannedRouteHops: objective.hops,
     routeRisk: objective.route.risk || null,
-    homeStationID: positiveID((require("../character/characterState").getCharacterRecord(bot.characterID) || {}).stationID || (require("../character/characterState").getCharacterRecord(bot.characterID) || {}).structureID) || require("./playerBotEconomyRuntime").BOT_HUB_STATION_ID,
+    homeStationID: positiveID(character.stationID || character.structureID) || require("./playerBotEconomyRuntime").BOT_HUB_STATION_ID,
     pendingDeployment: null,
     structureID: null,
     autonomous: options.autonomous === true,
@@ -2037,6 +2128,7 @@ async function advance(operation, bot, kit) {
   const existing = getExistingDeployment(operation.itemID, operation.destinationSystemID);
   if (existing) {
     operation.structureID = Number(existing.structureID);
+    if (operation.headquarters === true) markCorporationHeadquarters(operation, bot, existing);
     operation.anchorState = String(existing.state || "unknown");
     operation.pendingDeployment = null;
     operation.stage = "return";
@@ -2225,6 +2317,7 @@ async function advance(operation, bot, kit) {
     }
     const deployed = getExistingDeployment(operation.itemID, operation.destinationSystemID);
     if (!deployed) return kit.block(operation, "review", `The deployment service returned without a matching structure record for source item ${operation.itemID}.`);
+    if (operation.headquarters === true) markCorporationHeadquarters(operation, bot, deployed);
     operation.structureID = Number(deployed.structureID);
     operation.anchorState = String(deployed.state || "unknown");
     operation.pendingDeployment = null;
@@ -2277,6 +2370,8 @@ module.exports = {
   applyStructureCaretakerRoleToSession,
   canCarryStructurePackage,
   findAutonomousPurchasePlan,
+  isMissingCorporationHeadquarters,
+  getHeadquartersPriority,
   findCoreInstallPlan,
   findStructureMaintenancePlan,
   findStructureServiceProvisionPlan,
