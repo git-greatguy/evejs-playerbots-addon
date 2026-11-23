@@ -25,11 +25,17 @@ test("active work is working, travelling or holding by stage and status", () => 
   assert.equal(holding.reasonCode, "holding-review");
 });
 
-test("active work outranks a pause, and a corporation hold names itself", () => {
+test("a paused pilot's operation waits unless a corporation recall moves it", () => {
   const paused = bot({ status: "paused", autonomyPaused: true });
-  assert.equal(activity.classifyBotActivity({ bot: paused, activeWork: { kind: "relocate", status: "active", stage: "travel" } }).state, "travelling");
+  const frozen = activity.classifyBotActivity({ bot: paused, activeWork: { kind: "mine", status: "active", stage: "mining" } });
+  assert.equal(frozen.state, "paused");
+  assert.equal(frozen.doing, "Paused during: Mining: mining");
+  const recalled = activity.classifyBotActivity({ bot: paused, corpHold: true, activeWork: { kind: "relocate", status: "active", stage: "travel" } });
+  assert.equal(recalled.state, "travelling");
+  assert.equal(recalled.doing, "Returning to corporation HQ");
   assert.equal(activity.classifyBotActivity({ bot: paused, corpHold: true }).reasonCode, "corp-hold");
   assert.equal(activity.classifyBotActivity({ bot: paused }).reasonCode, "operator-pause");
+  assert.equal(activity.classifyBotActivity({ bot: bot(), connected: true, corpHold: true, corpRecallRunning: true }).reasonCode, "corp-recall");
 });
 
 test("autowork off while seeding is its own reason with progress", () => {
@@ -37,7 +43,7 @@ test("autowork off while seeding is its own reason with progress", () => {
     bot: bot(), connected: true, assignment: { cooldownUntil: NOW + 60_000, lastMessage: "x" },
     autowork: { enabled: false, seeding: { active: true, rosterCount: 2547, target: 5000 } }, now: NOW,
   });
-  assert.equal(result.state, "paused");
+  assert.equal(result.state, "standby");
   assert.equal(result.reasonCode, "seeding");
   assert.match(result.reason, /2,547 of 5,000/);
   const off = activity.classifyBotActivity({ bot: bot(), connected: true, autowork: { enabled: false, seeding: { active: false } }, now: NOW });
@@ -130,6 +136,100 @@ test("corporation recall persists as a standing order and is restored after a re
     assert.equal(work.success, true, work.message);
     assert.deepEqual(corpCommands.listStandingRecallCorporationIDs(), []);
     assert.equal(corpCommands.runCorporationCommand(corporationID, "bogus").success, false);
+  } finally {
+    corpCommands.reset();
+  }
+});
+
+function corpFixture() {
+  const roster = [11, 12, 13, 14].map((id) => bot({ characterID: id, characterName: `P${id}` }));
+  const standing = memoryStore();
+  const deps = {
+    playerBots: () => ({ listBots: () => roster }),
+    worldData: () => ({ getStationByID: (id) => (id === 60003760 ? { solarSystemID: 30000142, stationName: "Jita IV - Moon 4" } : null), getSolarSystemByID: () => ({}), getAsteroidBeltsForSystem: () => [] }),
+    structures: () => ({ getStructureByID: () => null, listOwnedStructures: () => [] }),
+    corporations: () => ({ getCorporationRecord: () => ({ stationID: 60003760, ceoID: 1 }) }),
+    characters: () => ({ getCharacterRecord: () => ({}) }),
+    operations: () => ({ getOperation: () => null, startRelocation: () => ({ success: true }), stopOperation: () => ({ success: true }), startMining: () => ({ success: true }), startColony: () => ({ success: true }) }),
+    tasks: () => ({ pauseBot: () => ({ success: true }), resumeBot: () => ({ success: true }), resumeBotsInCorporation: () => ({ success: true, affected: 4 }) }),
+    deposit: () => ({ forceFor: (corporationID, fn) => fn() }),
+    hqStore: memoryStore(),
+    standingOrderStore: standing,
+    commandLogStore: memoryStore(),
+    log: () => ({ warn() {} }),
+    replies: () => ({ emitChatFeedback() {} }),
+    now: () => NOW,
+  };
+  corpCommands.configure(deps);
+  return { deps, standing };
+}
+
+test("selected pilots are recalled without touching the rest of the corporation", () => {
+  corpFixture();
+  try {
+    const corporationID = 98000001;
+    assert.equal(corpCommands.runCorporationCommand(corporationID, "recall", { characterIDs: [11, 12] }).success, true);
+    let recalls = corpCommands.listStandingRecalls();
+    assert.deepEqual(recalls.map((row) => [row.whole, row.characterIDs]), [[false, [11, 12]]]);
+    assert.deepEqual(corpCommands.listStandingRecallCorporationIDs(), []);
+    // A second selection joins the running order instead of replacing it.
+    corpCommands.runCorporationCommand(corporationID, "recall", { characterIDs: [13] });
+    assert.equal(corpCommands._testing.state.orders.get(corporationID).total, 3);
+    assert.deepEqual(corpCommands.listStandingRecalls()[0].characterIDs, [11, 12, 13]);
+    // Sending one of them to work releases only that pilot.
+    assert.equal(corpCommands.runCorporationCommand(corporationID, "work", { characterIDs: [12], mode: "mine" }).success, true);
+    recalls = corpCommands.listStandingRecalls();
+    assert.deepEqual(recalls[0].characterIDs, [11, 13]);
+    assert.equal(corpCommands._testing.state.orders.get(corporationID).pending.has(12), false);
+    assert.deepEqual(corpCommands._testing.state.jobs.get(corporationID).pending, [12]);
+  } finally {
+    corpCommands.reset();
+  }
+});
+
+test("a whole-corporation recall keeps released pilots out after a restart", () => {
+  const { deps } = corpFixture();
+  try {
+    const corporationID = 98000001;
+    corpCommands.runCorporationCommand(corporationID, "recall", {});
+    corpCommands.releasePilots(corporationID, [14]);
+    corpCommands.runCorporationCommand(corporationID, "work", { characterIDs: [13], mode: "pi" });
+    assert.deepEqual(corpCommands.listStandingRecalls()[0].released, [14, 13]);
+    corpCommands._testing.state.orders.clear();
+    corpCommands._testing.state.jobs.clear();
+    corpCommands.configure(deps);
+    assert.deepEqual(corpCommands.restoreStandingOrders(), [corporationID]);
+    const order = corpCommands._testing.state.orders.get(corporationID);
+    assert.deepEqual([...order.pending.keys()].sort(), [11, 12]);
+    const job = corpCommands._testing.state.jobs.get(corporationID);
+    assert.deepEqual(job.pending, [13]);
+    // Resume all lifts the recall entirely.
+    assert.equal(corpCommands.runCorporationCommand(corporationID, "resume", {}).success, true);
+    assert.deepEqual(corpCommands.listStandingRecalls(), []);
+    assert.equal(corpCommands._testing.state.orders.has(corporationID), false);
+  } finally {
+    corpCommands.reset();
+  }
+});
+
+test("a standing order saved by the first build is still restored", () => {
+  const { deps, standing } = corpFixture();
+  try {
+    standing().write({ 98000001: { kind: "recall", status: "holding", destinationID: 0, characterIDs: null, createdAt: "x" } });
+    corpCommands.configure(deps);
+    assert.deepEqual(corpCommands.listStandingRecallCorporationIDs(), [98000001]);
+    assert.deepEqual(corpCommands.restoreStandingOrders(), [98000001]);
+  } finally {
+    corpCommands.reset();
+  }
+});
+
+test("dashboard messages drop chat-only hints", () => {
+  corpFixture();
+  try {
+    const result = corpCommands.runCorporationCommand(98000001, "recall", {});
+    assert.doesNotMatch(result.message, /\/bots corp|corporation 98000001|\(system/);
+    assert.match(result.message, /Jita IV - Moon 4/);
   } finally {
     corpCommands.reset();
   }

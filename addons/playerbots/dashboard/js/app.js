@@ -57,10 +57,24 @@ async function show(force = false) {
   document.querySelectorAll(".nav-link").forEach((link) => link.classList.toggle("active", link.dataset.view === route.view));
   if (changed || force) setCrumbs([{ label: TITLES[route.view] }]);
   const view = VIEWS[route.view];
+  const fresh = changed || force;
   try {
-    await view.render({ param: route.param, fresh: changed || force, store, loadSummary, setCrumbs });
+    await view.render({ param: route.param, fresh, store, loadSummary, setCrumbs });
+    if (!fresh) $("view").querySelector(".refresh-failed")?.remove();
   } catch (error) {
-    $("view").innerHTML = `<div class="notice error">${esc(error.message || String(error))} The page retries every ${REFRESH_MS / 1000} seconds.</div>`;
+    const message = `${error.message || String(error)} Retrying every ${REFRESH_MS / 1000} seconds.`;
+    // A failed background refresh keeps the page the operator is looking at.
+    if (!fresh && $("view").children.length && !$("view").querySelector(".load-failed")) {
+      let banner = $("view").querySelector(".refresh-failed");
+      if (!banner) {
+        banner = document.createElement("div");
+        banner.className = "notice error refresh-failed";
+        $("view").prepend(banner);
+      }
+      banner.textContent = `Could not refresh: ${message}`;
+      return;
+    }
+    $("view").innerHTML = `<div class="notice error load-failed">${esc(message)}</div>`;
   }
 }
 

@@ -424,7 +424,11 @@ function createDashboardServer(options = {}) {
     let body;
     try {
       body = fs.readFileSync(path.join(staticRoot, asset[0]));
-    } catch {
+    } catch (error) {
+      if (error && error.code === "ENOENT" && asset[0] !== "index.html") {
+        send(response, 404, "text/plain; charset=utf-8", "Not found.");
+        return;
+      }
       send(response, 503, "text/plain; charset=utf-8", "Dashboard assets are missing from this add-on package.");
       return;
     }

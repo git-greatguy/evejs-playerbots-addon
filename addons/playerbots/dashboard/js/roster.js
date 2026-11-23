@@ -2,7 +2,7 @@
 // chips, paging, optional row selection, and a click to open the pilot drawer.
 
 import { getJSON } from "./api.js";
-import { esc, num, pilotCell, stateTag, when, emptyRow, pager, STATE_ORDER, STATE_LABELS } from "./ui.js";
+import { esc, num, pilotCell, stateTag, when, emptyRow, pager, replaceKeepingFocus, STATE_ORDER, STATE_LABELS } from "./ui.js";
 import { openPilot } from "./drawer.js";
 
 export function createRoster(options = {}) {
@@ -57,7 +57,9 @@ export function filterDescription(roster, labels = {}) {
   return parts.join(" · ");
 }
 
-export function rosterHtml(roster, { corporations = [], specialties = [], labels = {}, selectionActions = "" } = {}) {
+export function rosterHtml(roster, options = {}) {
+  roster.lastOptions = options;
+  const { corporations = [], specialties = [], labels = {}, selectionActions = "" } = options;
   const cols = roster.selectable ? 6 : 5;
   const allOnPage = roster.rows.length > 0 && roster.rows.every((row) => roster.selected.has(row.characterID));
   const filterText = filterDescription(roster, labels);
@@ -77,7 +79,7 @@ export function rosterHtml(roster, { corporations = [], specialties = [], labels
   <div class="table-wrap"><table>
     <thead><tr>${roster.selectable ? `<th style="width:34px"><input type="checkbox" data-roster="all" ${allOnPage ? "checked" : ""} aria-label="Select all on this page"></th>` : ""}<th>Pilot</th><th>State</th><th>Doing</th><th>Where</th><th>Since</th></tr></thead>
     <tbody>${roster.rows.map((row) => `<tr class="clickable${roster.selected.has(row.characterID) ? " selected" : ""}" data-pilot="${row.characterID}">
-      ${roster.selectable ? `<td><input type="checkbox" data-select="${row.characterID}" ${roster.selected.has(row.characterID) ? "checked" : ""} aria-label="Select ${esc(row.characterName)}"></td>` : ""}
+      ${roster.selectable ? `<td class="select-cell"><input type="checkbox" data-select="${row.characterID}" ${roster.selected.has(row.characterID) ? "checked" : ""} aria-label="Select ${esc(row.characterName)}"></td>` : ""}
       <td>${pilotCell(row)}</td>
       <td>${stateTag(row.state, row.stateLabel)}</td>
       <td><strong>${esc(row.doing)}</strong>${row.reason ? `<span class="sub" title="${esc(row.reason)}">${esc(row.reason)}</span>` : ""}</td>
@@ -88,8 +90,10 @@ export function rosterHtml(roster, { corporations = [], specialties = [], labels
   ${pager(roster.page, roster.pageSize, roster.total, "roster")}`;
 }
 
-// Wires events inside `root`; calls rerender() after any change that needs a reload.
+// Wires events inside `root`. rerender(true) reloads pilots from the server;
+// selection changes only redraw the list in place.
 export function bindRoster(root, roster, rerender) {
+  const redraw = () => replaceKeepingFocus(root, rosterHtml(roster, roster.lastOptions || {}));
   let searchTimer = null;
   root.addEventListener("input", (event) => {
     if (event.target.dataset.roster !== "search") return;
@@ -102,16 +106,18 @@ export function bindRoster(root, roster, rerender) {
     else if (target.dataset.roster === "specialty") { roster.specialty = target.value; roster.page = 0; void rerender(true); }
     else if (target.dataset.roster === "all") {
       for (const row of roster.rows) target.checked ? roster.selected.add(row.characterID) : roster.selected.delete(row.characterID);
-      void rerender(false);
+      redraw();
     } else if (target.dataset.select) {
       const id = Number(target.dataset.select);
       target.checked ? roster.selected.add(id) : roster.selected.delete(id);
-      void rerender(false);
+      redraw();
     }
   });
   root.addEventListener("click", (event) => {
     const target = event.target;
     if (target.closest("input, select, a")) return;
+    const cell = target.closest(".select-cell");
+    if (cell) { cell.querySelector("input").click(); return; }
     const stateChip = target.closest("[data-roster-state]");
     if (stateChip) {
       const state = stateChip.dataset.rosterState;
@@ -126,13 +132,13 @@ export function bindRoster(root, roster, rerender) {
       roster.page = 0;
       return void rerender(true);
     }
-    if (control && control.dataset.roster === "unselect") { roster.selected.clear(); return void rerender(false); }
+    if (control && control.dataset.roster === "unselect") { roster.selected.clear(); return redraw(); }
     const pageButton = target.closest("[data-page]");
     if (pageButton && pageButton.dataset.page.startsWith("roster:")) {
       roster.page = Math.max(0, roster.page + (pageButton.dataset.page.endsWith("next") ? 1 : -1));
       return void rerender(true);
     }
     const row = target.closest("[data-pilot]");
-    if (row && !target.closest("button")) openPilot(Number(row.dataset.pilot), () => rerender(true));
+    if (row && !target.closest("button, .select-cell")) openPilot(Number(row.dataset.pilot), () => rerender(true));
   });
 }

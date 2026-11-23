@@ -2,13 +2,12 @@
 // working.
 
 import { getJSON } from "./api.js";
-import { $, esc, num, rel, duration, stateBar } from "./ui.js";
+import { $, esc, num, rel, duration, stateBar, coalesce, replaceKeepingFocus } from "./ui.js";
+import { openPilot } from "./drawer.js";
 import { createRoster, loadRoster, rosterHtml, bindRoster } from "./roster.js";
 
 const roster = createRoster();
 let activity = null;
-let mounted = false;
-let busy = false;
 let ctxRef = null;
 
 function headerHtml(summary) {
@@ -43,7 +42,7 @@ function breakdownHtml() {
   const activities = activity.activities || [];
   const reasons = activity.reasons || [];
   const cooldowns = activity.cooldownReasons || [];
-  return `<div class="grid-2">
+  return `<div class="grid-2 top">
     <div class="panel"><div class="panel-head"><div><h2>Working on</h2><p>Pilots working, travelling or holding, by job</p></div></div>
       <div class="panel-body breakdown">${activities.map((a) => `<button type="button" data-activity="${esc(a.id)}" class="${roster.activity === a.id ? "on" : ""}"><span>${esc(a.label)}</span><b>${num(a.count)}</b></button>`).join("") || `<div class="empty">No pilot is working right now.</div>`}</div></div>
     <div class="panel"><div class="panel-head"><div><h2>Why not working</h2><p>Everyone else, by reason</p></div></div>
@@ -66,40 +65,37 @@ function directorHtml(summary) {
     ${failures.length ? `<div class="panel"><div class="panel-head"><h2>Needs attention</h2></div><div class="panel-body">${failures.map((f) => `<div><a href="#" data-open-pilot="${f.characterID}"><u>${esc(f.characterName)}</u></a>: ${esc(f.message)}</div>`).join("")}</div></div>` : ""}`;
 }
 
-async function draw(reloadRoster) {
-  if (busy) return;
-  busy = true;
-  try {
-    const summary = await ctxRef.loadSummary(false);
-    const [nextActivity] = await Promise.all([getJSON("/api/activity"), reloadRoster ? loadRoster(roster) : null]);
-    activity = nextActivity;
-    if (!mounted || !$("act-roster")) return;
-    $("act-head").innerHTML = headerHtml(summary) + noticesHtml(summary);
-    $("act-bar").innerHTML = `<div class="panel-head"><div><h2>State of every pilot</h2><p>Click a state to filter the list</p></div></div><div class="panel-body">${stateBar(activity.states || [], { selected: [...roster.states] })}</div>`;
-    $("act-breakdown").innerHTML = breakdownHtml();
-    $("act-director").innerHTML = directorHtml(summary);
-    const labels = {
-      activity: (activity.activities || []).find((a) => a.id === roster.activity)?.label,
-      reason: (activity.reasons || []).find((r) => r.id === roster.reason)?.label,
-    };
-    $("act-roster").innerHTML = rosterHtml(roster, {
-      corporations: summary.corporations || [],
-      specialties: Object.keys(summary.roster?.bySpecialty || {}).sort(),
-      labels,
-    });
-  } finally {
-    busy = false;
-  }
+// One draw at a time; a filter click during a refresh runs right after it.
+const draw = coalesce(async (reloadRoster) => {
+  const summary = await ctxRef.loadSummary(false);
+  const [nextActivity] = await Promise.all([getJSON("/api/activity"), reloadRoster ? loadRoster(roster) : null]);
+  activity = nextActivity;
+  if (!$("act-roster")) return;
+  $("act-head").innerHTML = headerHtml(summary) + noticesHtml(summary);
+  $("act-bar").innerHTML = `<div class="panel-head"><div><h2>State of every pilot</h2><p>Click a state to filter the list below</p></div></div><div class="panel-body">${stateBar(activity.states || [], { selected: [...roster.states] })}</div>`;
+  $("act-breakdown").innerHTML = breakdownHtml();
+  $("act-director").innerHTML = directorHtml(summary);
+  const labels = {
+    activity: (activity.activities || []).find((a) => a.id === roster.activity)?.label,
+    reason: (activity.reasons || []).find((r) => r.id === roster.reason)?.label,
+  };
+  replaceKeepingFocus($("act-roster"), rosterHtml(roster, {
+    corporations: summary.corporations || [],
+    specialties: Object.keys(summary.roster?.bySpecialty || {}).sort(),
+    labels,
+  }));
+});
+
+function showRoster() {
+  const element = $("act-roster");
+  if (element) element.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 export async function render(ctx) {
   ctxRef = ctx;
   if (ctx.fresh || !$("act-roster")) {
-    mounted = false;
     $("view").innerHTML = `<div id="act-head"><div class="empty">Loading activity…</div></div><div id="act-bar" class="panel"></div><div id="act-breakdown"></div><div id="act-director"></div><div id="act-roster" class="panel"></div>`;
-    mounted = true;
-    const rerender = (reload) => draw(reload);
-    bindRoster($("act-roster"), roster, rerender);
+    bindRoster($("act-roster"), roster, (reload) => draw(reload));
     $("act-bar").addEventListener("click", (event) => {
       const button = event.target.closest("[data-state]");
       if (!button) return;
@@ -107,7 +103,7 @@ export async function render(ctx) {
       if (roster.states.size === 1 && roster.states.has(state)) roster.states.clear();
       else { roster.states.clear(); roster.states.add(state); }
       roster.page = 0;
-      void draw(true).then(() => $("act-roster").scrollIntoView({ behavior: "smooth", block: "start" }));
+      void draw(true).then(showRoster);
     });
     $("act-breakdown").addEventListener("click", (event) => {
       const a = event.target.closest("[data-activity]");
@@ -117,14 +113,13 @@ export async function render(ctx) {
       if (a) { roster.reason = ""; roster.activity = roster.activity === a.dataset.activity ? "" : a.dataset.activity; }
       if (r) { roster.activity = ""; roster.reason = roster.reason === r.dataset.reason ? "" : r.dataset.reason; }
       roster.page = 0;
-      void draw(true).then(() => $("act-roster").scrollIntoView({ behavior: "smooth", block: "start" }));
+      void draw(true).then(showRoster);
     });
-    $("act-director").addEventListener("click", async (event) => {
+    $("act-director").addEventListener("click", (event) => {
       const link = event.target.closest("[data-open-pilot]");
       if (!link) return;
       event.preventDefault();
-      const { openPilot } = await import("./drawer.js");
-      openPilot(Number(link.dataset.openPilot));
+      openPilot(Number(link.dataset.openPilot), () => draw(true));
     });
   }
   await draw(true);

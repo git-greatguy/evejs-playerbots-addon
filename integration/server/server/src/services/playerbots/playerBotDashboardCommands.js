@@ -49,7 +49,11 @@ function createDashboardCommands(deps = {}) {
       }
       case "resume": {
         const result = tasks().resumeBot(bot);
-        return result.success ? { success: true, message: `${name} resumed.` } : result;
+        if (!result.success) return result;
+        // A resumed pilot leaves any corporation recall, so a restart does not
+        // pull it back to the HQ.
+        try { corpCommands().releasePilots(bot.corporationID, [bot.characterID]); } catch { /* recall bookkeeping is optional */ }
+        return { success: true, message: `${name} resumed.` };
       }
       case "stop":
         return operations().stopOperation(name);
@@ -68,8 +72,11 @@ function createDashboardCommands(deps = {}) {
         return operations().startCombat(name, COMBAT_MODES.has(mode) ? mode : String(bot.specialty || "security"));
       }
       case "upgrade": {
-        const role = String(args.role || "mining").toLowerCase();
-        return operations().startShipUpgrade(name, UPGRADE_ROLES.has(role) ? role : "mining", { force: args.force === true });
+        // No role given: combat specialties climb their own ladder, the rest mine.
+        const requested = String(args.role || "").toLowerCase();
+        const specialty = String(bot.specialty || "").toLowerCase();
+        const role = UPGRADE_ROLES.has(requested) ? requested : UPGRADE_ROLES.has(specialty) ? specialty : "mining";
+        return operations().startShipUpgrade(name, role, { force: args.force === true });
       }
       default:
         return { success: false, message: `Unknown pilot action: ${action}.` };
@@ -106,6 +113,19 @@ function createDashboardCommands(deps = {}) {
       const success = result.success === true;
       const message = String(result.message || (success ? "Done." : "Refused.")).slice(0, 300);
       results.push({ characterID, characterName: bot.characterName, success, message });
+      // A paused pilot's operation would wait forever: an operator's order to
+      // start work also resumes the pilot and lifts any corporation recall.
+      if (success && STARTS.has(name) && (bot.status === "paused" || bot.autonomyPaused === true)) {
+        try {
+          const resumed = tasks().resumeBot(bot);
+          if (resumed && resumed.success) {
+            try { corpCommands().releasePilots(bot.corporationID, [bot.characterID]); } catch { /* optional */ }
+            results[results.length - 1].message += " The pilot was paused and has been resumed.";
+          }
+        } catch (error) {
+          results[results.length - 1].message += ` The pilot is paused and could not be resumed (${error.message}); resume it so the job can run.`;
+        }
+      }
       if (success && STARTS.has(name)) {
         try {
           Promise.resolve(autonomy().ensureIndustryCycleStep(characterID)).catch((error) => {

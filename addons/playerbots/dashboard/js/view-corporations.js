@@ -2,15 +2,18 @@
 // with its HQ, orders, priorities, roster and command log.
 
 import { getJSON, postJSON, corpCommand, botCommand } from "./api.js";
-import { $, esc, num, stateBar, stateTag, when, toast, confirmDialog, emptyRow, STATE_ORDER, STATE_LABELS } from "./ui.js";
+import { $, esc, num, stateBar, stateTag, when, toast, confirmDialog, emptyRow, coalesce, replaceKeepingFocus, STATE_ORDER, STATE_LABELS } from "./ui.js";
 import { createRoster, loadRoster, rosterHtml, bindRoster } from "./roster.js";
 
 let ctxRef = null;
 let listSort = "size";
 let detail = null;
 let roster = null;
-let busy = false;
 let priorityDraft = null;
+let priorityDirty = false;
+let hqDraft = "";
+let workMode = "auto";
+let workTrips = 1;
 
 function statesFor(counts = {}) {
   return STATE_ORDER.map((id) => ({ id, label: STATE_LABELS[id], count: Number(counts[id]) || 0 }));
@@ -22,7 +25,7 @@ async function renderList(fresh) {
   const summary = await ctxRef.loadSummary(false);
   if (fresh) ctxRef.setCrumbs([{ label: "Corporations" }]);
   const corps = [...(summary.corporations || [])].filter((c) => c.botCount > 0);
-  const idle = (c) => { const s = c.stateCounts || {}; const total = Object.values(s).reduce((a, b) => a + b, 0) || 1; return ((s.idle || 0) + (s.paused || 0) + (s.cooling || 0)) / total; };
+  const idle = (c) => { const s = c.stateCounts || {}; const total = Object.values(s).reduce((a, b) => a + b, 0) || 1; return ((s.idle || 0) + (s.paused || 0) + (s.standby || 0) + (s.cooling || 0)) / total; };
   corps.sort(listSort === "name" ? (a, b) => a.corporationName.localeCompare(b.corporationName)
     : listSort === "idle" ? (a, b) => idle(b) - idle(a) || b.botCount - a.botCount
       : (a, b) => b.botCount - a.botCount || a.corporationName.localeCompare(b.corporationName));
@@ -37,7 +40,7 @@ async function renderList(fresh) {
       <td>${stateBar(statesFor(c.stateCounts), { small: true })}<span class="sub">${STATE_ORDER.filter((s) => (c.stateCounts || {})[s]).map((s) => `${STATE_LABELS[s]} ${num(c.stateCounts[s])}`).join(" · ")}</span></td>
       <td>${c.topActivity ? `${esc(c.topActivity.label)} <span class="muted">${num(c.topActivity.count)}</span>` : `<span class="muted">—</span>`}</td>
       <td><div class="chips">${(c.priorities || []).map((p) => `<span class="chip">${esc(p.label)}</span>`).join("") || `<span class="muted">Default order</span>`}</div></td>
-      <td>${c.held ? `<span class="state warn">Recalled to HQ</span>` : `<span class="muted">—</span>`}</td>
+      <td>${c.held ? `<span class="state warn">Recalled to HQ</span>` : c.recalledPilots ? `<span class="state warn">${num(c.recalledPilots)} recalled</span>` : `<span class="muted">—</span>`}</td>
     </tr>`).join("") || emptyRow(6, "No bot corporations yet.")}</tbody></table></div></div>`;
   $("corp-sort").addEventListener("change", (event) => { listSort = event.target.value; void renderList(false); });
   $("view").querySelector("tbody").addEventListener("click", (event) => {
@@ -48,29 +51,42 @@ async function renderList(fresh) {
 
 // ---------------------------------------------------------------- detail
 
+function orderLabel(o) {
+  if (o.kind === "recall") {
+    const who = o.scope === "selected" ? `${num(o.pilots || o.total)} selected pilot(s)` : "whole corporation";
+    if (o.status === "running") return [`travelling`, `Recalling (${o.scope === "selected" ? "selected pilots" : "whole corporation"})`];
+    if (o.status === "holding") return ["paused", `Holding at HQ: ${who}${o.released ? `, ${num(o.released)} released` : ""}`];
+    if (o.status === "expired") return ["holding", `Recall timed out: ${who}`];
+    return ["idle", `Recall ${o.status}: ${who}`];
+  }
+  if (o.status === "running") return ["working", `Work order: ${o.mode}`];
+  return ["idle", `Work order saved (${o.mode}), ${num(o.pending)} pilot(s) still to start`];
+}
+
 function ordersHtml() {
   const orders = detail.orders || [];
-  const c = detail.corporation;
-  return `<div class="panel-head"><div><h2>Orders</h2><p>Whole-corporation orders. Recall and work orders are saved and re-issued after a server restart.</p></div></div>
+  return `<div class="panel-head"><div><h2>Orders</h2><p>For the whole corporation. Select pilots below to order just them. Recall and work orders survive a server restart.</p></div></div>
   <div class="panel-body">
     <div class="actions">
       <button class="btn primary" type="button" data-corp-act="recall">Recall all to HQ</button>
-      <span class="action-form" style="margin:0"><button class="btn primary" type="button" data-corp-act="work">Send to work</button>
-        <select class="field" data-corp-arg="mode"><option value="auto">Auto (by specialty)</option><option value="mine">Mine</option><option value="pi">PI setup</option><option value="director">Hand back to director</option></select>
-        <label class="muted">trips <input class="field" style="width:56px" type="number" min="1" max="20" value="1" data-corp-arg="trips"></label></span>
       <button class="btn" type="button" data-corp-act="pause">Pause all</button>
       <button class="btn" type="button" data-corp-act="resume">Resume all</button>
       ${orders.length ? `<button class="btn ghost" type="button" data-corp-act="cancel">Cancel orders</button>` : ""}
     </div>
-    <div style="margin-top:12px">${orders.map((o) => `<div class="strip" style="padding:8px 0">
-      ${stateTag(o.status === "running" ? "travelling" : o.status === "holding" ? "paused" : "idle", o.kind === "recall" ? (o.status === "holding" ? "Holding at HQ" : o.status === "running" ? "Recalling" : `Recall ${o.status}`) : o.status === "running" ? `Work: ${o.mode}` : `Work ${o.status}`)}
-      ${o.total ? `<span><b>${num(o.done)}</b> of <b>${num(o.total)}</b> done</span>` : ""}
-      ${o.held ? `<span><b>${num(o.held)}</b> held</span>` : ""}
-      ${o.pending ? `<span><b>${num(o.pending)}</b> pending</span>` : ""}
+    <div class="subform">
+      <button class="btn primary" type="button" data-corp-act="work">Send to work</button>
+      <select class="field" data-corp-arg="mode" aria-label="Work mode">${[["auto", "Auto (by specialty)"], ["mine", "Mine"], ["pi", "PI setup"], ["director", "Hand back to director"]].map(([value, label]) => `<option value="${value}"${value === workMode ? " selected" : ""}>${label}</option>`).join("")}</select>
+      <label class="muted">trips <input class="field" style="width:60px" type="number" min="1" max="20" value="${esc(workTrips)}" data-corp-arg="trips"></label>
+    </div>
+    <div class="order-rows">${orders.map((o) => `<div class="strip order-row">
+      ${stateTag(...orderLabel(o))}
+      ${o.status === "running" && o.total ? `<span><b>${num(o.done)}</b> of <b>${num(o.total)}</b> done</span>` : ""}
+      ${o.status !== "running" && o.held ? `<span><b>${num(o.held)}</b> docked and held</span>` : ""}
+      ${o.status === "running" && o.pending ? `<span><b>${num(o.pending)}</b> pending</span>` : ""}
       ${o.failed ? `<span><b>${num(o.failed)}</b> failed${o.failures ? ` (${esc(o.failures)})` : ""}</span>` : ""}
       ${o.destination ? `<span>to ${esc(o.destination)}</span>` : ""}
-      ${o.startedAt ? `<span>started ${when(o.startedAt)}</span>` : ""}
-    </div>`).join("") || `<p class="muted" style="margin:0">No orders in force. The director decides what these pilots do${detail.autowork && detail.autowork.enabled === false ? " (autonomous work is off server-wide)" : ""}.</p>`}</div>
+      ${o.startedAt ? `<span>ordered ${when(o.startedAt)}</span>` : ""}
+    </div>`).join("") || `<p class="muted" style="margin:4px 0 0">No orders in force. The director decides what these pilots do${detail.autowork && detail.autowork.enabled === false ? " (autonomous work is off server-wide)" : ""}.</p>`}</div>
   </div>`;
 }
 
@@ -81,15 +97,16 @@ function hqHtml() {
   return `<div class="panel-head"><div><h2>Headquarters</h2><p>Where recalls go and work starts from</p></div></div>
   <div class="panel-body">
     ${hq.error ? `<div class="notice error">${esc(hq.error)}</div>` : `<p style="margin:0 0 4px"><strong>${esc(hq.name || `${hq.kind} ${hq.stationID}`)}</strong></p><p class="muted" style="margin:0">${esc(hq.kind === "structure" ? "Corporation structure" : "NPC station")} in ${esc(hq.systemName || `system ${hq.systemID}`)}${hq.saved ? " · set from the dashboard or chat" : " · the corporation's own HQ"}</p>`}
-    <div class="action-form" style="margin-top:12px">
+    <div class="subform">
       ${candidates.length ? `<select class="field" data-hq="pick"><option value="">Choose a corporation structure…</option>${candidates.map((s) => `<option value="${s.structureID}"${s.dockingOnline ? "" : " disabled"}>${esc(s.name)} · ${esc(s.systemName || s.solarSystemID)}${s.dockingOnline ? "" : " (no docking)"}</option>`).join("")}</select>` : ""}
-      <input class="field" type="number" min="1" placeholder="or station / structure ID" data-hq="id" style="width:200px">
+      <input class="field" type="number" min="1" placeholder="or station / structure ID" data-hq="id" style="width:200px" value="${esc(hqDraft)}">
       <button class="btn" type="button" data-hq="set">Set HQ</button>
       ${detail.savedHeadquartersID ? `<button class="btn ghost" type="button" data-hq="clear">Use the corporation's own HQ${c.homeStationName ? ` (${esc(c.homeStationName)})` : ""}</button>` : ""}
     </div>
-    ${detail.deposit ? `<div class="action-form" style="margin-top:14px"><span class="muted">Mining and PI output:</span> <strong>${detail.deposit.enabled ? `deposited to ${esc(detail.deposit.label)}` : "sold"}</strong>${detail.deposit.explicit ? "" : ' <span class="muted">(automatic)</span>'}
-      <select class="field" data-deposit="mode"><option value="">Change…</option><option value="on">Deposit at HQ</option><option value="off">Sell</option><option value="auto">Automatic</option><option value="deliveries">To Corporation Deliveries</option><option value="hangar">To a hangar division</option></select>
-      <input class="field" type="number" min="1" max="7" value="${detail.deposit.division || 1}" data-deposit="division" style="width:60px" title="Hangar division 1–7"></div>` : ""}
+    ${detail.deposit ? `<h3 class="section-label">Mining and PI output</h3>
+      <p style="margin:0 0 8px"><strong>${detail.deposit.enabled ? `Deposited to ${esc(detail.deposit.label)}` : "Sold on the market"}</strong> <span class="muted">${detail.deposit.explicit ? "(set by hand)" : "(automatic)"}</span></p>
+      <div class="subform"><select class="field" data-deposit="mode" aria-label="Change where output goes"><option value="">Change where it goes…</option><option value="on">Deposit at HQ</option><option value="off">Sell</option><option value="auto">Automatic</option><option value="deliveries">Deposit to Corporation Deliveries</option><option value="hangar">Deposit to hangar division…</option></select>
+      <label class="muted">division <input class="field" type="number" min="1" max="7" value="${detail.deposit.division || 1}" data-deposit="division" style="width:60px"></label></div>` : ""}
   </div>`;
 }
 
@@ -99,9 +116,9 @@ function prioritiesHtml(options) {
   const completed = new Map((detail.corporation.priorities || []).map((p) => [String(p.id), p.completedTasks]));
   const unused = options.filter((o) => !draft.includes(String(o.id)));
   const changed = JSON.stringify(draft) !== JSON.stringify((detail.corporation.priorityIDs || []).map(String));
-  return `<div class="panel-head"><div><h2>Priorities</h2><p>The director serves this corporation's pilots in this order; tasks completed so far in brackets</p></div>${changed ? `<button class="btn primary small" type="button" data-prio="save">Save priorities</button>` : ""}</div>
+  return `<div class="panel-head"><div><h2>Priorities</h2><p>The director serves this corporation's pilots in this order</p></div>${changed ? `<button class="btn primary small" type="button" data-prio="save">Save priorities</button>` : ""}</div>
   <div class="panel-body">
-    ${draft.map((id, index) => `<div class="action-form" style="margin:0 0 6px"><span class="muted">${index + 1}.</span> <strong>${esc(labels.get(id) || id)}</strong> <span class="muted">(${num(completed.get(id) || 0)})</span>
+    ${draft.map((id, index) => `<div class="prio-row"><span class="muted">${index + 1}.</span><strong>${esc(labels.get(id) || id)}</strong><span class="muted num">${num(completed.get(id) || 0)} done</span>
       <button class="btn small ghost" type="button" data-prio="up" data-index="${index}" ${index === 0 ? "disabled" : ""} aria-label="Move up">↑</button>
       <button class="btn small ghost" type="button" data-prio="down" data-index="${index}" ${index === draft.length - 1 ? "disabled" : ""} aria-label="Move down">↓</button>
       <button class="btn small ghost" type="button" data-prio="remove" data-index="${index}" aria-label="Remove">✕</button></div>`).join("") || `<p class="muted" style="margin:0 0 8px">None set: the director uses its normal order.</p>`}
@@ -124,35 +141,27 @@ function selectionActions() {
 function logHtml() {
   const log = detail.log || [];
   return `<div class="panel-head"><div><h2>Command log</h2><p>Orders from the dashboard and chat, newest first</p></div></div>
-  <div class="table-wrap"><table><thead><tr><th>When</th><th>From</th><th>Action</th><th>Result</th></tr></thead><tbody>
-  ${log.map((row) => `<tr><td class="nowrap">${when(row.at)}</td><td>${esc(row.source)}</td><td>${esc(row.action)}</td><td>${row.success === false ? '<span class="state bad">Refused</span> ' : ""}${esc(row.message)}</td></tr>`).join("") || emptyRow(4, "No orders yet.")}
-  </tbody></table></div>`;
+  <ul class="log">${log.map((row) => `<li><div class="log-meta">${when(row.at)} · ${esc(row.source)} · <strong>${esc(row.action)}</strong>${row.success === false ? ' <span class="state bad">Refused</span>' : ""}</div><div>${esc(row.message)}</div></li>`).join("") || `<li class="muted">No orders yet.</li>`}</ul>`;
 }
 
-async function drawDetail(reloadRoster = false) {
-  if (busy) return;
-  busy = true;
-  try {
-    const id = Number(ctxRef.param);
-    const [summary, data] = await Promise.all([ctxRef.loadSummary(false), getJSON(`/api/corporation?corporationID=${id}`), reloadRoster ? loadRoster(roster) : null]);
-    if (!$("corp-roster") || Number(ctxRef.param) !== id) return;
-    detail = data;
-    const c = data.corporation;
-    if (!priorityDraft) priorityDraft = (c.priorityIDs || []).map(String);
-    ctxRef.setCrumbs([{ label: "Corporations", href: "#corporations" }, { label: c.corporationName }]);
-    $("corp-head").innerHTML = `<div class="page-head"><div><h1>${esc(c.corporationName)} <span class="muted">[${esc(c.ticker)}]</span></h1>
-      <p>${esc(c.allianceName || "No alliance")} · ${num(c.botCount)} pilots · ${num(c.memberCount)} / ${c.memberLimit ? num(c.memberLimit) : "∞"} members · ${esc((c.specialties || []).join(", "))}</p></div>
-      ${c.held ? `<span class="pill warn">Recalled to HQ</span>` : ""}</div>`;
-    $("corp-status").innerHTML = `<div class="panel-head"><div><h2>What its pilots are doing</h2><p>Click a state to filter the pilot list</p></div>${c.topActivity ? `<span class="muted">Top job: <strong>${esc(c.topActivity.label)}</strong> (${num(c.topActivity.count)})</span>` : ""}</div><div class="panel-body">${stateBar(statesFor(c.stateCounts), { selected: [...roster.states] })}</div>`;
-    $("corp-orders").innerHTML = ordersHtml();
-    $("corp-hq").innerHTML = hqHtml();
-    $("corp-prio").innerHTML = prioritiesHtml(summary.corporationPriorityOptions || []);
-    $("corp-roster").innerHTML = rosterHtml(roster, { specialties: c.specialties || [], selectionActions: selectionActions() });
-    $("corp-log").innerHTML = logHtml();
-  } finally {
-    busy = false;
-  }
-}
+const drawDetail = coalesce(async (reloadRoster) => {
+  const id = Number(ctxRef.param);
+  const [summary, data] = await Promise.all([ctxRef.loadSummary(false), getJSON(`/api/corporation?corporationID=${id}`), reloadRoster ? loadRoster(roster) : null]);
+  if (!$("corp-roster") || Number(ctxRef.param) !== id) return;
+  detail = data;
+  const c = data.corporation;
+  if (!priorityDirty) priorityDraft = (c.priorityIDs || []).map(String);
+  ctxRef.setCrumbs([{ label: "Corporations", href: "#corporations" }, { label: c.corporationName }]);
+  $("corp-head").innerHTML = `<div class="page-head"><div><h1>${esc(c.corporationName)} <span class="muted">[${esc(c.ticker)}]</span></h1>
+    <p>${esc(c.allianceName || "No alliance")} · ${num(c.botCount)} pilots · ${num(c.memberCount)} / ${c.memberLimit ? num(c.memberLimit) : "∞"} members · ${esc((c.specialties || []).join(", "))}</p></div>
+    ${c.held ? `<span class="pill warn">Recalled to HQ</span>` : c.recalledPilots ? `<span class="pill warn">${num(c.recalledPilots)} pilot(s) recalled</span>` : ""}</div>`;
+  $("corp-status").innerHTML = `<div class="panel-head"><div><h2>What its pilots are doing</h2><p>Click a state to filter the pilot list</p></div>${c.topActivity ? `<span class="muted">Top job: <strong>${esc(c.topActivity.label)}</strong> (${num(c.topActivity.count)})</span>` : ""}</div><div class="panel-body">${stateBar(statesFor(c.stateCounts), { selected: [...roster.states] })}</div>`;
+  $("corp-orders").innerHTML = ordersHtml();
+  replaceKeepingFocus($("corp-hq"), hqHtml());
+  $("corp-prio").innerHTML = prioritiesHtml(summary.corporationPriorityOptions || []);
+  replaceKeepingFocus($("corp-roster"), rosterHtml(roster, { specialties: c.specialties || [], selectionActions: selectionActions() }));
+  $("corp-log").innerHTML = logHtml();
+});
 
 async function runCorp(action, args, confirmText) {
   if (confirmText && !(await confirmDialog("Confirm order", confirmText, "Send order"))) return;
@@ -172,13 +181,20 @@ async function runSelection(action) {
   const c = detail.corporation;
   if (action === "recall" || action === "work") {
     const args = { characterIDs: ids };
-    if (action === "work") args.mode = ($("corp-orders").querySelector('[data-corp-arg="mode"]') || {}).value || "auto";
-    return runCorp(action, args, `${action === "recall" ? "Recall" : "Send to work"} ${num(ids.length)} selected pilot(s) of ${c.corporationName}?`);
+    let modeLabel = "";
+    if (action === "work") {
+      const mode = $("corp-orders").querySelector('[data-corp-arg="mode"]');
+      args.mode = mode ? mode.value : "auto";
+      args.trips = Number(($("corp-orders").querySelector('[data-corp-arg="trips"]') || {}).value) || 1;
+      modeLabel = mode ? ` (${mode.selectedOptions[0].textContent})` : "";
+    }
+    return runCorp(action, args, action === "recall"
+      ? `Recall ${num(ids.length)} selected pilot(s) of ${c.corporationName} to the HQ? They stop their work, dock there and stay paused until sent to work or resumed.`
+      : `Send ${num(ids.length)} selected pilot(s) of ${c.corporationName} to work${modeLabel}? The mode and trips are taken from the Orders panel.`);
   }
   const args = {};
-  if (action === "combat") args.mode = "";
-  if (action === "upgrade") args.role = "mining";
-  if (ids.length > 5 && !(await confirmDialog("Confirm order", `${action[0].toUpperCase()}${action.slice(1)} for ${num(ids.length)} pilots?`, "Send order"))) return;
+  const labels = { pause: "Pause", resume: "Resume", stop: "Stop the current operation of", mine: "Start mining for", colony: "Start PI colony setup for", combat: "Start a combat patrol for", upgrade: "Start a ship upgrade for" };
+  if (ids.length > 5 && !(await confirmDialog("Confirm order", `${labels[action] || action} ${num(ids.length)} pilots?`, "Send order"))) return;
   const result = await botCommand(ids, action, args);
   toast(result.message, result.ok ? "good" : "bad");
   ctxRef.store.summaryAt = 0;
@@ -188,8 +204,12 @@ async function runSelection(action) {
 async function renderDetail(fresh) {
   if (fresh || !$("corp-roster")) {
     const id = Number(ctxRef.param);
-    roster = createRoster({ corporationID: id, selectable: true });
-    priorityDraft = null;
+    if (!roster || Number(roster.corporationID) !== id) {
+      roster = createRoster({ corporationID: id, selectable: true });
+      priorityDraft = null;
+      priorityDirty = false;
+      hqDraft = "";
+    }
     $("view").innerHTML = `<div id="corp-head"><div class="empty">Loading corporation…</div></div>
       <div class="grid-2"><div id="corp-orders" class="panel"></div><div id="corp-hq" class="panel"></div></div>
       <div id="corp-status" class="panel"></div>
@@ -221,8 +241,8 @@ async function renderDetail(fresh) {
         const mode = arg("mode").value;
         return void runCorp("work", { mode, trips: Number(arg("trips").value) || 1 }, `Send all ${num(c.botCount)} ${c.corporationName} pilots to work (${arg("mode").selectedOptions[0].textContent})? This releases any recall hold.`);
       }
-      if (action === "pause") return void runCorp("pause", {}, `Pause all ${num(c.botCount)} ${c.corporationName} pilots? Running operations keep going; the director stops giving them new work.`);
-      if (action === "resume") return void runCorp("resume", {}, null);
+      if (action === "pause") return void runCorp("pause", {}, `Pause all ${num(c.botCount)} ${c.corporationName} pilots? Their operations wait where they are and the director gives them no new work until you resume them.`);
+      if (action === "resume") return void runCorp("resume", {}, `Resume all ${num(c.botCount)} ${c.corporationName} pilots? This also lifts any recall hold, so the director can give them work again.`);
       if (action === "cancel") return void runCorp("cancel", {}, "Cancel this corporation's recall or work order? Pilots keep their current pause state.");
     });
     $("corp-hq").addEventListener("click", (event) => {
@@ -233,7 +253,15 @@ async function renderDetail(fresh) {
       const typed = $("corp-hq").querySelector('[data-hq="id"]');
       const target = Number(typed.value) || Number(picked && picked.value) || 0;
       if (!target) return toast("Choose a structure or type a station or structure ID.", "bad");
+      hqDraft = "";
       void runCorp("hq-set", { target }, null);
+    });
+    $("corp-orders").addEventListener("change", (event) => {
+      if (event.target.dataset.corpArg === "mode") workMode = event.target.value;
+      if (event.target.dataset.corpArg === "trips") workTrips = Math.max(1, Math.min(20, Number(event.target.value) || 1));
+    });
+    $("corp-hq").addEventListener("input", (event) => {
+      if (event.target.dataset.hq === "id") hqDraft = event.target.value;
     });
     $("corp-hq").addEventListener("change", (event) => {
       if (event.target.dataset.deposit !== "mode" || !event.target.value) return;
@@ -248,12 +276,13 @@ async function renderDetail(fresh) {
       if (kind === "up" && index > 0) [priorityDraft[index - 1], priorityDraft[index]] = [priorityDraft[index], priorityDraft[index - 1]];
       if (kind === "down" && index < priorityDraft.length - 1) [priorityDraft[index + 1], priorityDraft[index]] = [priorityDraft[index], priorityDraft[index + 1]];
       if (kind === "remove") priorityDraft.splice(index, 1);
+      if (["up", "down", "remove"].includes(kind)) priorityDirty = true;
       if (kind === "save") {
         try {
           const data = await postJSON("/api/corporation-priorities", { corporationID: detail.corporation.corporationID, priorityIDs: priorityDraft });
           if (data.success !== true) throw new Error(data.message || "Not saved.");
           toast("Priorities saved.", "good");
-          priorityDraft = null;
+          priorityDirty = false;
           ctxRef.store.summaryAt = 0;
           return void drawDetail(false);
         } catch (error) { return toast(error.message, "bad"); }
@@ -264,6 +293,7 @@ async function renderDetail(fresh) {
     $("corp-prio").addEventListener("change", async (event) => {
       if (event.target.dataset.prio !== "add" || !event.target.value) return;
       priorityDraft.push(event.target.value);
+      priorityDirty = true;
       const summary = await ctxRef.loadSummary(false);
       $("corp-prio").innerHTML = prioritiesHtml(summary.corporationPriorityOptions || []);
     });

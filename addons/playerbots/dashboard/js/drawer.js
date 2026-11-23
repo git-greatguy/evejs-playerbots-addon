@@ -4,11 +4,11 @@
 import { getJSON, botCommand, corpCommand } from "./api.js";
 import { $, esc, num, isk, portrait, stateTag, when, toast } from "./ui.js";
 
-let current = { characterID: 0, onChange: null };
+let current = { characterID: 0, onChange: null, pilot: null };
 
 export function closeDrawer() {
   $("drawer-root").innerHTML = "";
-  current = { characterID: 0, onChange: null };
+  current = { characterID: 0, onChange: null, pilot: null };
   document.removeEventListener("keydown", onKey);
 }
 
@@ -17,7 +17,7 @@ function onKey(event) {
 }
 
 export async function openPilot(characterID, onChange = null) {
-  current = { characterID, onChange };
+  current = { characterID, onChange, pilot: null };
   document.addEventListener("keydown", onKey);
   $("drawer-root").innerHTML = `<div class="drawer-backdrop" data-close></div><aside class="drawer" role="dialog" aria-label="Pilot details"><div class="drawer-head"><strong>Loading pilot…</strong><button class="close" type="button" data-close aria-label="Close">×</button></div></aside>`;
   bind();
@@ -36,6 +36,7 @@ async function reload() {
     return;
   }
   if (current.characterID !== id) return;
+  current.pilot = pilot;
   $("drawer-root").querySelector(".drawer").innerHTML = drawerHtml(pilot);
 }
 
@@ -77,8 +78,8 @@ function drawerHtml(p) {
     <div class="action-form"><button class="btn" type="button" data-act="mine">Mine</button><label class="muted">trips <input class="field" style="width:60px" type="number" min="1" max="20" value="1" data-arg="trips"></label><label class="muted">station ID <input class="field" style="width:120px" type="number" min="1" placeholder="nearest" data-arg="station"></label></div>
     <div class="action-form"><button class="btn" type="button" data-act="colony">Set up PI colony</button></div>
     <div class="action-form"><button class="btn" type="button" data-act="combat">Combat patrol</button><select class="field" data-arg="mode"><option value="">By specialty</option><option value="security">Security</option><option value="war">War</option><option value="piracy">Piracy</option><option value="nullsec-conflict">Null-sec conflict</option></select></div>
-    <div class="action-form"><button class="btn" type="button" data-act="upgrade">Upgrade ship</button><select class="field" data-arg="role"><option value="mining">Mining</option><option value="logistics">Logistics</option><option value="security">Security</option><option value="piracy">Piracy</option><option value="sovereignty">Sovereignty</option></select><label class="muted check"><input type="checkbox" data-arg="force"> force</label></div>
-    <p class="muted" style="font-size:12px;margin:10px 0 0">Starting work does not unpause a paused pilot; resume it too if the director should take over afterwards.</p>
+    <div class="action-form"><button class="btn" type="button" data-act="upgrade">Upgrade ship</button><select class="field" data-arg="role"><option value="">By specialty</option><option value="mining">Mining</option><option value="logistics">Logistics</option><option value="security">Security</option><option value="piracy">Piracy</option><option value="sovereignty">Sovereignty</option></select><label class="muted check"><input type="checkbox" data-arg="force"> force</label></div>
+    <p class="muted" style="font-size:12px;margin:10px 0 0">${p.paused ? "This pilot is paused. Starting a job resumes it, and the director takes over again once the job ends." : "When a job you start here ends, the director takes over again."}</p>
   </section>`;
 }
 
@@ -96,13 +97,13 @@ function bind() {
     try {
       let result;
       if (action === "recall") {
-        const pilot = await getJSON(`/api/bot?characterID=${id}`);
+        const pilot = current.pilot || await getJSON(`/api/bot?characterID=${id}`);
         result = await corpCommand(pilot.corporationID, "recall", { characterIDs: [id] }).then((data) => ({ ok: 1, message: data.message })).catch((error) => ({ ok: 0, message: error.message }));
       } else {
         const args = {};
         if (action === "mine") { args.trips = Number(arg("trips").value) || 1; if (Number(arg("station").value)) args.station = Number(arg("station").value); }
         if (action === "combat" && arg("mode").value) args.mode = arg("mode").value;
-        if (action === "upgrade") { args.role = arg("role").value; args.force = arg("force").checked; }
+        if (action === "upgrade") { if (arg("role").value) args.role = arg("role").value; args.force = arg("force").checked; }
         result = await botCommand([id], action, args);
       }
       toast(result.message, result.ok ? "good" : "bad");

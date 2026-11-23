@@ -698,10 +698,20 @@ function createPlayerBotDashboardRuntime(options = {}) {
     onlineBotIDSet = onlineBotIDs;
     inSpaceBotIDSet = inSpaceBotIDs;
     autoworkCache = autoworkStatus(roster.length);
+    // Standing corporation recalls: whole corporations (minus pilots released
+    // by hand) or listed pilots.
     const corpCommands = corpCommandsModule();
-    const heldCorporations = corpCommands && typeof corpCommands.listStandingRecallCorporationIDs === "function"
-      ? new Set(corpCommands.listStandingRecallCorporationIDs())
-      : new Set();
+    let standingRecalls = [];
+    try {
+      standingRecalls = corpCommands && typeof corpCommands.listStandingRecalls === "function"
+        ? corpCommands.listStandingRecalls()
+        : [];
+    } catch { standingRecalls = []; }
+    const heldCorporations = new Map(standingRecalls.filter((row) => row.whole).map((row) => [row.corporationID, new Set(row.released)]));
+    const heldPilots = new Set(standingRecalls.filter((row) => !row.whole).flatMap((row) => row.characterIDs));
+    const recallRunning = new Set(standingRecalls.filter((row) => row.running).map((row) => row.corporationID));
+    const isHeld = (corporationID, characterID) => heldPilots.has(characterID) ||
+      (heldCorporations.has(corporationID) && !heldCorporations.get(corporationID).has(characterID));
     activityByCharacter = new Map();
     const stateCounts = Object.fromEntries(activityState.STATES.map((entry) => [entry.id, 0]));
     const activityCounts = {};
@@ -711,7 +721,7 @@ function createPlayerBotDashboardRuntime(options = {}) {
     for (const bot of roster) {
       const characterID = positiveInteger(bot && bot.characterID);
       if (!characterID) continue;
-      const corporationID = positiveInteger(bot.corporationID || bot.specialtyCorporationID);
+      const corporationID = positiveInteger(bot.corporationID);
       let assignment = {};
       try {
         assignment = typeof directorAssignments.getBotDirectorAssignment === "function"
@@ -726,7 +736,8 @@ function createPlayerBotDashboardRuntime(options = {}) {
         queuedWork: queuedColonyByCharacter.get(characterID) || null,
         tasks: Array.isArray(tasksForBot) ? tasksForBot : [],
         assignment,
-        corpHold: heldCorporations.has(corporationID),
+        corpHold: isHeld(corporationID, characterID),
+        corpRecallRunning: recallRunning.has(corporationID),
         autowork: autoworkCache,
         now,
       });
@@ -770,7 +781,7 @@ function createPlayerBotDashboardRuntime(options = {}) {
         .sort((left, right) => right.count - left.count)
         .slice(0, 8)
         .map((group) => ({ label: group.example, count: group.count })),
-      heldCorporationIDs: [...heldCorporations],
+      heldCorporationIDs: [...heldCorporations.keys()],
     };
     for (const corporation of corporationsList) {
       const corp = corporationActivity.get(corporation.corporationID) || { states: {}, activities: {} };
@@ -779,6 +790,7 @@ function createPlayerBotDashboardRuntime(options = {}) {
       corporation.topActivity = top ? { id: top[0], label: activityState.kindLabel(top[0]), count: top[1] } : null;
       corporation.allianceName = allianceName(corporation.allianceID);
       corporation.held = heldCorporations.has(corporation.corporationID);
+      corporation.recalledPilots = (standingRecalls.find((row) => !row.whole && row.corporationID === corporation.corporationID) || { characterIDs: [] }).characterIDs.length;
     }
     const systemsList = [...bySystem.entries()]
       .map(([systemID, botCount]) => {
@@ -919,6 +931,8 @@ function createPlayerBotDashboardRuntime(options = {}) {
   }
 
   const STATE_ORDER = new Map(activityState.STATES.map((entry, index) => [entry.id, index]));
+  let stateRank = new Map();
+  let stateRankSnapshot = null;
 
   function botLocation(bot, character, presence) {
     const systemID = positiveInteger(presence.solarSystemID || character.solarSystemID);
@@ -1010,12 +1024,21 @@ function createPlayerBotDashboardRuntime(options = {}) {
       return true;
     });
     if (String(query.sort || "") === "state") {
-      filtered.sort((left, right) => {
-        const a = activityByCharacter.get(Number(left.characterID)) || {};
-        const b = activityByCharacter.get(Number(right.characterID)) || {};
-        return (STATE_ORDER.get(a.state) ?? 99) - (STATE_ORDER.get(b.state) ?? 99) ||
-          String(left.characterName || "").localeCompare(String(right.characterName || ""));
-      });
+      // Rank once per snapshot; sorting 15,000 names with localeCompare on
+      // every page request would stall the event loop.
+      if (stateRankSnapshot !== snapshot) {
+        const ranked = [...roster].sort((left, right) => {
+          const a = activityByCharacter.get(Number(left.characterID)) || {};
+          const b = activityByCharacter.get(Number(right.characterID)) || {};
+          const nameA = String(left.characterName || "");
+          const nameB = String(right.characterName || "");
+          return (STATE_ORDER.get(a.state) ?? 99) - (STATE_ORDER.get(b.state) ?? 99) ||
+            (nameA < nameB ? -1 : nameA > nameB ? 1 : 0);
+        });
+        stateRank = new Map(ranked.map((bot, index) => [Number(bot.characterID), index]));
+        stateRankSnapshot = snapshot;
+      }
+      filtered.sort((left, right) => (stateRank.get(Number(left.characterID)) ?? 0) - (stateRank.get(Number(right.characterID)) ?? 0));
     }
     const limit = boundedInteger(query.limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE) || DEFAULT_PAGE_SIZE;
     const offset = boundedInteger(query.offset, 0, Math.max(0, filtered.length));
@@ -1056,7 +1079,7 @@ function createPlayerBotDashboardRuntime(options = {}) {
     }
     let recent = [];
     try {
-      const page = getOperationHistoryPage({ search: String(id), limit: 6, offset: 0 });
+      const page = getOperationHistoryPage({ search: String(id), limit: 10, offset: 0 });
       recent = (page.rows || []).filter((entry) => Number(entry.characterID) === id).slice(0, 5);
     } catch { recent = []; }
     let assignment = {};
@@ -1186,7 +1209,7 @@ function createPlayerBotDashboardRuntime(options = {}) {
         const hq = corpCommands.getHeadquarters(id);
         headquarters = hq && !hq.error
           ? { ...hq, name: hq.name || (hq.kind === "station" ? stationName(hq.stationID) : structureName(hq.stationID)), systemName: systemInfo(hq.systemID).name }
-          : { error: hq && hq.error || "No headquarters." };
+          : { error: String(hq && hq.error || "No headquarters.").replace(/ Run "\/bots corp hq[^"]*" or choose another with "[^"]*"\./, " Clear the saved HQ or choose another below.") };
       } catch (error) { headquarters = { error: error.message }; }
       try { savedHeadquartersID = typeof corpCommands.getSavedHeadquartersID === "function" ? corpCommands.getSavedHeadquartersID(id) : 0; } catch { savedHeadquartersID = 0; }
       try { orders = typeof corpCommands.describeOrders === "function" ? corpCommands.describeOrders(id) : []; } catch { orders = []; }

@@ -60,8 +60,8 @@ export function pilotCell(row) {
   return `<div class="pilot">${portrait(row.characterID)}<span><strong>${esc(row.characterName)}</strong><span class="sub">${corp}${esc(row.corporationName || "")}</span></span></div>`;
 }
 
-export const STATE_ORDER = ["working", "travelling", "holding", "queued", "cooling", "paused", "idle", "offline"];
-export const STATE_LABELS = { working: "Working", travelling: "Travelling", holding: "Holding", queued: "Queued", cooling: "Cooling down", paused: "Paused", idle: "Idle", offline: "Offline" };
+export const STATE_ORDER = ["working", "travelling", "holding", "queued", "cooling", "paused", "standby", "idle", "offline"];
+export const STATE_LABELS = { working: "Working", travelling: "Travelling", holding: "Holding", queued: "Queued", cooling: "Cooling down", paused: "Paused", standby: "Standing by", idle: "Idle", offline: "Offline" };
 
 export function stateTag(state, label) {
   return `<span class="state ${esc(state)}">${esc(label || STATE_LABELS[state] || state)}</span>`;
@@ -132,4 +132,52 @@ export function security(value) {
   const n = Number(value);
   const color = n >= 0.45 ? "#8ce7c2" : n > 0 ? "#f6d08f" : "#ffaab1";
   return `<span class="mono" style="color:${color}">${n.toFixed(1)}</span>`;
+}
+
+// Runs fn one call at a time. A call made while one is running is not
+// dropped: it runs once more afterwards, with `true` if any caller asked
+// for a full reload.
+export function coalesce(fn) {
+  let running = null;
+  let again = false;
+  let againArg = false;
+  const run = async (arg = false) => {
+    if (running) {
+      again = true;
+      againArg = againArg || Boolean(arg);
+      return running;
+    }
+    running = (async () => {
+      try { await fn(arg); } finally { running = null; }
+      if (again) {
+        const next = againArg;
+        again = false;
+        againArg = false;
+        await run(next);
+      }
+    })();
+    return running;
+  };
+  return run;
+}
+
+// Replaces an element's HTML without losing the operator's place in a text
+// field inside it (search boxes re-render while being typed in).
+export function replaceKeepingFocus(element, html) {
+  if (!element) return;
+  const active = document.activeElement;
+  let key = "";
+  if (active && element.contains(active) && active.matches("input, select, textarea")) {
+    const attr = [...active.attributes].find((entry) => entry.name.startsWith("data-"));
+    key = attr ? `[${attr.name}="${CSS.escape(attr.value)}"]` : active.id ? `#${CSS.escape(active.id)}` : "";
+  }
+  const selection = key && typeof active.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null;
+  element.innerHTML = html;
+  if (!key) return;
+  const next = element.querySelector(key);
+  if (!next) return;
+  next.focus();
+  if (selection && typeof next.setSelectionRange === "function") {
+    try { next.setSelectionRange(selection[0], selection[1]); } catch { /* not a text field */ }
+  }
 }

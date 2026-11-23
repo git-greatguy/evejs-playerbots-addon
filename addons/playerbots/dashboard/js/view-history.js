@@ -1,11 +1,10 @@
 // History: the operation archive, newest first, with filters and details.
 
 import { getJSON } from "./api.js";
-import { $, esc, num, isk, when, emptyRow, pager, showDialog } from "./ui.js";
+import { $, esc, num, isk, when, emptyRow, pager, showDialog, coalesce, replaceKeepingFocus } from "./ui.js";
 import { openPilot } from "./drawer.js";
 
 const state = { page: 0, pageSize: 50, status: "", kind: "", search: "", data: null };
-let busy = false;
 
 function statusClass(status) {
   const s = String(status).toLowerCase();
@@ -16,10 +15,8 @@ function statusClass(status) {
   return "idle";
 }
 
-async function draw() {
-  if (busy) return;
-  busy = true;
-  try {
+const draw = coalesce(async () => {
+  {
     const query = new URLSearchParams({ offset: String(state.page * state.pageSize), limit: String(state.pageSize) });
     if (state.status) query.set("status", state.status);
     if (state.kind) query.set("kind", state.kind);
@@ -30,10 +27,10 @@ async function draw() {
     const statuses = Object.entries(data.counts || {}).sort();
     const kinds = Object.entries(data.kindCounts || {}).sort();
     const kindLabels = data.kindLabels || {};
-    $("hist-filters").innerHTML = `
+    replaceKeepingFocus($("hist-filters"), `
       <input class="field" type="search" data-h="search" placeholder="Pilot, operation ID or action" value="${esc(state.search)}" style="min-width:260px">
       <select class="field" data-h="status"><option value="">All statuses</option>${statuses.map(([value, count]) => `<option value="${esc(value)}"${value === state.status ? " selected" : ""}>${esc(value)} (${num(count)})</option>`).join("")}</select>
-      <select class="field" data-h="kind"><option value="">All operation types</option>${kinds.map(([value, count]) => `<option value="${esc(value)}"${value === state.kind ? " selected" : ""}>${esc(kindLabels[value] || value)} (${num(count)})</option>`).join("")}</select>`;
+      <select class="field" data-h="kind"><option value="">All operation types</option>${kinds.map(([value, count]) => `<option value="${esc(value)}"${value === state.kind ? " selected" : ""}>${esc(kindLabels[value] || value)} (${num(count)})</option>`).join("")}</select>`);
     const rows = data.rows || [];
     $("hist-table").innerHTML = `<div class="table-wrap"><table>
       <thead><tr><th>Updated</th><th>Pilot</th><th>Operation</th><th>Status</th><th>Where</th><th>Last step</th><th class="num">ISK</th><th></th></tr></thead>
@@ -51,10 +48,8 @@ async function draw() {
         <td><button class="btn small" type="button" data-op="${esc(op.operationID)}">Details</button></td></tr>`;
       }).join("") || emptyRow(8, "No operations match these filters.")}</tbody></table></div>
       ${pager(state.page, state.pageSize, Number(data.total) || 0, "hist")}`;
-  } finally {
-    busy = false;
   }
-}
+});
 
 async function showOperation(operationID) {
   try {

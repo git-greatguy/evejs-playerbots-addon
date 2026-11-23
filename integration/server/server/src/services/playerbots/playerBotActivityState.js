@@ -12,6 +12,7 @@ const STATES = Object.freeze([
   { id: "queued", label: "Queued" },
   { id: "cooling", label: "Cooling down" },
   { id: "paused", label: "Paused" },
+  { id: "standby", label: "Standing by" },
   { id: "idle", label: "Idle" },
   { id: "offline", label: "Offline" },
 ]);
@@ -114,6 +115,7 @@ const REASONS = Object.freeze({
   "seeding": "Autonomous work is off while the roster seeds",
   "operator-pause": "Paused by an operator",
   "corp-hold": "Held at HQ by a corporation order",
+  "corp-recall": "Waiting for its corporation recall to start",
   "pi-slot": "Waiting for a PI setup slot",
   "task": "Waiting on a queued task",
   "cooldown": "Cooling down after a failed assignment",
@@ -185,6 +187,28 @@ function classifyBotActivity(input = {}) {
   const assignment = input.assignment || {};
   const autowork = input.autowork || { enabled: true };
 
+  // A paused pilot's operation does not advance (advanceOperation waits), so
+  // it is paused, not working, unless a corporation recall is moving it.
+  if (work && paused && !input.corpHold) {
+    return {
+      state: "paused",
+      activity: String(work.kind || ""),
+      doing: `Paused during: ${describeWork(work.kind, work.stage)}`,
+      reason: REASONS["operator-pause"],
+      reasonCode: "operator-pause",
+      since: String(work.updatedAt || ""),
+    };
+  }
+  if (work && paused) {
+    return {
+      state: "travelling",
+      activity: "corp-recall",
+      doing: "Returning to corporation HQ",
+      reason: cleanText(work.lastAction || "Moved by a corporation recall"),
+      reasonCode: "",
+      since: String(work.updatedAt || ""),
+    };
+  }
   if (work) {
     const status = String(work.status || "").toLowerCase();
     const kind = String(work.kind || "other").toLowerCase();
@@ -202,6 +226,9 @@ function classifyBotActivity(input = {}) {
   if (paused) {
     const code = input.corpHold ? "corp-hold" : "operator-pause";
     return { state: "paused", activity: "", doing: input.corpHold ? "Held at corporation HQ" : "Paused", reason: REASONS[code], reasonCode: code, since: "" };
+  }
+  if (input.corpHold && input.corpRecallRunning) {
+    return { state: "queued", activity: "corp-recall", doing: "Waiting to be recalled to HQ", reason: REASONS["corp-recall"], reasonCode: "corp-recall", since: "" };
   }
   if (input.queuedWork) {
     return {
@@ -234,7 +261,7 @@ function classifyBotActivity(input = {}) {
     const reason = seeding.active
       ? `${REASONS.seeding} (${Number(seeding.rosterCount || 0).toLocaleString("en-US")} of ${Number(seeding.target || 0).toLocaleString("en-US")})`
       : REASONS["autowork-off"];
-    return { state: "paused", activity: "", doing: "Standing by", reason, reasonCode: code, since: "" };
+    return { state: "standby", activity: "", doing: "Standing by", reason, reasonCode: code, since: "" };
   }
   const cooldownUntil = Number(assignment.cooldownUntil) || 0;
   if (cooldownUntil > now) {
