@@ -374,21 +374,49 @@ function createDashboardServer(options = {}) {
       const offset = positiveInteger(url.searchParams.get("offset"), 0, 10_000_000);
       const limit = positiveInteger(url.searchParams.get("limit"), 50, 100) || 50;
       const query = new URLSearchParams({ offset: String(offset), limit: String(limit) });
-      for (const key of ["specialty", "corporationID", "search"]) {
+      for (const key of ["specialty", "corporationID", "search", "state", "activity", "reason", "sort"]) {
         const value = String(url.searchParams.get(key) || "").trim().slice(0, 80);
         if (value) query.set(key, value);
       }
       return proxyApi(response, "/v1/dashboard/bots", `?${query}`);
     }
+    if (url.pathname === "/api/activity") {
+      if (request.method !== "GET") {
+        send(response, 405, "text/plain; charset=utf-8", "Method not allowed.", { allow: "GET" });
+        return;
+      }
+      return proxyApi(response, "/v1/dashboard/activity");
+    }
+    if (url.pathname === "/api/bot" || url.pathname === "/api/corporation") {
+      if (request.method !== "GET") {
+        send(response, 405, "text/plain; charset=utf-8", "Method not allowed.", { allow: "GET" });
+        return;
+      }
+      const key = url.pathname === "/api/bot" ? "characterID" : "corporationID";
+      const id = positiveInteger(url.searchParams.get(key), 0, 9_000_000_000);
+      if (!id) {
+        send(response, 400, "application/json; charset=utf-8", JSON.stringify({ error: `A valid ${key} is required.` }));
+        return;
+      }
+      return proxyApi(response, `/v1/dashboard/${url.pathname.slice(5)}`, `?${new URLSearchParams({ [key]: String(id) })}`);
+    }
+    if (url.pathname === "/api/corp-command" || url.pathname === "/api/bot-command") {
+      if (request.method !== "POST") {
+        send(response, 405, "text/plain; charset=utf-8", "Method not allowed.", { allow: "POST" });
+        return;
+      }
+      if (!isSameOriginRequest(request)) {
+        send(response, 403, "application/json; charset=utf-8", JSON.stringify({ error: "Cross-origin dashboard commands are blocked." }));
+        return;
+      }
+      return proxyMutation(response, `/v1/dashboard/${url.pathname.slice(5)}`, "POST", await readJsonBody(request));
+    }
 
-    const assets = {
-      "/": ["index.html", "text/html; charset=utf-8"],
-      "/index.html": ["index.html", "text/html; charset=utf-8"],
-      "/app.js": ["app.js", "text/javascript; charset=utf-8"],
-      "/styles.css": ["styles.css", "text/css; charset=utf-8"],
-      "/favicon.svg": ["favicon.svg", "image/svg+xml"],
-    };
-    const asset = assets[url.pathname];
+    // Static files: index.html, styles, the favicon and the ES modules under
+    // js/. Names are restricted so no request can leave the dashboard folder.
+    const contentTypes = { html: "text/html; charset=utf-8", js: "text/javascript; charset=utf-8", css: "text/css; charset=utf-8", svg: "image/svg+xml" };
+    const assetMatch = url.pathname === "/" ? ["/index.html", "index.html", "html"] : url.pathname.match(/^\/((?:js\/)?[a-z0-9][a-z0-9-]*\.(html|js|css|svg))$/);
+    const asset = assetMatch ? [assetMatch[1], contentTypes[assetMatch[2]]] : null;
     if (!asset) {
       send(response, 404, "text/plain; charset=utf-8", "Not found.");
       return;

@@ -34,11 +34,12 @@
  *   safe belts, otherwise from the nearest safe belt system) and/or PI colony
  *   setup. Everything else is left to the normal director.
  *
- * Orders live in memory. After a server restart, relocations to NPC stations
- * continue (durable operations) but holds and structure trips are not
- * re-applied: run /bots corp recall again (it is idempotent) or /bots corp work.
- * /bots corp status counts pilots that are held away from the HQ. Saved HQs
- * persist in the playerBots game-store table.
+ * Standing orders persist in the playerBots game-store table: a recall stays
+ * in force (pilots held at the HQ) until a work order replaces it, and a work
+ * order keeps its unstarted pilots. restoreStandingOrders() re-issues both
+ * after a server restart. The dashboard uses runCorporationCommand(), which
+ * takes structured arguments and acts as the server operator. Saved HQs
+ * persist in the same table.
  */
 
 const TICK_MS = 2000;
@@ -58,22 +59,43 @@ function load(relativePath) {
 
 const HQ_TABLE = "playerBots";
 const HQ_PATH = "/_corpCommandHeadquarters";
+const STANDING_ORDERS_PATH = "/_corpCommandStandingOrders";
+const COMMAND_LOG_PATH = "/_corpCommandLog";
+const COMMAND_LOG_LIMIT = 40;
 
-function defaultHqStore() {
-  const repo = load("gameStore/tableRepository").createTableRepository("service:playerbots", { strict: true });
+function tableStore(pathName, errorCode) {
+  let repo = null;
+  const getRepo = () => {
+    if (!repo) repo = load("gameStore/tableRepository").createTableRepository("service:playerbots", { strict: true });
+    return repo;
+  };
   return {
     read() {
-      repo.ensureTable(HQ_TABLE);
-      const result = repo.read(HQ_TABLE, HQ_PATH);
+      const store = getRepo();
+      store.ensureTable(HQ_TABLE);
+      const result = store.read(HQ_TABLE, pathName);
       return result.success && result.data && typeof result.data === "object" ? { ...result.data } : {};
     },
     write(value) {
-      repo.ensureTable(HQ_TABLE);
-      const result = repo.write(HQ_TABLE, HQ_PATH, value);
-      if (!result || !result.success) throw new Error(result && result.errorMsg || "PLAYERBOT_CORP_HQ_WRITE_FAILED");
-      if (typeof repo.flushTableSync === "function") repo.flushTableSync(HQ_TABLE);
+      const store = getRepo();
+      store.ensureTable(HQ_TABLE);
+      const result = store.write(HQ_TABLE, pathName, value);
+      if (!result || !result.success) throw new Error(result && result.errorMsg || errorCode);
+      if (typeof store.flushTableSync === "function") store.flushTableSync(HQ_TABLE);
     },
   };
+}
+
+function defaultHqStore() {
+  return tableStore(HQ_PATH, "PLAYERBOT_CORP_HQ_WRITE_FAILED");
+}
+
+function defaultStandingOrderStore() {
+  return tableStore(STANDING_ORDERS_PATH, "PLAYERBOT_CORP_ORDER_WRITE_FAILED");
+}
+
+function defaultCommandLogStore() {
+  return tableStore(COMMAND_LOG_PATH, "PLAYERBOT_CORP_LOG_WRITE_FAILED");
 }
 
 function defaultDeps() {
@@ -92,6 +114,8 @@ function defaultDeps() {
     hasStaffRole: (session) => load("services/chat/commands/commandAccess").hasStaffDebugRole(session),
     log: () => load("utils/logger"),
     hqStore: defaultHqStore,
+    standingOrderStore: defaultStandingOrderStore,
+    commandLogStore: defaultCommandLogStore,
     now: () => Date.now(),
   };
 }
@@ -101,12 +125,16 @@ const state = {
   orders: new Map(),
   jobs: new Map(),
   hq: null,
+  standing: null,
+  commandLog: null,
   timer: null,
 };
 
 function configure(overrides = {}) {
   state.deps = { ...defaultDeps(), ...overrides };
   state.hq = null;
+  state.standing = null;
+  state.commandLog = null;
 }
 
 function reset() {
@@ -114,7 +142,65 @@ function reset() {
   state.orders.clear();
   state.jobs.clear();
   state.hq = null;
+  state.standing = null;
+  state.commandLog = null;
   state.deps = defaultDeps();
+}
+
+// ------------------------------------------------------ standing orders
+
+function standingOrders() {
+  if (!state.standing) {
+    try { state.standing = state.deps.standingOrderStore().read() || {}; }
+    catch (error) { warn(`Could not read standing orders: ${error.message}`); state.standing = {}; }
+  }
+  return state.standing;
+}
+
+function saveStandingOrder(corporationID, record) {
+  const next = { ...standingOrders() };
+  if (record) next[String(corporationID)] = record;
+  else delete next[String(corporationID)];
+  state.standing = next;
+  try { state.deps.standingOrderStore().write(next); }
+  catch (error) { warn(`Could not save the standing order for corporation ${corporationID}: ${error.message}`); }
+}
+
+function getStandingOrder(corporationID) {
+  const record = standingOrders()[String(corporationID)];
+  return record && typeof record === "object" ? record : null;
+}
+
+// ---------------------------------------------------------- command log
+
+function commandLog() {
+  if (!state.commandLog) {
+    try { state.commandLog = state.deps.commandLogStore().read() || {}; }
+    catch (error) { warn(`Could not read the command log: ${error.message}`); state.commandLog = {}; }
+  }
+  return state.commandLog;
+}
+
+function appendCommandLog(corporationID, entry) {
+  const key = String(positive(corporationID) || 0);
+  const log = { ...commandLog() };
+  const rows = Array.isArray(log[key]) ? log[key].slice(-(COMMAND_LOG_LIMIT - 1)) : [];
+  rows.push({
+    at: new Date(state.deps.now()).toISOString(),
+    source: String(entry.source || "chat"),
+    action: String(entry.action || ""),
+    message: String(entry.message || "").slice(0, 400),
+    success: entry.success !== false,
+  });
+  log[key] = rows;
+  state.commandLog = log;
+  try { state.deps.commandLogStore().write(log); }
+  catch (error) { warn(`Could not save the command log: ${error.message}`); }
+}
+
+function getCommandLog(corporationID) {
+  const rows = commandLog()[String(positive(corporationID))];
+  return Array.isArray(rows) ? [...rows].reverse() : [];
 }
 
 function positive(value) {
@@ -168,7 +254,7 @@ function describeDestination(destinationID, corporationID) {
   const worldData = state.deps.worldData();
   const station = worldData.getStationByID(destinationID);
   if (station) {
-    return { kind: "station", stationID: destinationID, systemID: positive(station.solarSystemID), name: "" };
+    return { kind: "station", stationID: destinationID, systemID: positive(station.solarSystemID), name: String(station.stationName || station.itemName || "") };
   }
   const structure = state.deps.structures().getStructureByID(destinationID, { refresh: false });
   if (!structure) {
@@ -204,9 +290,8 @@ function resolveHeadquarters(corporationID, overrideID) {
 }
 
 function formatDestination(destination) {
-  return destination.kind === "structure"
-    ? `structure ${destination.stationID}${destination.name ? ` "${destination.name}"` : ""}`
-    : `station ${destination.stationID}`;
+  if (destination.name) return `${destination.name} (${destination.kind} ${destination.stationID})`;
+  return `${destination.kind === "structure" ? "structure" : "station"} ${destination.stationID}`;
 }
 
 function canControlCorporation(session, corporationID) {
@@ -390,7 +475,9 @@ function summarizeFailures(failures) {
   return [...counts.entries()].slice(0, 3).map(([reason, count]) => `${count} x ${reason}`).join("; ");
 }
 
-function notify(context, message) {
+function notify(context, message, corporationID = 0, action = "") {
+  if (corporationID) appendCommandLog(corporationID, { source: context && context.source || "chat", action, message });
+  if (!context || !context.chatHub) return;
   try {
     state.deps.replies().emitChatFeedback(context.chatHub, context.session, context.options, message);
   } catch (error) {
@@ -417,9 +504,14 @@ function finishOrder(order, reason) {
     for (const characterID of order.pending.keys()) releaseStrandedPilot(order, characterID);
   }
   const detail = order.failed ? ` ${order.failed} could not be recalled (${summarizeFailures(order.failures)}).` : "";
+  const standing = getStandingOrder(order.corporationID);
+  if (standing && standing.kind === "recall") {
+    saveStandingOrder(order.corporationID, { ...standing, status: reason === "expired" ? "expired" : "holding", finishedAt: new Date(state.deps.now()).toISOString(), held: order.held, failed: order.failed });
+  }
   notify(order.context, reason === "expired"
     ? `Recall for corporation ${order.corporationID} timed out with ${order.pending.size} pilot(s) unfinished. Run /bots corp status ${order.corporationID}.`
-    : `Recall complete for corporation ${order.corporationID}: ${order.held} of ${order.total} pilot(s) docked and held at ${formatDestination(order.headquarters)}.${detail}`);
+    : `Recall complete for corporation ${order.corporationID}: ${order.held} of ${order.total} pilot(s) docked and held at ${formatDestination(order.headquarters)}.${detail}`,
+  order.corporationID, "recall");
 }
 
 function runRecallBatch(order, budget) {
@@ -535,18 +627,25 @@ function runWorkBatch(job, budget) {
       job.counts[key] = (job.counts[key] || 0) + 1;
     }
   }
+  const standing = getStandingOrder(job.corporationID);
+  if (slice.length && standing && standing.kind === "work" && job.pending.length) {
+    saveStandingOrder(job.corporationID, { ...standing, pending: [...job.pending] });
+  }
   return slice.length;
 }
 
 function finishJob(job) {
   state.jobs.delete(job.corporationID);
+  const standing = getStandingOrder(job.corporationID);
+  if (standing && standing.kind === "work") saveStandingOrder(job.corporationID, null);
   const parts = [];
   if (job.counts.mine) parts.push(`${job.counts.mine} mining`);
   if (job.counts.pi) parts.push(`${job.counts.pi} PI setup`);
   if (job.counts.already) parts.push(`${job.counts.already} already working`);
   if (job.counts.director) parts.push(`${job.counts.director} left to the director`);
   if (job.failures.length) parts.push(`${job.failures.length} refused (${summarizeFailures(job.failures)})`);
-  notify(job.context, `Work order for corporation ${job.corporationID} (${job.mode}): ${parts.join(", ") || "no pilots"}.`);
+  notify(job.context, `Work order for corporation ${job.corporationID} (${job.mode}): ${parts.join(", ") || "no pilots"}.`,
+    job.corporationID, "work");
 }
 
 // ----------------------------------------------------------------- ticker
@@ -623,6 +722,16 @@ function commandRecall(parsed, corporationID, bots, context) {
   if (headquarters.error) return headquarters.error;
   cancelOrders(corporationID);
   createRecallOrder(corporationID, headquarters, bots, context);
+  if (!parsed.restoring) {
+    saveStandingOrder(corporationID, {
+      kind: "recall",
+      status: "recalling",
+      destinationID: positive(parsed.station),
+      characterIDs: parsed.characterIDs ? parsed.characterIDs.map(Number) : null,
+      createdAt: new Date(state.deps.now()).toISOString(),
+      source: context && context.source || "chat",
+    });
+  }
   ensureTimer();
   const caution = headquarters.kind === "structure"
     ? " Pilots are paused for the trip and travel without their usual threat responses."
@@ -631,13 +740,31 @@ function commandRecall(parsed, corporationID, bots, context) {
     `Pilots stop their current work, travel and dock, then are held.${caution} Progress: /bots corp status ${corporationID}. Release them with /bots corp work ${corporationID}.`;
 }
 
+function resumePilots(corporationID, bots) {
+  if (!bots.selection) return state.deps.tasks().resumeBotsInCorporation(corporationID);
+  let affected = 0;
+  const errors = [];
+  for (const bot of bots) {
+    try {
+      const result = state.deps.tasks().resumeBot(bot);
+      if (result && result.success) affected += 1;
+      else errors.push(`${bot.characterName}:${result && result.message || "resume failed"}`);
+    } catch (error) {
+      errors.push(`${bot.characterName}:${error.message}`);
+    }
+  }
+  return { success: errors.length === 0, affected, errors };
+}
+
 function commandWork(parsed, corporationID, bots, context) {
   // A later "work director" must not leave an earlier "work mine" queued.
   cancelOrders(corporationID);
-  const resumed = state.deps.tasks().resumeBotsInCorporation(corporationID);
+  const resumed = parsed.restoring ? { success: true, affected: 0 } : resumePilots(corporationID, bots);
   if (!resumed.success) {
     return `Could not release the corporation: ${(resumed.errors || []).join("; ") || resumed.message || "error"}.`;
   }
+  const standing = getStandingOrder(corporationID);
+  if (standing && standing.kind === "recall" && !bots.selection) saveStandingOrder(corporationID, null);
   const resolved = resolveHeadquarters(corporationID, parsed.station);
   const job = {
     corporationID,
@@ -653,6 +780,15 @@ function commandWork(parsed, corporationID, bots, context) {
     return `Released ${resumed.affected} pilot(s); the director will assign work on its next pass.`;
   }
   state.jobs.set(corporationID, job);
+  saveStandingOrder(corporationID, {
+    kind: "work",
+    mode: parsed.mode,
+    trips: parsed.trips,
+    destinationID: positive(parsed.station),
+    pending: [...job.pending],
+    createdAt: new Date(state.deps.now()).toISOString(),
+    source: context && context.source || "chat",
+  });
   ensureTimer();
   return `Released ${resumed.affected} pilot(s) of corporation ${corporationID}. Starting ${parsed.mode} work` +
     `${job.headquarters ? ` around ${formatDestination(job.headquarters)}` : ""}; a summary follows.`;
@@ -696,11 +832,11 @@ function commandStatus(corporationID, bots) {
   ].join("\n");
 }
 
-function commandDeposit(parsed, session, corporationID) {
+function commandDeposit(parsed, session, corporationID, options = {}) {
   const deposit = state.deps.deposit();
   const action = parsed.depositAction;
   if (action && action !== "status") {
-    if (!canManageHeadquarters(session, corporationID)) {
+    if (!options.operator && !canManageHeadquarters(session, corporationID)) {
       return "Only the corporation's CEO or staff/admin can change the deposit settings.";
     }
     if (action === "hangar" && !(parsed.depositDivision >= 1 && parsed.depositDivision <= 7)) {
@@ -727,7 +863,7 @@ function commandDeposit(parsed, session, corporationID) {
   ].join("\n");
 }
 
-function commandHeadquarters(parsed, session, corporationID) {
+function commandHeadquarters(parsed, session, corporationID, options = {}) {
   const action = parsed.hqAction;
   if (action === "list") {
     const rows = state.deps.structures().listOwnedStructures(corporationID, { refresh: false })
@@ -742,7 +878,7 @@ function commandHeadquarters(parsed, session, corporationID) {
       : `Corporation ${corporationID} owns no active structures.`;
   }
   if (action === "set" || action === "clear") {
-    if (!canManageHeadquarters(session, corporationID)) {
+    if (!options.operator && !canManageHeadquarters(session, corporationID)) {
       return "Only the corporation's CEO or staff/admin can change the HQ used by /bots corp.";
     }
     const store = state.deps.hqStore();
@@ -790,7 +926,7 @@ const BOTS_HELP_ADDENDUM = [
   "HQ choice, first match wins: station|structure <id> on the command (that order only); the HQ saved with /bots corp hq set; the corporation's headquarters NPC station from the corporation window. A saved HQ that is destroyed, unanchoring, no longer owned or without docking blocks recall with a message instead of diverting pilots.",
   "Recall to an NPC station uses the durable relocate operation (undock, route, warp, dock) and pauses each pilot once docked. Recall to a structure pauses the pilot at once and steps it there with the same stargate-route and dock helpers; docking permission is checked first, and pilots in an industry cycle are reported rather than pulled away.",
   "Paused pilots skip their own threat responses, so use structure recalls in safe space. /bots corp work resumes the corporation and cancels a pending recall; mining uses the HQ as its home only if its system is high-security with belts (and a structure has a quantum core), otherwise the nearest safe belts.",
-  "Limits: orders are kept in memory, so after a server restart run /bots corp recall or /bots corp work again (both are safe to repeat). Raise EVEJS_PLAYER_BOTS_MAX_PER_SYSTEM (default 30) to at least the largest corporation, or the director will move pilots out of the HQ system after /bots corp work. Progress and results arrive as chat messages.",
+  "Limits: recall and work orders are saved and re-issued after a server restart; a recall holds the corporation until a work order replaces it. Raise EVEJS_PLAYER_BOTS_MAX_PER_SYSTEM (default 30) to at least the largest corporation, or the director will move pilots out of the HQ system after /bots corp work. Progress and results arrive as chat messages.",
   "Per-pilot equivalents: /playerbots route|dock|undock|pause|resume|op stop|mine|colony <bot> ... (listed above). /bots corp applies them to a whole corporation.",
 ].join("\n");
 
@@ -842,7 +978,197 @@ function getHeadquarters(corporationID) {
   return resolveHeadquarters(positive(corporationID), 0);
 }
 
+// ----------------------------------------------------- dashboard surface
+
+function standingRecallIDs() {
+  return Object.entries(standingOrders())
+    .filter(([, record]) => record && record.kind === "recall")
+    .map(([id]) => positive(id))
+    .filter(Boolean);
+}
+
+function getSavedHeadquartersID(corporationID) {
+  return positive(savedHeadquarters()[String(positive(corporationID))]);
+}
+
+function listHeadquartersCandidates(corporationID) {
+  const id = positive(corporationID);
+  let structures = [];
+  try { structures = state.deps.structures().listOwnedStructures(id, { refresh: false }) || []; } catch { structures = []; }
+  return structures
+    .filter((structure) => !structure.destroyedAt && !structure.unanchoring)
+    .slice(0, 50)
+    .map((structure) => ({
+      structureID: positive(structure.structureID || structure.itemID),
+      name: String(structure.itemName || structure.name || "Unnamed structure"),
+      solarSystemID: positive(structure.solarSystemID),
+      dockingOnline: !validateStructure(structure, id),
+    }));
+}
+
+// Live progress of a corporation's orders, plus the standing order on file.
+function describeOrders(corporationID) {
+  const id = positive(corporationID);
+  const rows = [];
+  const order = state.orders.get(id);
+  if (order) {
+    rows.push({
+      kind: "recall",
+      status: "running",
+      destination: formatDestination(order.headquarters),
+      total: order.total,
+      done: order.held,
+      failed: order.failed,
+      pending: order.pending.size,
+      startedAt: new Date(order.createdAt).toISOString(),
+      failures: summarizeFailures(order.failures),
+    });
+  }
+  const job = state.jobs.get(id);
+  if (job) {
+    const started = Object.values(job.counts).reduce((sum, count) => sum + count, 0);
+    rows.push({
+      kind: "work",
+      status: "running",
+      mode: job.mode,
+      total: started + job.failures.length + job.pending.length,
+      done: started,
+      failed: job.failures.length,
+      pending: job.pending.length,
+      failures: summarizeFailures(job.failures),
+    });
+  }
+  const standing = getStandingOrder(id);
+  if (standing && !rows.some((row) => row.kind === standing.kind)) {
+    rows.push({
+      kind: standing.kind,
+      status: standing.status || "saved",
+      mode: standing.mode || "",
+      destinationID: positive(standing.destinationID),
+      pending: Array.isArray(standing.pending) ? standing.pending.length : 0,
+      held: Number(standing.held) || 0,
+      failed: Number(standing.failed) || 0,
+      startedAt: String(standing.createdAt || ""),
+      finishedAt: String(standing.finishedAt || ""),
+      standing: true,
+    });
+  }
+  return rows;
+}
+
+function selectBots(corporationID, characterIDs) {
+  const all = botsOf(corporationID);
+  if (!Array.isArray(characterIDs) || !characterIDs.length) return all;
+  const wanted = new Set(characterIDs.map((value) => positive(value)).filter(Boolean));
+  const selected = all.filter((bot) => wanted.has(Number(bot.characterID)));
+  selected.selection = true;
+  return selected;
+}
+
+const DASHBOARD_ACTIONS = new Set(["recall", "work", "cancel", "hq-set", "hq-clear", "deposit", "pause", "resume"]);
+
+/*
+ * Structured corporation orders for the operator dashboard. No session: the
+ * dashboard is the server operator, so corporation and CEO checks do not
+ * apply. args: { characterIDs?, station?, mode?, trips?, target?, deposit? }
+ * Returns { success, message, orders }.
+ */
+function runCorporationCommand(corporationID, action, args = {}) {
+  const id = positive(corporationID);
+  const name = String(action || "").toLowerCase();
+  const context = { source: "dashboard" };
+  const done = (success, rawMessage) => {
+    // Chat hints ("Progress: /bots corp status ...") mean nothing on the dashboard.
+    const message = String(rawMessage || "").replace(/ (Progress|Release them with)[^.]*\/bots corp[^.]*\./g, "").replace(/; a summary follows\./, ".");
+    appendCommandLog(id, { source: "dashboard", action: name, message, success });
+    return { success, message, orders: describeOrders(id) };
+  };
+  if (!id) return { success: false, message: "A corporation is required." };
+  if (!DASHBOARD_ACTIONS.has(name)) return { success: false, message: `Unknown corporation action: ${action}.` };
+  if (name === "hq-set" || name === "hq-clear") {
+    const target = positive(args.target);
+    if (name === "hq-set" && !target) return { success: false, message: "Choose a station or structure for the HQ." };
+    const message = commandHeadquarters({ hqAction: name === "hq-set" ? "set" : "clear", hqTarget: target }, null, id, { operator: true });
+    return done(!/^(Could not|Usage|Only|.*is not an NPC station|Structure \d+ )/.test(message), message);
+  }
+  if (name === "deposit") {
+    const allowed = ["on", "off", "auto", "deliveries", "hangar"];
+    const depositAction = String(args.deposit || "").toLowerCase();
+    if (!allowed.includes(depositAction)) return { success: false, message: "Choose on, off, auto, deliveries or hangar." };
+    const message = commandDeposit({ depositAction, depositDivision: positive(args.division) }, null, id, { operator: true });
+    return done(!/^(Could not|Usage|Only)/.test(message), message);
+  }
+  if (name === "cancel") {
+    cancelOrders(id);
+    saveStandingOrder(id, null);
+    return done(true, `Orders cancelled for corporation ${id}. Pilots keep their current pause state; use Send to work to release them.`);
+  }
+  const bots = selectBots(id, args.characterIDs);
+  if (!bots.length) return { success: false, message: `Corporation ${id} has no matching playerbots.` };
+  if (name === "pause" || name === "resume") {
+    let affected = 0;
+    const errors = [];
+    for (const bot of bots) {
+      try {
+        const result = name === "pause" ? state.deps.tasks().pauseBot(bot) : state.deps.tasks().resumeBot(bot);
+        if (result && result.success) affected += 1;
+        else errors.push(`${bot.characterName}: ${result && result.message || "failed"}`);
+      } catch (error) { errors.push(`${bot.characterName}: ${error.message}`); }
+    }
+    return done(errors.length === 0, `${name === "pause" ? "Paused" : "Resumed"} ${affected} of ${bots.length} pilot(s).${errors.length ? ` ${errors.slice(0, 3).join("; ")}` : ""}`);
+  }
+  const parsed = {
+    station: positive(args.station),
+    mode: MODES.has(String(args.mode || "").toLowerCase()) ? String(args.mode).toLowerCase() : "auto",
+    trips: Math.max(1, Math.min(20, positive(args.trips) || 1)),
+    characterIDs: bots.selection ? bots.map((bot) => Number(bot.characterID)) : null,
+  };
+  const message = name === "recall"
+    ? commandRecall(parsed, id, bots, context)
+    : commandWork(parsed, id, bots, context);
+  const failed = /^(Could not|Corporation \d+ has no headquarters|The saved HQ is unusable|\d+ is not an NPC station|Structure \d+ )/.test(message);
+  return done(!failed, message);
+}
+
+// Re-issues saved recall and work orders after a restart.
+function restoreStandingOrders() {
+  const restored = [];
+  for (const [key, record] of Object.entries(standingOrders())) {
+    const corporationID = positive(key);
+    if (!corporationID || !record || state.orders.has(corporationID) || state.jobs.has(corporationID)) continue;
+    try {
+      const bots = selectBots(corporationID, record.kind === "recall" ? record.characterIDs : null);
+      if (!bots.length) continue;
+      const context = { source: record.source || "restore" };
+      if (record.kind === "recall") {
+        const message = commandRecall({ station: positive(record.destinationID), restoring: true }, corporationID, bots, context);
+        appendCommandLog(corporationID, { source: "restore", action: "recall", message: `Re-issued after restart: ${message}` });
+        restored.push(corporationID);
+      } else if (record.kind === "work" && Array.isArray(record.pending) && record.pending.length) {
+        const pending = new Set(record.pending.map(Number));
+        const remaining = bots.filter((bot) => pending.has(Number(bot.characterID)));
+        if (!remaining.length) { saveStandingOrder(corporationID, null); continue; }
+        remaining.selection = true;
+        const message = commandWork({ station: positive(record.destinationID), mode: record.mode || "auto", trips: Number(record.trips) || 1, restoring: true }, corporationID, remaining, context);
+        appendCommandLog(corporationID, { source: "restore", action: "work", message: `Resumed after restart: ${message}` });
+        restored.push(corporationID);
+      }
+    } catch (error) {
+      warn(`Could not restore the standing order for corporation ${corporationID}: ${error.message}`);
+    }
+  }
+  return restored;
+}
+
 module.exports = {
+  runCorporationCommand,
+  restoreStandingOrders,
+  describeOrders,
+  getCommandLog,
+  appendCommandLog,
+  listStandingRecallCorporationIDs: standingRecallIDs,
+  getSavedHeadquartersID,
+  listHeadquartersCandidates,
   handle,
   hasSavedHeadquarters,
   getHeadquarters,

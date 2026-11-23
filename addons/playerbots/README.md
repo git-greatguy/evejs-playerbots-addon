@@ -4,7 +4,7 @@ The Playerbots Add-on runs EveJS's autonomous playerbot director as a separate
 Node.js process. The game server remains authoritative for characters,
 corporations, wallets, market orders, inventory, planetary colonies, ships,
 contracts, sovereignty, and movement. The add-on talks to a private HTTP API
-inside the Docker network and has no database connection. Its dashboard is served without login on host port 8080, bound to `0.0.0.0`.
+inside the Docker network and has no database connection. Its dashboard is served without login on host port 8080, bound to `127.0.0.1`. Set `EVEJS_PLAYER_BOTS_DASHBOARD_BIND=0.0.0.0` to reach it from other machines; because the dashboard can command bots and corporations, do that only on a trusted network.
 
 This release targets the original EveJS source version `261115.2`. The ZIP
 contains the standalone add-on process and a version-pinned integration overlay

@@ -36,6 +36,9 @@ function createPlayerBotAddonApiRuntime(options = {}) {
   });
   const configuration = options.configuration || require("./playerBotConfigurationRuntime");
   const director = options.director || require("./playerBotDirectorRuntime");
+  const corpCommands = options.corpCommands || require("./playerBotCorpCommands");
+  const botCommands = options.botCommands || require("./playerBotDashboardCommands").createDashboardCommands();
+  let restoreTimer = null;
   const getConnectedCharacterIDs = options.getConnectedCharacterIDs || (() =>
     require("./playerBotSpaceRuntime").getConnectedBotCharacterIDs());
   const logger = options.logger || require("../../utils/logger");
@@ -260,7 +263,43 @@ function createPlayerBotAddonApiRuntime(options = {}) {
         specialty: url.searchParams.get("specialty"),
         corporationID: url.searchParams.get("corporationID"),
         search: url.searchParams.get("search"),
+        state: url.searchParams.get("state"),
+        activity: url.searchParams.get("activity"),
+        reason: url.searchParams.get("reason"),
+        sort: url.searchParams.get("sort"),
       }));
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/v1/dashboard/activity") {
+      sendJson(response, 200, dashboard.getActivity());
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/v1/dashboard/bot") {
+      const detail = dashboard.getBotDetail(url.searchParams.get("characterID"));
+      if (!detail) return sendJson(response, 404, { error: "PLAYERBOT_NOT_FOUND" });
+      sendJson(response, 200, detail);
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/v1/dashboard/corporation") {
+      const detail = dashboard.getCorporationDetail(url.searchParams.get("corporationID"));
+      if (!detail) return sendJson(response, 404, { error: "PLAYERBOT_CORPORATION_NOT_FOUND" });
+      sendJson(response, 200, detail);
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/v1/dashboard/corp-command") {
+      const body = await readBody(request);
+      const result = corpCommands.runCorporationCommand(body.corporationID, body.action, body.args || {});
+      if (typeof dashboard.invalidate === "function") dashboard.invalidate();
+      logger.info(`[PlayerBotsAddon] Dashboard corporation order ${String(body.action).slice(0, 20)} corp=${Number(body.corporationID) || 0}: ${String(result.message || "").slice(0, 160)}`);
+      sendJson(response, result.success ? 200 : 400, result);
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/v1/dashboard/bot-command") {
+      const body = await readBody(request);
+      const result = botCommands.runBotCommand(body.characterIDs, body.action, body.args || {});
+      if (typeof dashboard.invalidate === "function") dashboard.invalidate();
+      logger.info(`[PlayerBotsAddon] Dashboard pilot order ${String(body.action).slice(0, 20)} pilots=${Array.isArray(body.characterIDs) ? body.characterIDs.length : 1}: ${String(result.message || "").slice(0, 160)}`);
+      sendJson(response, result.success ? 200 : 400, result);
       return;
     }
     if (request.method === "GET" && url.pathname === "/v1/dashboard/operations") {
@@ -732,10 +771,25 @@ function createPlayerBotAddonApiRuntime(options = {}) {
       });
       logger.info(`[PlayerBotsAddon] Internal API listening on ${host}:${server.address().port}`);
       telemetry.start();
+      // Re-issue saved corporation recall and work orders once the world has
+      // settled after a restart.
+      if (!restoreTimer && options.restoreStandingOrders !== false) {
+        restoreTimer = setTimeout(() => {
+          try {
+            const restored = corpCommands.restoreStandingOrders();
+            if (restored.length) logger.info(`[PlayerBotsAddon] Restored corporation orders for ${restored.join(", ")}`);
+          } catch (error) {
+            logger.warn(`[PlayerBotsAddon] Could not restore corporation orders: ${error.message}`);
+          }
+        }, Number(process.env.EVEJS_PLAYER_BOTS_ORDER_RESTORE_DELAY_MS) || 60_000);
+        if (typeof restoreTimer.unref === "function") restoreTimer.unref();
+      }
       return this.getDiagnostics();
     },
     async shutdown() {
       cycle = null;
+      if (restoreTimer) clearTimeout(restoreTimer);
+      restoreTimer = null;
       eventLoopDelay.disable();
       clearInterval(loadSampleTimer);
       telemetry.stop();

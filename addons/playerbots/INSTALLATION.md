@@ -211,7 +211,7 @@ docker compose \
 
 Do not publish port `26004` on the host. It is only for server-to-add-on
 traffic on the internal Compose network. The dashboard port is `8080` and is
-bound to `0.0.0.0`. The dashboard does not require login. It provides paginated operation history and a same-origin settings form. Official killboard ship renders require outbound HTTPS from the add-on host to `images.evetech.net`. See
+bound to `127.0.0.1`. Set `EVEJS_PLAYER_BOTS_DASHBOARD_BIND=0.0.0.0` to reach it from other machines; because the dashboard can command bots and corporations, do that only on a trusted network. The dashboard does not require login. It provides paginated operation history and a same-origin settings form. Official killboard ship renders require outbound HTTPS from the add-on host to `images.evetech.net`. See
 `OPERATIONS.md` for direct and SSH-tunnel access.
 
 ## Roll back

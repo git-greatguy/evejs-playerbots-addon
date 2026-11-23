@@ -2,7 +2,7 @@
 
 ## The dashboard does not open on port 8080
 
-The dashboard binds to `0.0.0.0:8080` and does not require a login. Check
+The dashboard binds to `127.0.0.1:8080` by default (`EVEJS_PLAYER_BOTS_DASHBOARD_BIND`) and does not require a login. Check
 `docker compose ps playerbots-addon`, the sidecar log for
 `PlayerBotsDashboard`, and the host port mapping. Operation records are loaded
 through a paginated API; settings updates require a same-origin request. The
