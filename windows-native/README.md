@@ -1,4 +1,4 @@
-# Playerbots 0.2.152.12 for Windows (EVEJS Launcher)
+# Playerbots 0.2.152.13 for native EveJS (EVEJS Launcher)
 
 This package runs Playerbots inside a native Windows EveJS server managed by
 EVEJS Launcher, with no Docker. It carries the Luna update by
@@ -7,7 +7,12 @@ income, portrait repair, Windows multicore support and performance work)
 together with the overhauled operator dashboard from this repository.
 
 You need EveJS **261115.2**, EVEJS Launcher **1.0.91** or later and
-**Node.js 24** or later.
+**Node.js 24** or later. This is the same build as @rizonx's
+*Playerbots 0.2.152.13 (Windows, Luna)*: every file it installs is identical.
+
+No launcher? Servers started with `StartServer.bat` can install this package
+with the repository's installer instead: run `python install.py` and choose
+**Native**, then **Directly** (see the main README).
 
 ## Install
 
@@ -31,7 +36,7 @@ Settings saved in the launcher apply at the next Game start. The dashboard
 shows them locked with the note "Set in EVEJS Launcher"; everything else on
 the dashboard's Settings page still works there.
 
-## Upgrade from 0.2.152.11 or earlier
+## Upgrade an existing installation
 
 Stop Game and Market. Keep a copy of `config/playerbots-native.json`. In
 **Mods**, disable and remove the previous Playerbots entry, import this ZIP
@@ -39,7 +44,8 @@ and turn it on. Restore your settings copy if the launcher changed it, or
 re-enter the settings in **Configure**, then **Start Stack**. Leave your
 multicore files in place.
 
-The installer recognises the files earlier packages installed and replaces
+The installer recognises the files earlier packages installed, including
+both builds named 0.2.152.11 (Luna and the ubermidas fork), and replaces
 them; it stops on anything else.
 
 ## What's included

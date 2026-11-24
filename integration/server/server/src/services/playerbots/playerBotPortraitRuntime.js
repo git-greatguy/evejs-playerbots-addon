@@ -227,12 +227,23 @@ async function openMigration(profiles) {
 async function refreshPortrait(id, state) {
   const source = builtinPortrait(id);
   const destination = getCharacterPortraitFilePath(id, 256, "jpg");
+  const oldFiles = state.oldFiles.get(id) || [];
+  if (oldFiles.length === 1 && path.join(oldFiles[0].root, oldFiles[0].name) === destination) {
+    // A previous pass may have installed this exact file before saving the journal.
+    try {
+      const expected = await fs.promises.readFile(source);
+      if ((await fs.promises.stat(destination)).size === expected.length &&
+          (await fs.promises.readFile(destination)).equals(expected)) return;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
   const temp = destination + ".refresh-" + randomUUID();
   await fs.promises.mkdir(path.dirname(destination), { recursive: true });
   // Stage the replacement before moving any old image out of the serving path.
   await fs.promises.copyFile(source, temp, fs.constants.COPYFILE_EXCL);
   try {
-    for (const { root, index, name } of state.oldFiles.get(id) || []) {
+    for (const { root, index, name } of oldFiles) {
       const old = path.join(root, name);
       const archived = path.join(state.backup, `${index}-${randomUUID()}-${name}`);
       try { await fs.promises.rename(old, archived); }

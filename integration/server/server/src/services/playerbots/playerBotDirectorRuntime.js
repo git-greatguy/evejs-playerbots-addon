@@ -102,6 +102,11 @@ function getBotDirectorAssignment(characterID) {
   return readDirectorBotAssignments()[String(Math.trunc(Number(characterID) || 0))] || {};
 }
 
+function createDashboardAssignmentReader() {
+  const assignments = readDirectorBotAssignments();
+  return characterID => assignments[characterID] || null;
+}
+
 function saveBotDirectorAssignment(characterID, entry) {
   const id = Math.trunc(Number(characterID) || 0);
   if (id <= 0) return false;
@@ -2560,6 +2565,7 @@ module.exports = {
   getMaxConcurrentCapacityRelocations,
   getMaxConcurrentColonySetups,
   getBotDirectorAssignment,
+  createDashboardAssignmentReader,
   getQueuedColonySetupCount,
   listQueuedColonySetupAssignments,
   hasActiveWork,

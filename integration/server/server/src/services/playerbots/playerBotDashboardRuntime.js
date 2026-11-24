@@ -426,17 +426,17 @@ function createPlayerBotDashboardRuntime(options = {}) {
       }
     }
 
+    const getCachedAssignment = directorAssignments.createDashboardAssignmentReader?.();
+    const getAssignment = getCachedAssignment || (characterID =>
+      directorAssignments.getBotDirectorAssignment?.(characterID));
+    const queuedAssignments = getCachedAssignment ? null
+      : directorAssignments.listQueuedColonySetupAssignments?.(roster.map(bot => bot && bot.characterID));
     queuedColonyByCharacter = new Map();
-    const queuedDirectorAssignments = typeof directorAssignments.listQueuedColonySetupAssignments === "function"
-      ? directorAssignments.listQueuedColonySetupAssignments(roster.map((bot) => bot && bot.characterID))
-      : null;
     for (const bot of roster) {
       const characterID = positiveInteger(bot && bot.characterID);
-      if (!characterID || (!queuedDirectorAssignments && typeof directorAssignments.getBotDirectorAssignment !== "function")) continue;
-      const assignment = queuedDirectorAssignments
-        ? queuedDirectorAssignments[String(characterID)] || null
-        : directorAssignments.getBotDirectorAssignment(characterID) || {};
-      if (!assignment || (!queuedDirectorAssignments && assignment.queuedColonySetup !== true)) continue;
+      if (!characterID) continue;
+      const assignment = queuedAssignments ? queuedAssignments[characterID] : getAssignment(characterID);
+      if (!assignment || (!queuedAssignments && assignment.queuedColonySetup !== true)) continue;
       queuedColonyByCharacter.set(characterID, {
         kind: "colony",
         status: "queued",
@@ -724,9 +724,7 @@ function createPlayerBotDashboardRuntime(options = {}) {
       const corporationID = positiveInteger(bot.corporationID);
       let assignment = {};
       try {
-        assignment = typeof directorAssignments.getBotDirectorAssignment === "function"
-          ? directorAssignments.getBotDirectorAssignment(characterID) || {}
-          : {};
+        assignment = getAssignment(characterID) || {};
       } catch { assignment = {}; }
       const tasksForBot = taskSummary.byCharacter && taskSummary.byCharacter[String(characterID)];
       const classified = activityState.classifyBotActivity({

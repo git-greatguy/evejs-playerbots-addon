@@ -5,10 +5,9 @@ const { createTableRepository } = require("../../gameStore/tableRepository");
 // Settings saved in the Windows launcher are locked in the dashboard. Docker
 // builds have no launcher and therefore no locked settings.
 const nativePlayerbotsPath = require("path").join(__dirname, "../../../playerbots-native/native.cjs");
-function launcherOverrides() {
-  if (!require("fs").existsSync(nativePlayerbotsPath)) return {};
-  return require(nativePlayerbotsPath).launcherOverrides();
-}
+const launcherOverrides = require("fs").existsSync(nativePlayerbotsPath)
+  ? require(nativePlayerbotsPath).launcherOverrides
+  : () => ({});
 
 const TABLE = "playerBots";
 const PATH = "/_dashboardSettings";
