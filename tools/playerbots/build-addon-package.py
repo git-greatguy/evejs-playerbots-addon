@@ -29,7 +29,7 @@ MANIFEST = REPO / "integration" / "manifest.json"
 # Package-level tools: placed at the package root, not inside addons/playerbots.
 INSTALLER_FILES = {"install.sh", "install.py", "rollback.py", "verify.py"}
 # Documents shipped at the package root.
-DOCS = ("README.md", "GUIDE.md", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES.md")
+DOCS = ("README.md", "GUIDE.md", "CHANGELOG.md", "PLAYERBOTS_ROADMAP.md", "LICENSE", "THIRD_PARTY_NOTICES.md")
 # Keep in step with addons/playerbots/verify.py.
 SUBSYSTEM_PREFIXES = (
     ("server/src/services/playerbots/", "playerbots-core"),

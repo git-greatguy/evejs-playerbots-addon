@@ -3,7 +3,9 @@
 This repository holds the Playerbots add-on, the EveJS server files it
 installs, its installer, and the release ZIPs. It does not hold the EveJS
 server itself. Operator documentation is in the [README](README.md) and the
-[GUIDE](GUIDE.md); release notes are in the [CHANGELOG](CHANGELOG.md).
+[GUIDE](GUIDE.md); release notes are in the [CHANGELOG](CHANGELOG.md), and the
+project's long-form plan and test evidence in
+[PLAYERBOTS_ROADMAP.md](PLAYERBOTS_ROADMAP.md).
 
 ## What lives where
 

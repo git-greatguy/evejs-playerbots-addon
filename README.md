@@ -340,6 +340,7 @@ and so on; see [Roster and population](GUIDE.md#roster-and-population)).
 | [GUIDE.md](GUIDE.md) | The operator's handbook: running the server, roster sizing, every chat command, how the bots behave, performance, troubleshooting, the fitting catalog |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in each release, newest first |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Repository layout, design rules, tests and building releases |
+| [PLAYERBOTS_ROADMAP.md](PLAYERBOTS_ROADMAP.md) | The project's long-form roadmap: shared rules, phases, and dated evidence from test servers |
 | [windows-native/README.md](windows-native/README.md) | The EVEJS Launcher package in detail |
 | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Sources and licenses of EveJS code and the fittings |
 

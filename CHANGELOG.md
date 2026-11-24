@@ -45,10 +45,10 @@ Docker add-on 0.2.152, Windows package 0.2.152.12.
 
 ### Documentation
 
-- 29 Markdown files are now 7: README (overview and quick start), GUIDE
-  (the operator's handbook), CHANGELOG, CONTRIBUTING, the Windows package
-  README and the license notices. The old roadmap and dated test logs stay in
-  git history.
+- 29 Markdown files are now 8: README (overview and quick start), GUIDE
+  (the operator's handbook), CHANGELOG, CONTRIBUTING, the roadmap, the
+  Windows package README and the license notices. Older dated test logs stay
+  in git history.
 - The Windows package upgrades 0.2.152.10 and 0.2.152.11 installs in place.
 
 ## Fork changes, 22–23 Nov 2026 (Windows 0.2.152.11)
@@ -133,6 +133,6 @@ Windows package.
 
 See the git history and the upstream repository,
 [kroryan/evejs-playerbots-addon](https://github.com/kroryan/evejs-playerbots-addon).
-The former `PLAYERBOTS_ROADMAP.md`, `PLAYERBOTS_CAPACITY_MODEL.md` and native
-validation notes, with their dated test evidence, are in the history before
-this release.
+The former `PLAYERBOTS_CAPACITY_MODEL.md` and native validation notes, with
+their dated test evidence, are in the history before this release; the
+roadmap is kept as [`PLAYERBOTS_ROADMAP.md`](PLAYERBOTS_ROADMAP.md).
