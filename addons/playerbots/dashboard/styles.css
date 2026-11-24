@@ -158,6 +158,18 @@ tr.selected td { background: rgba(67, 215, 233, .07); }
 .pilot { align-items: center; display: flex; gap: 10px; min-width: 180px; }
 .pilot img, .pilot .ph { background: #182637; border: 1px solid rgba(148, 166, 190, .2); border-radius: 6px; flex: 0 0 34px; height: 34px; object-fit: cover; width: 34px; }
 .pilot .ph { align-items: center; color: var(--muted); display: flex; justify-content: center; }
+/* Corporation logos */
+.corp-logo { border-radius: 4px; flex: 0 0 auto; object-fit: contain; vertical-align: middle; }
+.corp-logo.inline { margin-right: 5px; position: relative; top: -1px; }
+.corp-logo.ph { align-items: center; background: #182637; border: 1px solid rgba(148, 166, 190, .2); color: var(--muted); display: inline-flex; font-size: 10px; font-weight: 600; height: 32px; justify-content: center; width: 32px; }
+.corp-logo.large { height: 64px; width: 64px; }
+.corp-logo.xl { height: 128px; width: 128px; }
+.corp-logo.xl.ph { font-size: 22px; }
+.corp-name, .corp-title { align-items: center; display: flex; gap: 10px; }
+.corp-title { gap: 14px; }
+.logo-row { display: flex; flex-wrap: wrap; gap: 22px; margin-bottom: 12px; }
+.logo-preview { align-items: center; display: flex; flex-direction: column; gap: 6px; max-width: 180px; text-align: center; }
+.logo-preview img, .logo-preview .ph { background: repeating-conic-gradient(#1a2633 0% 25%, #131d28 0% 50%) 50% / 16px 16px; border: 1px solid rgba(148, 166, 190, .2); }
 .pager { align-items: center; color: var(--muted); display: flex; font-size: 13px; gap: 8px; justify-content: flex-end; padding: 10px 16px; }
 .bar { background: #1d2a38; border-radius: 4px; display: inline-block; height: 6px; overflow: hidden; vertical-align: middle; width: 120px; }
 .bar i { background: linear-gradient(90deg, #38a9d3, #54d8d7); display: block; height: 100%; }

@@ -1,7 +1,7 @@
 // Dashboard shell: hash router, shared summary refresh, connection status.
 
 import { getJSON } from "./api.js";
-import { $, esc, rel } from "./ui.js";
+import { $, esc, rel, setCorporationLogos } from "./ui.js";
 import { closeDrawer } from "./drawer.js";
 import * as activity from "./view-activity.js";
 import * as corporations from "./view-corporations.js";
@@ -37,7 +37,13 @@ export function setCrumbs(parts) {
 export async function loadSummary(force = false) {
   if (!force && store.summary && Date.now() - store.summaryAt < REFRESH_MS - 500) return store.summary;
   try {
-    store.summary = await getJSON("/api/summary");
+    const [summary, logos] = await Promise.all([
+      getJSON("/api/summary"),
+      // Servers from before corporation logos answer 404; the pages then show none.
+      getJSON("/api/corporation-logos").catch(() => null),
+    ]);
+    store.summary = summary;
+    if (logos) setCorporationLogos(logos);
     store.summaryAt = Date.now();
     $("connection-dot").classList.remove("down");
     $("connection-state").textContent = "Connected to EveJS";

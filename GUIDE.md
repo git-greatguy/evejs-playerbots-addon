@@ -361,6 +361,30 @@ active wars, structures missing Quantum Cores or running low-power, and claimed
 sovereignty systems. Pilot tables are paginated at 100 rows per request, and
 the aggregate snapshot is cached for 30 seconds. The dashboard refreshes live views every 15 seconds while visible.
 
+### Corporation logos
+
+Any player or bot corporation (ID 2,000,000 or above) can have a picture logo.
+On the corporation's page, the **Logo** panel takes a PNG, JPEG, WebP or GIF
+of up to 20 MB. The browser centres it on a transparent square and makes PNGs
+at 32, 64, 128, 256, 512 and 1024 pixels; the server checks that each is a PNG
+of the right size (at most 2 MB) and stores them where EveJS keeps runtime
+images, as `Corporation/<corporationID>_<size>.png` beside the alliance logos.
+**Remove logo** deletes all six files. Uploads go through the same
+same-origin check and private API token as the other dashboard orders.
+
+Logos show next to the corporation's name across the dashboard: the
+corporation list and page, pilot rows, the pilot panel, History and the
+killboard. The dashboard serves them through the add-on API, so this works
+with or without anything else installed.
+
+The game client is different: it always draws a player corporation from its
+emblem layers and never asks the image server for a picture. The separate
+corporation-logo add-on adds a small client patch to EveJS's login script so
+corporations with a PNG are drawn from it. With that add-on installed, the
+Logo panel says so, and players see a new or changed logo from their next
+login. A client that cached an earlier picture of the same corporation may
+keep showing it until its `Pictures\Corporations` cache folder is cleared.
+
 ### Corporation and alliance name library
 
 Open **Settings → Corporation and alliance names**, paste a name library and

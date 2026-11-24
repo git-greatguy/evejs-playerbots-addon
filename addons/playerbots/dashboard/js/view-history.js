@@ -1,7 +1,7 @@
 // History: the operation archive, newest first, with filters and details.
 
 import { getJSON } from "./api.js";
-import { $, esc, num, isk, when, emptyRow, pager, showDialog, coalesce, replaceKeepingFocus } from "./ui.js";
+import { $, esc, num, isk, when, emptyRow, pager, showDialog, coalesce, replaceKeepingFocus, corpLogo } from "./ui.js";
 import { openPilot } from "./drawer.js";
 
 const state = { page: 0, pageSize: 50, status: "", kind: "", search: "", data: null };
@@ -39,7 +39,7 @@ const draw = coalesce(async () => {
         const proceeds = Number(op.proceeds) || 0;
         return `<tr>
         <td class="nowrap">${when(op.updatedAt) || "—"}</td>
-        <td><a href="#" data-pilot="${op.characterID}"><strong>${esc(op.characterName || `Pilot ${op.characterID}`)}</strong></a><span class="sub">${op.corporationTicker ? `[${esc(op.corporationTicker)}] ` : ""}${esc(op.corporationName || "")}</span></td>
+        <td><a href="#" data-pilot="${op.characterID}"><strong>${esc(op.characterName || `Pilot ${op.characterID}`)}</strong></a><span class="sub">${corpLogo(op.corporationID, 14, "corp-logo inline")}${op.corporationTicker ? `[${esc(op.corporationTicker)}] ` : ""}${esc(op.corporationName || "")}</span></td>
         <td><strong>${esc(op.kindLabel || op.kind)}</strong>${op.stageLabel ? `<span class="sub">${esc(op.stageLabel)}</span>` : ""}</td>
         <td><span class="state ${statusClass(op.status)}">${esc(op.status)}</span></td>
         <td>${esc(op.systemName || (op.systemID ? `System ${op.systemID}` : "—"))}${op.shipName ? `<span class="sub">${esc(op.shipName)}</span>` : ""}</td>

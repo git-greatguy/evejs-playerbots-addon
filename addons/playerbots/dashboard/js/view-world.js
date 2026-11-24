@@ -2,7 +2,7 @@
 // sovereignty (territory), and combat (killboard).
 
 import { getJSON } from "./api.js";
-import { $, esc, num, isk, stat, emptyRow, security } from "./ui.js";
+import { $, esc, num, isk, stat, emptyRow, security, corpLogo } from "./ui.js";
 
 let killboard = null;
 let killboardAt = 0;
@@ -71,7 +71,7 @@ function killboardHtml(data) {
     <div class="panel"><div class="panel-head"><h2>Playerbot pilots</h2></div><div class="table-wrap"><table><thead><tr><th>Pilot</th><th class="num">Kills</th><th class="num">Losses</th></tr></thead><tbody>
       ${(data.pilots || []).map((p) => `<tr><td><strong>${esc(p.name)}</strong></td><td class="num">${num(p.kills)}</td><td class="num">${num(p.losses)}</td></tr>`).join("") || emptyRow(3, "None yet.")}</tbody></table></div></div>
     <div class="panel"><div class="panel-head"><h2>Corporations</h2></div><div class="table-wrap"><table><thead><tr><th>Corporation</th><th class="num">Kills</th><th class="num">NPC kills</th><th class="num">Losses</th></tr></thead><tbody>
-      ${(data.corporations || []).map((c) => `<tr><td><strong>${esc(c.name)}</strong></td><td class="num">${num(c.kills)}</td><td class="num">${num(c.npcKills)}</td><td class="num">${num(c.losses)}</td></tr>`).join("") || emptyRow(4, "None yet.")}</tbody></table></div></div>
+      ${(data.corporations || []).map((c) => `<tr><td>${corpLogo(c.corporationID, 16, "corp-logo inline")}<strong>${esc(c.name)}</strong></td><td class="num">${num(c.kills)}</td><td class="num">${num(c.npcKills)}</td><td class="num">${num(c.losses)}</td></tr>`).join("") || emptyRow(4, "None yet.")}</tbody></table></div></div>
   </div>
   <div class="panel"><div class="panel-head"><h2>Most destroyed ships</h2></div><div class="table-wrap"><table><thead><tr><th>Ship</th><th class="num">Lost</th></tr></thead><tbody>
     ${(data.ships || []).map((s) => `<tr><td><div class="kill-ship">${shipIcon(s.typeID)}<span>${esc(s.name)}</span></div></td><td class="num">${num(s.lost)}</td></tr>`).join("") || emptyRow(2, "None yet.")}</tbody></table></div></div>`;

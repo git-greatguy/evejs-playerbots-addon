@@ -3,6 +3,22 @@
 Newest first. The Docker add-on keeps the upstream version number (0.2.152);
 the Windows launcher package adds a fourth number for its own releases.
 
+## Unreleased: corporation logos
+
+On the `corp-logos` branch of the ubermidas fork.
+
+- **Picture logos for corporations.** A corporation's page on the dashboard
+  has a **Logo** panel: choose a PNG, JPEG, WebP or GIF, check the preview and
+  save. The browser makes square PNGs from 32 to 1024 pixels and the server
+  stores them in EveJS's image folder, beside the alliance logos.
+  **Remove logo** puts the emblem back.
+- **Logos across the dashboard:** next to the corporation's name on the
+  corporation list and page, pilot rows, the pilot panel, History and the
+  killboard.
+- **In game** the logos need the separate corporation-logo add-on, which
+  patches the client at login to draw corporations with a PNG from it. The
+  Logo panel says whether it is installed.
+
 ## Unreleased: housekeeping
 
 On the `housekeeping` branch of the ubermidas fork, offered upstream.

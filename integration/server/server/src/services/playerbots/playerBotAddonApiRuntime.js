@@ -5,6 +5,8 @@ const http = require("node:http");
 const { monitorEventLoopDelay, performance } = require("node:perf_hooks");
 
 const MAX_BODY_BYTES = 16 * 1024;
+// Six base64 PNGs of a corporation logo, 32 to 1024 pixels.
+const MAX_LOGO_BODY_BYTES = 12 * 1024 * 1024;
 const CYCLE_TTL_MS = 30 * 60 * 1000;
 const ROSTER_SEED_RETRY_MS = 15_000;
 const LOAD_SAMPLE_INTERVAL_MS = 5_000;
@@ -44,6 +46,7 @@ function createPlayerBotAddonApiRuntime(options = {}) {
   const logger = options.logger || require("../../utils/logger");
   const telemetry = options.telemetry || require("./playerBotPerformanceTelemetry").getTelemetry();
   const loadController = options.loadController || require("./playerBotLoadController").getPlayerBotLoadController();
+  const corporationLogos = options.corporationLogos || require("./playerBotCorporationLogoStore").getCorporationLogoStore();
   const eventLoopDelay = options.eventLoopDelayMonitor || monitorEventLoopDelay({ resolution: 20 });
   const getEventLoopDelayP95Ms = options.getEventLoopDelayP95Ms || (() => Number(eventLoopDelay.percentile(95)) / 1_000_000 || 0);
   eventLoopDelay.enable();
@@ -177,12 +180,12 @@ function createPlayerBotAddonApiRuntime(options = {}) {
     return false;
   }
 
-  async function readBody(request) {
+  async function readBody(request, maxBytes = MAX_BODY_BYTES) {
     const chunks = [];
     let size = 0;
     for await (const chunk of request) {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
+      if (size > maxBytes) {
         const error = new Error("request body exceeds the size limit");
         error.statusCode = 413;
         throw error;
@@ -284,6 +287,33 @@ function createPlayerBotAddonApiRuntime(options = {}) {
       const detail = dashboard.getCorporationDetail(url.searchParams.get("corporationID"));
       if (!detail) return sendJson(response, 404, { error: "PLAYERBOT_CORPORATION_NOT_FOUND" });
       sendJson(response, 200, detail);
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/v1/dashboard/corporation-logos") {
+      sendJson(response, 200, corporationLogos.list());
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/v1/dashboard/corporation-logo") {
+      const bytes = corporationLogos.read(url.searchParams.get("corporationID"), url.searchParams.get("size"));
+      if (!bytes) return sendJson(response, 404, { error: "CORPORATION_LOGO_NOT_FOUND" });
+      response.writeHead(200, {
+        "cache-control": "no-store",
+        "content-length": bytes.length,
+        "content-type": "image/png",
+        "x-content-type-options": "nosniff",
+      });
+      response.end(bytes);
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/v1/dashboard/corporation-logo") {
+      const body = await readBody(request, MAX_LOGO_BODY_BYTES);
+      const result = body.remove === true
+        ? corporationLogos.remove(body.corporationID)
+        : corporationLogos.store(body.corporationID, body.images);
+      if (result.success) {
+        logger.info(`[PlayerBotsAddon] Dashboard ${body.remove === true ? "removed" : "saved"} the logo of corporation ${result.corporationID}.`);
+      }
+      sendJson(response, result.success ? 200 : Number(result.statusCode) || 400, result);
       return;
     }
     if (request.method === "POST" && url.pathname === "/v1/dashboard/corp-command") {

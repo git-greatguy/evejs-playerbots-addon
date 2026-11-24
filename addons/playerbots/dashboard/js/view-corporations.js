@@ -2,7 +2,7 @@
 // with its HQ, orders, priorities, roster and command log.
 
 import { getJSON, postJSON, corpCommand, botCommand } from "./api.js";
-import { $, esc, num, stateBar, stateTag, when, toast, confirmDialog, emptyRow, coalesce, replaceKeepingFocus, STATE_ORDER, STATE_LABELS } from "./ui.js";
+import { $, esc, num, stateBar, stateTag, when, toast, confirmDialog, emptyRow, coalesce, replaceKeepingFocus, corpLogo, corporationLogos, hasCorporationLogo, setCorporationLogos, STATE_ORDER, STATE_LABELS } from "./ui.js";
 import { createRoster, loadRoster, rosterHtml, bindRoster } from "./roster.js";
 
 let ctxRef = null;
@@ -35,7 +35,7 @@ async function renderList(fresh) {
   <div class="panel"><div class="table-wrap"><table>
     <thead><tr><th>Corporation</th><th class="num">Pilots</th><th style="min-width:200px">What they are doing</th><th>Top job</th><th>Priorities</th><th>Orders</th></tr></thead>
     <tbody>${corps.map((c) => `<tr class="clickable" data-corp="${c.corporationID}">
-      <td><strong>${esc(c.corporationName)}</strong> <span class="muted">[${esc(c.ticker)}]</span><span class="sub">${esc(c.allianceName || "No alliance")} · ${esc((c.specialties || []).join(", "))}</span></td>
+      <td><div class="corp-name">${corpLogo(c.corporationID, 32) || `<span class="corp-logo ph">${esc((c.ticker || "?").slice(0, 3))}</span>`}<span><strong>${esc(c.corporationName)}</strong> <span class="muted">[${esc(c.ticker)}]</span><span class="sub">${esc(c.allianceName || "No alliance")} · ${esc((c.specialties || []).join(", "))}</span></span></div></td>
       <td class="num">${num(c.botCount)}<span class="sub">${num(c.memberCount)} / ${c.memberLimit ? num(c.memberLimit) : "∞"} members</span></td>
       <td>${stateBar(statesFor(c.stateCounts), { small: true })}<span class="sub">${STATE_ORDER.filter((s) => (c.stateCounts || {})[s]).map((s) => `${STATE_LABELS[s]} ${num(c.stateCounts[s])}`).join(" · ")}</span></td>
       <td>${c.topActivity ? `${esc(c.topActivity.label)} <span class="muted">${num(c.topActivity.count)}</span>` : `<span class="muted">—</span>`}</td>
@@ -138,6 +138,135 @@ function selectionActions() {
     <button class="btn small" type="button" data-sel="upgrade">Upgrade ship</button>`;
 }
 
+// ------------------------------------------------------------------ logo
+
+let logoDraft = null;
+
+function logoHtml(c) {
+  const has = hasCorporationLogo(c.corporationID);
+  const current = has
+    ? `<div class="logo-preview">${corpLogo(c.corporationID, 128, "corp-logo xl")}<span class="muted">Current logo</span></div>`
+    : `<div class="logo-preview"><span class="corp-logo xl ph">${esc((c.ticker || "?").slice(0, 3))}</span><span class="muted">No logo yet. The game shows the corporation's emblem.</span></div>`;
+  const draft = logoDraft && logoDraft.corporationID === c.corporationID
+    ? `<div class="logo-preview"><img class="corp-logo xl" src="${esc(logoDraft.preview)}" alt=""><span class="muted">New logo, not saved</span></div>`
+    : "";
+  const note = corporationLogos.inGame
+    ? "Players see a new logo in game the next time they log in."
+    : "Players only see it in game once the corporation-logo add-on is installed on the server. The dashboard shows it either way.";
+  return `<div class="panel-head"><div><h2>Logo</h2><p>A picture for this corporation, shown here and in game in place of its emblem</p></div></div>
+  <div class="panel-body">
+    <div class="logo-row">${current}${draft}</div>
+    <div class="actions">
+      <label class="btn">Choose image…<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-logo="file" hidden></label>
+      ${draft ? `<button class="btn primary" type="button" data-logo="save">Save logo</button><button class="btn" type="button" data-logo="discard">Discard</button>` : ""}
+      ${has && !draft ? `<button class="btn" type="button" data-logo="remove">Remove logo</button>` : ""}
+    </div>
+    <p class="muted small">PNG, JPEG, WebP or GIF. A square picture of at least 256 × 256 looks best; other shapes are centred on a transparent background. ${esc(note)}</p>
+  </div>`;
+}
+
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("The file could not be read."));
+    reader.onload = () => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error("This file is not an image the browser can open."));
+      image.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// Square PNGs at every logo size, largest first, each scaled from the one
+// above it so small sizes stay sharp.
+function logoSizes(image) {
+  const sizes = [...(corporationLogos.sizes.length ? corporationLogos.sizes : [32, 64, 128, 256, 512, 1024])].sort((a, b) => b - a);
+  const images = {};
+  let source = image;
+  let sourceWidth = image.naturalWidth || image.width;
+  let sourceHeight = image.naturalHeight || image.height;
+  let preview = "";
+  for (const size of sizes) {
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext("2d");
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    const scale = Math.min(size / sourceWidth, size / sourceHeight);
+    const width = Math.round(sourceWidth * scale);
+    const height = Math.round(sourceHeight * scale);
+    context.drawImage(source, Math.round((size - width) / 2), Math.round((size - height) / 2), width, height);
+    const url = canvas.toDataURL("image/png");
+    images[String(size)] = url.slice(url.indexOf(",") + 1);
+    if (size === 256) preview = url;
+    source = canvas;
+    sourceWidth = size;
+    sourceHeight = size;
+  }
+  const largest = images[String(sizes[0])] || "";
+  if (largest.length * 0.75 > 2 * 1024 * 1024) throw new Error("This picture is too detailed: its 1024 × 1024 PNG is over 2 MB. Try a simpler image.");
+  return { images, preview };
+}
+
+async function refreshLogos() {
+  try {
+    setCorporationLogos(await getJSON("/api/corporation-logos"));
+  } catch {
+    // An older server without logo support: keep what we have.
+  }
+}
+
+function drawLogo() {
+  if (detail && $("corp-logo")) $("corp-logo").innerHTML = logoHtml(detail.corporation);
+}
+
+function bindLogo() {
+  $("corp-logo").addEventListener("change", async (event) => {
+    if (event.target.dataset.logo !== "file") return;
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    try {
+      if (file.size > 20 * 1024 * 1024) throw new Error("Choose an image smaller than 20 MB.");
+      const { images, preview } = logoSizes(await loadImage(file));
+      logoDraft = { corporationID: detail.corporation.corporationID, images, preview };
+    } catch (error) {
+      toast(error.message, "bad");
+    }
+    drawLogo();
+  });
+  $("corp-logo").addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-logo]");
+    if (!button) return;
+    const c = detail.corporation;
+    const action = button.dataset.logo;
+    if (action === "discard") {
+      logoDraft = null;
+      return void drawLogo();
+    }
+    try {
+      let result;
+      if (action === "save" && logoDraft) {
+        button.disabled = true;
+        result = await postJSON("/api/corporation-logo", { corporationID: c.corporationID, images: logoDraft.images });
+        logoDraft = null;
+      } else if (action === "remove") {
+        if (!(await confirmDialog("Remove logo", `Remove the logo of ${c.corporationName}? The game shows its emblem again after players next log in.`, "Remove logo"))) return;
+        result = await postJSON("/api/corporation-logo", { corporationID: c.corporationID, remove: true });
+      } else {
+        return;
+      }
+      toast(result.message, "good");
+    } catch (error) {
+      toast(error.message, "bad");
+    }
+    await refreshLogos();
+    await drawDetail(false);
+  });
+}
+
 function logHtml() {
   const log = detail.log || [];
   return `<div class="panel-head"><div><h2>Command log</h2><p>Orders from the dashboard and chat, newest first</p></div></div>
@@ -152,11 +281,12 @@ const drawDetail = coalesce(async (reloadRoster) => {
   const c = data.corporation;
   if (!priorityDirty) priorityDraft = (c.priorityIDs || []).map(String);
   ctxRef.setCrumbs([{ label: "Corporations", href: "#corporations" }, { label: c.corporationName }]);
-  $("corp-head").innerHTML = `<div class="page-head"><div><h1>${esc(c.corporationName)} <span class="muted">[${esc(c.ticker)}]</span></h1>
-    <p>${esc(c.allianceName || "No alliance")} · ${num(c.botCount)} pilots · ${num(c.memberCount)} / ${c.memberLimit ? num(c.memberLimit) : "∞"} members · ${esc((c.specialties || []).join(", "))}</p></div>
+  $("corp-head").innerHTML = `<div class="page-head"><div class="corp-title">${corpLogo(c.corporationID, 64, "corp-logo large")}<div><h1>${esc(c.corporationName)} <span class="muted">[${esc(c.ticker)}]</span></h1>
+    <p>${esc(c.allianceName || "No alliance")} · ${num(c.botCount)} pilots · ${num(c.memberCount)} / ${c.memberLimit ? num(c.memberLimit) : "∞"} members · ${esc((c.specialties || []).join(", "))}</p></div></div>
     ${c.held ? `<span class="pill warn">Recalled to HQ</span>` : c.recalledPilots ? `<span class="pill warn">${num(c.recalledPilots)} pilot(s) recalled</span>` : ""}</div>`;
   $("corp-status").innerHTML = `<div class="panel-head"><div><h2>What its pilots are doing</h2><p>Click a state to filter the pilot list</p></div>${c.topActivity ? `<span class="muted">Top job: <strong>${esc(c.topActivity.label)}</strong> (${num(c.topActivity.count)})</span>` : ""}</div><div class="panel-body">${stateBar(statesFor(c.stateCounts), { selected: [...roster.states] })}</div>`;
   $("corp-orders").innerHTML = ordersHtml();
+  if (!$("corp-logo").contains(document.activeElement)) $("corp-logo").innerHTML = logoHtml(c);
   replaceKeepingFocus($("corp-hq"), hqHtml());
   $("corp-prio").innerHTML = prioritiesHtml(summary.corporationPriorityOptions || []);
   replaceKeepingFocus($("corp-roster"), rosterHtml(roster, { specialties: c.specialties || [], selectionActions: selectionActions() }));
@@ -212,10 +342,13 @@ async function renderDetail(fresh) {
     }
     $("view").innerHTML = `<div id="corp-head"><div class="empty">Loading corporation…</div></div>
       <div class="grid-2"><div id="corp-orders" class="panel"></div><div id="corp-hq" class="panel"></div></div>
+      <div id="corp-logo" class="panel"></div>
       <div id="corp-status" class="panel"></div>
       <div class="grid-2"><div id="corp-prio" class="panel"></div><div id="corp-log" class="panel" style="max-height:360px;overflow-y:auto"></div></div>
       <div id="corp-roster" class="panel"></div>`;
     bindRoster($("corp-roster"), roster, (reload) => drawDetail(reload));
+    if (logoDraft && logoDraft.corporationID !== id) logoDraft = null;
+    bindLogo();
     $("corp-roster").addEventListener("click", (event) => {
       const button = event.target.closest("[data-sel]");
       if (button) void runSelection(button.dataset.sel);
