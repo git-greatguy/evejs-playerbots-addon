@@ -1,6 +1,6 @@
 "use strict";
 
-// Behaviour checks from @rizonx's Luna 0.2.152.13 package
+// Behaviour checks from @xrizonx's Luna 0.2.152.13 package
 // (tests/performance-overlay.test.cjs there), adapted to this repository's
 // layout. The package-integrity part of that file is covered by
 // windows-native-package.test.cjs.

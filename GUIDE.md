@@ -1121,7 +1121,7 @@ approval flow.
 
 ### Agent missions
 
-Since Luna 0.2.152.14 (by @rizonx), idle pilots can run level 1 missions for
+Since Luna 0.2.152.14 (by @xrizonx), idle pilots can run level 1 missions for
 EveJS's own agents: **Security** (combat sites) for security pilots, **Mining**
 for industry pilots and **Distribution** (courier) for trade pilots. A pilot
 takes a mission only from a high-security agent (0.45 or better) within 10
@@ -1373,7 +1373,7 @@ each pass in one slice, as earlier releases did; the pass is still measured.
 
 ### Disk writes
 
-Luna 0.2.152.15 (by @rizonx) cut the server's routine disk writes:
+Luna 0.2.152.15 (by @xrizonx) cut the server's routine disk writes:
 
 - **Bot tasks are saved one row each.** Earlier releases rewrote the whole
   task queue, history included, on every task change; a busy server wrote
