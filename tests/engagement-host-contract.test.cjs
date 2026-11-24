@@ -10,9 +10,12 @@ function checkMethods(object, source, names) {
   }
 }
 
-test("the supported combined checkout exposes the engagement host contract", () => {
+// Needs a full EveJS checkout with the add-on installed; skipped without one.
+test("the supported combined checkout exposes the engagement host contract", {
+  skip: process.env.EVEJS_SOURCE_ROOT ? false
+    : "set EVEJS_SOURCE_ROOT to a combined EveJS/Playerbots checkout to run this",
+}, () => {
   const root = process.env.EVEJS_SOURCE_ROOT;
-  assert.ok(root, "Set EVEJS_SOURCE_ROOT to the combined EveJS/Playerbots checkout containing server/src.");
   const src = path.resolve(root, "server/src");
   const load = (relative) => require(path.join(src, relative));
   const space = load("services/playerbots/playerBotSpaceRuntime");
