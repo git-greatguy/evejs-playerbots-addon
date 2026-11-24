@@ -190,7 +190,7 @@
   },
   "playerCorpProfitSharePercent": {
     "label": "Player corporation bot profit share (%)",
-    "description": "Share of each bot’s cumulative net profit paid to its player-led corporation. Set 0 to disable new contributions.",
+    "description": "Share of each bot\u2019s cumulative net profit paid to its player-led corporation. Set 0 to disable new contributions.",
     "group": "Corporation income",
     "type": "integer",
     "default": 60,
@@ -225,5 +225,21 @@
     "type": "boolean",
     "default": true,
     "env": "REFRESH_EXISTING_PORTRAITS"
+  },
+  "scifiCorporationNames": {
+    "label": "Famous sci-fi names for new bot corporations",
+    "description": "New bot corporations take an unused name from a list of famous science fiction companies (Weyland-Yutani, Tyrell Corporation, Kuat Drive Yards and more). Names in the dashboard's name library come first. Turn off to name them after their specialty.",
+    "group": "New corporations",
+    "type": "boolean",
+    "default": true,
+    "env": "SCIFI_CORPORATION_NAMES"
+  },
+  "corporationEmblems": {
+    "label": "Random emblems for new bot corporations",
+    "description": "New bot corporations get a random emblem from the game's corporation logo shapes and colours. Turn off to keep EveJS's default emblem, for example when another add-on supplies PNG logos.",
+    "group": "New corporations",
+    "type": "boolean",
+    "default": true,
+    "env": "CORPORATION_EMBLEMS"
   }
 }

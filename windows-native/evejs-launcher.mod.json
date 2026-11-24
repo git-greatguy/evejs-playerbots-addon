@@ -388,6 +388,32 @@
           "refreshExistingPortraits"
         ],
         "restart": "game_server"
+      },
+      {
+        "label": "Famous sci-fi names for new bot corporations",
+        "description": "New bot corporations take an unused name from a list of famous science fiction companies (Weyland-Yutani, Tyrell Corporation, Kuat Drive Yards and more). Names in the dashboard's name library come first. Turn off to name them after their specialty.",
+        "group": "New corporations",
+        "type": "boolean",
+        "default": true,
+        "id": "scifiCorporationNames",
+        "file": "options",
+        "key": [
+          "scifiCorporationNames"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Random emblems for new bot corporations",
+        "description": "New bot corporations get a random emblem from the game's corporation logo shapes and colours. Turn off to keep EveJS's default emblem, for example when another add-on supplies PNG logos.",
+        "group": "New corporations",
+        "type": "boolean",
+        "default": true,
+        "id": "corporationEmblems",
+        "file": "options",
+        "key": [
+          "corporationEmblems"
+        ],
+        "restart": "game_server"
       }
     ]
   }

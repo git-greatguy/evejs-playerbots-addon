@@ -51,8 +51,13 @@ next.
 - Every bot gets a portrait from 32 bundled faces, with no internet needed.
   Missing or blank portraits are repaired in the background, and existing
   bots can be refreshed once after an upgrade (custom portraits are kept).
-- Corporation and alliance names can come from a name list you edit on the
-  dashboard.
+- New bot corporations are named after famous science fiction companies
+  (129 of them, from Weyland-Yutani and Tyrell Corporation to Kuat Drive Yards
+  and Aperture Science), each with its own ticker, and get a random emblem
+  built from the game's own corporation logo shapes and colours. Names you put
+  in the dashboard's name library come first; once every sci-fi name is
+  taken, corporations are named after their specialty.
+- Alliance names can come from the same name library.
 
 ### Work they do without being told
 
@@ -487,7 +492,7 @@ full. The dashboard settings above can also be given starting values here
 (`TARGET`, `MAX_ONLINE`, `MAX_PER_SYSTEM` and so on; see
 [`OPERATIONS.md`](OPERATIONS.md#configure-bot-count-and-connection-rotation)).
 
-#### Recruitment, corporations and portraits
+#### Corporations, recruitment and portraits
 
 | Variable | Default | What it does |
 | --- | --- | --- |
@@ -500,6 +505,8 @@ full. The dashboard settings above can also be given starting values here
 | `BOT_CORP_OPERATION_SHARE_PERCENT` | 20 | Share of each profitable job paid to a bot-led corporation |
 | `CORP_MIN_PROFIT_SHARE_ISK` | 1 | Smallest corporation payout; smaller amounts wait until they reach it |
 | `REFRESH_EXISTING_PORTRAITS` | `1` | `0` keeps existing bot portraits instead of refreshing them once after upgrading |
+| `SCIFI_CORPORATION_NAMES` | `1` | `0` names new bot corporations after their specialty instead of famous sci-fi companies |
+| `CORPORATION_EMBLEMS` | `1` | `0` leaves new bot corporations on EveJS's default emblem instead of a random one, for example when another add-on supplies PNG logos |
 
 Recruitment takes bots from NPC corporations or their own specialist
 corporation, leaves at least five in each specialist corporation, and never
@@ -670,6 +677,19 @@ recruitment, income and portrait settings are passed through the Docker
 Compose file. In Docker, the new defaults apply after the next rebuild,
 including the larger corporation income shares and the 15,000-seat member
 limit for player corporations.
+
+### Corporation names and emblems (this copy)
+
+- New bot corporations take an unused name from a built-in list of famous
+  sci-fi companies, with a unique ticker, unless the dashboard's name library
+  has names for that empire. Existing corporations keep their names.
+- New bot corporations get a random emblem: one to three layers from the
+  client's corporation logo shapes, each in a different colour.
+- Both can be turned off (`SCIFI_CORPORATION_NAMES=0`,
+  `CORPORATION_EMBLEMS=0`, or under **Configure → New corporations** on
+  Windows). The emblem switch is there for a future add-on that replaces
+  corporation logos with PNG images; that work is kept separately and is not
+  part of Playerbots.
 
 ### Installing a patch
 

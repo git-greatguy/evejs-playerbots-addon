@@ -53,6 +53,9 @@ them; it stops on anything else.
 - **Portrait repair** for existing and new bots (below).
 - **Windows multicore support**, with the multicore TCP file detected at
   install.
+- **Corporation names and emblems**: new bot corporations take famous sci-fi
+  company names and random in-game emblems. Both can be turned off under
+  **Configure → New corporations**.
 - **Lighter server load**: buffered combat progress saves, cheaper task
   claims and roster lookups, and no full-roster scans for corporation counts.
 

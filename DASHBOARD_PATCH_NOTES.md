@@ -261,6 +261,32 @@ changed, so every file merged cleanly.
   native driver, API and dashboard started together with launcher settings
   locked.
 
+## Corporation names and emblems (23 Nov 2026)
+
+- `playerBotSciFiCorporationNames.js` (new): 129 famous science fiction
+  company names and `chooseCorporationName()`, which returns a random unused
+  name with a free 2–5 letter ticker (initials first, then letter runs).
+  `EVEJS_PLAYER_BOTS_SCIFI_CORPORATION_NAMES=0` turns it off.
+- `playerBotCorporationEmblemRuntime.js` (new): `chooseEmblem()` picks one to
+  three layers from the client's corporation logo shapes (graphic IDs
+  416–578; 415 is "no shape") with distinct colours (671–685).
+  `emblemForNewCorporation()` returns nothing when
+  `EVEJS_PLAYER_BOTS_CORPORATION_EMBLEMS=0`, leaving EveJS's default emblem
+  for a future PNG logo add-on.
+- `playerBotRuntime.js`: a new bot corporation uses the name library first,
+  then the sci-fi list, then the specialty name; `createCorporationForSpecialty()`
+  and the Wildfire corporation store a random emblem. Existing corporations
+  are not changed.
+- Compose and the Windows launcher (group **New corporations**) expose both
+  switches, on by default.
+- Tests: sci-fi names and emblems during real roster seeding, both switches,
+  emblem ranges and layer rules, and that every name fits the client and
+  gets its own ticker.
+- The custom PNG corporation logo work (client logo patch, icon generator,
+  `corporationState.js` change) was moved out of the EveJS folder into a
+  separate, parked add-on project outside this repository. Playerbots
+  does not include or depend on it.
+
 ## Known limits
 
 - Resuming a held pilot with the `/playerbots resume` chat command does not

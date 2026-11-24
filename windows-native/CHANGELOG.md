@@ -9,6 +9,8 @@
 - Headquarters upkeep: structure maintenance runs before HQ mining and every
   owned structure is maintained.
 - The dashboard also accepts `localhost` as well as `127.0.0.1`.
+- New bot corporations take famous sci-fi company names and random in-game
+  emblems (Configure → New corporations).
 
 # 0.2.152.7
 

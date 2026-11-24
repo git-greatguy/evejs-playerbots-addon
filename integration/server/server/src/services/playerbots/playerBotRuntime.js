@@ -440,9 +440,15 @@ function createCorporationForSpecialty(specialty, founderID, shardIndex = 0, sel
     foundingOperationID,
   });
   if (!result.success) throw new Error(result.errorMsg || "PLAYERBOT_CORP_CREATE_FAILED");
+  // New bot corporations get a random emblem from the client's logo library
+  // unless EVEJS_PLAYER_BOTS_CORPORATION_EMBLEMS=0.
   const initialized = require("../corporation/corporationRuntimeState").updateCorporationRecord(
     result.data.corporationRecord.corporationID,
-    { description: specialty.name, ...(selectedName ? { tickerName: selectedName.ticker } : {}) },
+    {
+      description: specialty.name,
+      ...(selectedName ? { tickerName: selectedName.ticker } : {}),
+      ...require("./playerBotCorporationEmblemRuntime").emblemForNewCorporation(),
+    },
   );
   if (!initialized.success) throw new Error(initialized.errorMsg || "PLAYERBOT_CORP_INITIALIZATION_FAILED");
   return initialized.data?.corporationRecord || getCorporationRecord(result.data.corporationRecord.corporationID);
@@ -496,6 +502,10 @@ function joinRevengeCorporation(characterID) {
     foundingOperationID: wildfire.REVENGE_FOUNDING_OPERATION_ID,
   });
   if (!result.success) throw new Error(result.errorMsg || "PLAYERBOT_CORP_CREATE_FAILED");
+  const emblem = require("./playerBotCorporationEmblemRuntime").emblemForNewCorporation();
+  if (Object.keys(emblem).length) {
+    require("../corporation/corporationRuntimeState").updateCorporationRecord(result.data.corporationRecord.corporationID, emblem);
+  }
   ensureCharacterMemberState(Number(result.data.corporationRecord.corporationID), characterID);
   return Number(result.data.corporationRecord.corporationID);
 }
@@ -509,10 +519,15 @@ function createBotInTeam(specialty, corporationID, founder = false, shardIndex =
     corporationID = 0;
   }
   const { origin, characterName } = chooseNewBotIdentity();
-  // Check an optional library before creating a founder, so exhaustion cannot create orphan pilots.
-  const selectedName = !revenge && (founder || !Number(corporationID)) &&
-    !findCorporationByFoundingOperationID(foundingOperationIDForShard(specialty.id, shardIndex))
-    ? require("./playerBotNameLibraryRuntime").getRuntime().chooseName(origin?.raceID || 1, "corporations")
+  // Check the name library before creating a founder, so exhaustion cannot
+  // create orphan pilots. Without library names for this empire, new
+  // corporations take an unused famous sci-fi company name, and fall back to
+  // the specialty name once those run out.
+  const newCorporation = !revenge && (founder || !Number(corporationID)) &&
+    !findCorporationByFoundingOperationID(foundingOperationIDForShard(specialty.id, shardIndex));
+  const selectedName = newCorporation
+    ? require("./playerBotNameLibraryRuntime").getRuntime().chooseName(origin?.raceID || 1, "corporations") ||
+      require("./playerBotSciFiCorporationNames").chooseCorporationName()
     : null;
   const characterResult = require("../character/charService").createPlayerBotCharacter(
     characterName,
