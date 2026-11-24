@@ -616,8 +616,8 @@
     },
     "server/src/services/playerbots/playerBotEconomyRuntime.js": {
       "baseSha256": null,
-      "sourceSha256": "3b5ea672e252b48f07e425f5accb7a8e5ed2a9db55c639f60c54aae49786fd53",
-      "overlaySha256": "3b5ea672e252b48f07e425f5accb7a8e5ed2a9db55c639f60c54aae49786fd53",
+      "sourceSha256": "4ef186bee17e08d82b4158549084b55ae74038ba7b41cf32c458bdfe72215649",
+      "overlaySha256": "4ef186bee17e08d82b4158549084b55ae74038ba7b41cf32c458bdfe72215649",
       "subsystem": "playerbots-core"
     },
     "server/src/services/playerbots/playerBotEngagementPolicy.js": {
