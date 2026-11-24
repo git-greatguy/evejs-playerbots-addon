@@ -1,4 +1,4 @@
-# Playerbots 0.2.152.11 for Windows (EVEJS Launcher)
+# Playerbots 0.2.152.12 for Windows (EVEJS Launcher)
 
 This package runs Playerbots inside a native Windows EveJS server managed by
 EVEJS Launcher, with no Docker. It carries the Luna update by
@@ -31,7 +31,7 @@ Settings saved in the launcher apply at the next Game start. The dashboard
 shows them locked with the note "Set in EVEJS Launcher"; everything else on
 the dashboard's Settings page still works there.
 
-## Upgrade from 0.2.152.10 or earlier
+## Upgrade from 0.2.152.11 or earlier
 
 Stop Game and Market. Keep a copy of `config/playerbots-native.json`. In
 **Mods**, disable and remove the previous Playerbots entry, import this ZIP
