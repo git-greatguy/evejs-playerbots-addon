@@ -33,11 +33,8 @@ PACKAGE_DIR = "evejs-playerbots-native"
 NATIVE_PREFIX = "server/playerbots-native"
 DOCS = (
     "GUIDE.md",
-    "LOCAL_DEFENSE.md",
-    "COMMUNITY_FITTINGS.md",
-    "PLAYERBOTS_CAPACITY_MODEL.md",
+    "CHANGELOG.md",
     "THIRD_PARTY_NOTICES.md",
-    "DASHBOARD_PATCH_NOTES.md",
     "LICENSE",
 )
 
@@ -141,7 +138,7 @@ def verify(package: Path, overlay: dict) -> None:
 def build(package: Path) -> dict:
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     history = load_history()
-    for name in ("evejs-launcher.mod.json", "helper.cjs", "README.md", "CHANGELOG.md"):
+    for name in ("evejs-launcher.mod.json", "helper.cjs", "README.md"):
         copy(NATIVE / name, package / name)
     for name in DOCS:
         copy(REPO / name, package / name)
