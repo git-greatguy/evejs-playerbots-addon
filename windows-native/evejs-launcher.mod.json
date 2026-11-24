@@ -2,7 +2,7 @@
   "schemaVersion": 3,
   "id": "evejs-playerbots-native",
   "displayName": "Playerbots (Windows, Luna Update)",
-  "version": "0.2.152.11",
+  "version": "0.2.152.12",
   "description": "Native EveJS 261115.2 Playerbots with the Luna gameplay updates, corporation recruitment, Windows multicore support and the overhauled operator dashboard.",
   "kind": "source-integrated",
   "supportedBackends": [

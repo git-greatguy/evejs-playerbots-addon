@@ -1066,14 +1066,8 @@
     }
   },
   "addonFiles": {
-    "addons/playerbots/GUIDE.md": "0ac5d654a1abe4adb6551c3fa2f6b658c494f1d2de43e26f08528a874c2f1e71",
-    "addons/playerbots/INSTALLATION.md": "3e173ff5e4ca3403410fb1549f48f006617feca0a00e477be42a79d7c7e5058a",
     "addons/playerbots/LICENSE": "ce3fb82d9ee80a1cb0e548f9b0560ead52378ee2b4e826fd9459b4acf7075d89",
-    "addons/playerbots/LOCAL_DEFENSE.md": "212bc0e1fe6447aba93b1794327bc1fc3e475445f19809d67a04624e2d3ebd3a",
-    "addons/playerbots/OPERATIONS.md": "8bc83285f866dd259ba39bc5d6779bb1c9de21629260a05e89166be307270970",
-    "addons/playerbots/README.md": "7c8ff4b9943af0d1b204086efdeb9abcb8ee07f8f83f61441554fee486a9e19f",
     "addons/playerbots/THIRD_PARTY_NOTICES.md": "4e53a2b31f3965241b9d182b7764420e4f121213267ebc3936682544204c34dc",
-    "addons/playerbots/TROUBLESHOOTING.md": "d3af657f4ee93a2a3c93e53e7e3f2dba321f492d1e85f6e6c9a569d250085191",
     "addons/playerbots/compose.override.yaml": "8452c2e820f86e592487c2595db001e9bda60445a1de33f3365f0038bd4038d8",
     "addons/playerbots/dashboard/favicon.svg": "b253bad68ca8a9fbff82054eeb86dc5084ca42c3f3168144b6866a81da7c3159",
     "addons/playerbots/dashboard/index.html": "c49aa809a82f94c63d26a401ac43de93c9bdf617ca1cb182b0719f0044001368",
@@ -1093,6 +1087,7 @@
     "addons/playerbots/dashboard/styles.css": "fad074193e54e9d45401d8273ed252484ffae056ae78e339a226ad9502952394",
     "addons/playerbots/dashboard-server.js": "b37c72487dfcc9e042abfc3e278f8da5b1de3a611bf36958e92af9ff55333003",
     "addons/playerbots/index.js": "2b087cf854c063875e1ac20d601934bf36ba4277cbb80f2a85e423745a0ef878",
-    "addons/playerbots/manifest.json": "d482e20dc9afc59f02a8808f447d76d4825387ecf4faeb6f67c9d8f3d8da85df"
+    "addons/playerbots/manifest.json": "d482e20dc9afc59f02a8808f447d76d4825387ecf4faeb6f67c9d8f3d8da85df",
+    "addons/playerbots/playerbots.py": "986e36722ff611ed0fb26e5b980bde73ed4569deda751ca778013aa1dc5f0d0d"
   }
 }
