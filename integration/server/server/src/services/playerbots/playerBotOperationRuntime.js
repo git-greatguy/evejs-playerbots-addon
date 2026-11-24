@@ -4171,9 +4171,13 @@ async function advanceFleetFollow(operation, bot, dependencies = {}) {
     return finishFollow("Fleet follow ended because the pilot and target are no longer together in the commanded fleet.");
   }
 
-  const bots = playerBots.listBots();
-  const botIDs = new Set(bots.map((entry) => positive(entry && entry.characterID)).filter(Boolean));
-  if (![...botFleet.members.keys()].some((memberID) => !botIDs.has(positive(memberID)))) {
+  // Check fleet members against the roster index instead of rebuilding the
+  // whole roster on every follow step.
+  const isBot = typeof playerBots.hasBotProfile === "function"
+    ? (id) => playerBots.hasBotProfile(id)
+    : ((ids) => (id) => ids.has(id))(new Set(playerBots.listBots()
+      .map((entry) => positive(entry && entry.characterID)).filter(Boolean)));
+  if (![...botFleet.members.keys()].some((memberID) => !isBot(positive(memberID)))) {
     return finishFollow("Fleet follow ended because no human pilot remains in the fleet.");
   }
 

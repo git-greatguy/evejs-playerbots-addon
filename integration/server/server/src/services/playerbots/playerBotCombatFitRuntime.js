@@ -47,12 +47,15 @@ function calculateCapacitorUse(bot, shipID, modules) {
     const effects = fitting.getTypeEffectRecords(Number(module.typeID)) || [];
     const activation = effects.filter((effect) =>
       Number(effect && effect.effectCategoryID) === 1 && Number(effect.dischargeAttributeID) > 0);
-    for (const effect of activation) {
+    // A module draws its capacitor need once per cycle, however many
+    // activation effects it lists; counting per effect overstated cap use.
+    if (activation.length) {
       const discharge = Number(fitting.getTypeAttributeValue(module.typeID, "capacitorNeed")) || 0;
       const durationMs = Number(fitting.getTypeAttributeValue(module.typeID, "duration", "speed")) || 0;
-      if (!(discharge > 0) || !(durationMs > 0)) continue;
-      activatedModules += 1;
-      capPerSecond += discharge / (durationMs / 1000);
+      if (discharge > 0 && durationMs > 0) {
+        activatedModules += 1;
+        capPerSecond += discharge / (durationMs / 1000);
+      }
     }
     const offensiveWeapon = fitting.typeHasEffectName(module.typeID, "turretFitted") ||
       fitting.typeHasEffectName(module.typeID, "launcherFitted");

@@ -137,7 +137,11 @@ function isEnabled(corporationID) {
 function resolveDepot(corporationID) {
   const id = positive(corporationID);
   try {
-    const structures = load("services/structure/structureState").listStructures();
+    // Read-only view: listStructures() would deep-copy every structure.
+    const structureState = load("services/structure/structureState");
+    const structures = typeof structureState.peekStructures === "function"
+      ? structureState.peekStructures()
+      : structureState.listStructures();
     const { getCorporationHeadquartersStructure } = require("./playerBotStructurePriorityRuntime");
     const structure = getCorporationHeadquartersStructure(id, structures, state.deps.headquarters().getHeadquarters(id));
     if (structure) {

@@ -132,10 +132,20 @@ function assess(bot, target, scene, operation, legal, options = {}) {
   };
   if (JSON.stringify(stored) !== JSON.stringify(next)) {
     repo.ensureTable("playerBots");
-    if (
-      !repo.write("playerBots", key, next).success ||
-      !repo.flushTableSync("playerBots")?.success
-    )
+    if (!repo.write("playerBots", key, next).success)
+      throw new Error("DEFENSE_DECISION_PERSIST_FAILED");
+    // The hit-point observation in memory changes every second of a fight.
+    // Flush to disk synchronously only when the decision itself changes; the
+    // memory is saved by the store's normal scheduled flush.
+    const decisionChanged =
+      stored.identity !== next.identity ||
+      stored.shipID !== next.shipID ||
+      stored.fitSignature !== next.fitSignature ||
+      stored.validated !== next.validated ||
+      stored.action !== next.action ||
+      stored.reason !== next.reason ||
+      Boolean(stored.memory?.withdrawing) !== Boolean(next.memory?.withdrawing);
+    if (decisionChanged && !repo.flushTableSync("playerBots")?.success)
       throw new Error("DEFENSE_DECISION_PERSIST_FAILED");
   }
   return decision;

@@ -50,6 +50,7 @@ const {
   PI_COLLECTION_COHORT_SIZE,
   PI_SETUP_COHORT_SIZE,
   isPiWorkCohort,
+  shouldCollectLaunch,
   chooseHeadquartersAssignment,
   canStartHeadquartersAssignment,
   headquartersWorkTakesPriority,
@@ -197,8 +198,7 @@ function isBusy(characterID) {
       (operation?.kind === "upgrade" && operation?.resumeCombat && !["stopped", "completed"].includes(operation.status)) ||
       (operation?.status === "review" && !retryableColonyReview)) return true;
   const structureRuntime = require("./playerBotStructureRuntime");
-  const bot = require("./playerBotRuntime").getBotByCharacterID?.(Number(characterID)) ||
-    require("./playerBotRuntime").listBots().find((entry) => Number(entry.characterID) === Number(characterID));
+  const bot = require("./playerBotRuntime").getBotByCharacterID(Number(characterID));
   const headquartersNeeded = bot && structureRuntime.getHeadquartersPriority?.(bot) === 0 &&
     headquartersWorkTakesPriority({
       hasOwnedStructure: structureRuntime.isMissingCorporationHeadquarters?.(bot) !== true,
@@ -1328,8 +1328,7 @@ function chooseAssignment(bot, options = {}) {
           operations.hasRoleShipFit(bot, "security")) return { kind: "combat", mode: "war" };
     }
   }
-  if (!options.prioritizeHeadquarters && isPiWorkCohort(bot, PI_COLLECTION_COHORT_SIZE) &&
-      operations.nextPlanetaryLaunch(bot)) {
+  if (!options.prioritizeHeadquarters && shouldCollectLaunch(bot, operations.nextPlanetaryLaunch(bot))) {
     return { kind: "pi-collect" };
   }
   // Keep automatic colony setup to a small cohort so most pilots remain
@@ -1872,6 +1871,29 @@ async function runDirectorInternal(bots = [], options = {}) {
   });
 
   const autonomy = require("./playerBotAutonomyRuntime");
+  // Resolve each corporation's headquarters once per pass. The structure list
+  // is a read-only view; the director only reads IDs and systems from it.
+  const corpStructureRuntime = require("./playerBotStructurePriorityRuntime");
+  const headquartersByCorporation = new Map();
+  let structuresForPass = null;
+  const corporationHeadquartersFor = (corporationID) => {
+    if (!corporationID) return { structure: null, saved: null };
+    if (headquartersByCorporation.has(corporationID)) return headquartersByCorporation.get(corporationID);
+    if (!structuresForPass) {
+      const structureState = require("../structure/structureState");
+      structuresForPass = typeof structureState.peekStructures === "function"
+        ? structureState.peekStructures()
+        : structureState.listStructures();
+    }
+    let saved = null;
+    try { saved = require("./playerBotCorpCommands").getHeadquarters(corporationID); } catch (_) { saved = null; }
+    const entry = {
+      structure: corpStructureRuntime.getCorporationHeadquartersStructure(corporationID, structuresForPass, saved),
+      saved,
+    };
+    headquartersByCorporation.set(corporationID, entry);
+    return entry;
+  };
   let assignmentAttempts = 0;
   budget.switchStage("assignment");
   for (const bot of candidates) {
@@ -1907,14 +1929,7 @@ async function runDirectorInternal(bots = [], options = {}) {
         hasManagerAuthority: structureRuntime.getHeadquartersPriority?.(bot) === 0,
         escortNeeded: Boolean(humanControlled || escortAssignment || coreInstallPlan),
       });
-    const corpStructureRuntime = require("./playerBotStructurePriorityRuntime");
-    const corporationHeadquarters = corporationID
-      ? corpStructureRuntime.getCorporationHeadquartersStructure(
-        corporationID,
-        require("../structure/structureState").listStructures(),
-        require("./playerBotCorpCommands").getHeadquarters(corporationID),
-      )
-      : null;
+    const corporationHeadquarters = corporationHeadquartersFor(corporationID).structure;
     const headquartersOperation = operationRuntime.getOperation(bot.characterID);
     const headquartersWorkCanStart = headquartersStructure &&
       !headquartersOperation?.pending &&
@@ -1925,7 +1940,7 @@ async function runDirectorInternal(bots = [], options = {}) {
       ? corpStructureRuntime.getHQHaulDepot(
         corporationID,
         corporationHeadquarters,
-        (id) => require("./playerBotCorpCommands").getHeadquarters(id),
+        (id) => corporationHeadquartersFor(id).saved,
       )
       : 0;
     const localHQMiningAssignment = corporateHQDepot && !humanControlled &&
@@ -1951,11 +1966,11 @@ async function runDirectorInternal(bots = [], options = {}) {
     })) continue;
     // A live belt-rat request has priority over new market work so a fitted
     // security pilot can respond as soon as its current operation completes.
-    // Only a small deterministic cohort handles PI launches automatically;
-    // the rest can take player orders, mining, or combat work first.
-    const hasLaunch = headquartersWorkCanStart || escortAssignment || coreInstallPlan ||
-      !isPiWorkCohort(bot, PI_COLLECTION_COHORT_SIZE)
-      ? false : operationRuntime.nextPlanetaryLaunch(bot);
+    // A small deterministic cohort handles PI launches automatically; other
+    // pilots collect their own launches only once they near decay, so they
+    // can take player orders, mining, or combat work first.
+    const hasLaunch = headquartersWorkCanStart || escortAssignment || coreInstallPlan
+      ? false : shouldCollectLaunch(bot, operationRuntime.nextPlanetaryLaunch(bot));
     const courier = headquartersWorkCanStart || escortAssignment || coreInstallPlan || hasLaunch
       ? null : require("./playerBotAllianceLogisticsRuntime").findAssignedCourier(bot);
     const industryCycleReview = bot.specialty === "industry" &&
