@@ -383,9 +383,10 @@ emblem layers and never asks the image server for a picture. The separate
 client patch to EveJS's login script so corporations with a PNG are drawn
 from it, and makes sure the image server serves the stored PNGs. Install it
 once per server with its `install.py`, then rebuild. With that add-on installed, the
-Logo panel says so, and players see a new or changed logo from their next
-login. A client that cached an earlier picture of the same corporation may
-keep showing it until its `Pictures\Corporations` cache folder is cleared.
+Logo panel says so. A corporation's first logo shows from each player's next
+login; a changed logo shows within an hour, when the client re-checks its
+cached copy (clearing the client's `Pictures\Corporations` cache shows it at
+once).
 
 ### Corporation and alliance name library
 
