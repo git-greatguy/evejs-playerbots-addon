@@ -657,14 +657,6 @@ async function advance(characterID, options = {}) {
     };
     if (["reserved", "travelling"].includes(lease.phase))
       c.update(characterID, lease.token, "on-grid", evidence);
-    const fitResult =
-      require("./playerBotCombatFitRuntime").buildCombatFitSnapshot(
-        bot,
-        entity,
-        { ...state, deployedDrones: controlled },
-      );
-    const fit = fitResult.fit || {},
-      own = combat().estimateEffectiveHitPoints(entity.typeID, entity, fit);
     const fitting = require("../fitting/liveFittingState");
     const modules = fitting.getFittedModuleItems(characterID, entity.itemID);
     const modulesValid = (lease.resume?.moduleIDs || []).every((id) =>
@@ -672,7 +664,6 @@ async function advance(characterID, options = {}) {
         (m) => Number(m.itemID) === id && fitting.isEffectivelyOnlineModule(m),
       ),
     );
-    const enemy = combat().estimateEffectiveHitPoints(target.typeID, target);
     const decision = !modulesValid
       ? { action: "evade", reason: "original-fitting-changed" }
       : settings.aggressive
@@ -721,6 +712,13 @@ async function advance(characterID, options = {}) {
       }
       active = launched.drones;
     }
+    // Drone ranges come from the fit; build it only once the pilot engages.
+    const fit =
+      require("./playerBotCombatFitRuntime").buildCombatFitSnapshot(
+        bot,
+        entity,
+        { ...state, deployedDrones: controlled },
+      ).fit || {};
     const range = Math.min(
       15000,
       Number(fit.droneAttackRange) || 0,

@@ -18,7 +18,9 @@ function getInventory() {
 }
 
 function resolveBotByID(characterID) {
-  return require("./playerBotRuntime").listBots().find((bot) => Number(bot.characterID) === Number(characterID)) || null;
+  const playerBots = require("./playerBotRuntime");
+  if (typeof playerBots.getBotByCharacterID === "function") return playerBots.getBotByCharacterID(characterID);
+  return playerBots.listBots().find((bot) => Number(bot.characterID) === Number(characterID)) || null;
 }
 
 // Materials each waiting cycle at the station still lacks.

@@ -55,7 +55,9 @@ function getEscortState(miningOperation) {
   const characterID = positiveID(miningOperation && miningOperation.escortCharacterID);
   if (!characterID) return { assigned: false, destroyed: false, onGrid: false, engaging: false, ready: false };
   const playerBots = require("./playerBotRuntime");
-  const bot = playerBots.listBots().find((entry) => Number(entry.characterID) === characterID);
+  const bot = typeof playerBots.getBotByCharacterID === "function"
+    ? playerBots.getBotByCharacterID(characterID)
+    : playerBots.listBots().find((entry) => Number(entry.characterID) === characterID);
   if (!bot) return { assigned: false, destroyed: false, onGrid: false, engaging: false, ready: false, characterID };
   const operationRuntime = require("./playerBotOperationRuntime");
   const escortOperation = operationRuntime.getOperation(characterID);

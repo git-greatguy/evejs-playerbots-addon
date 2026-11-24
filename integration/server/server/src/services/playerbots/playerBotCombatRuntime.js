@@ -643,8 +643,21 @@ function findNearestCombatAnomalyBase(bot, fitProfile, maxHops = 20, options = {
 }
 
 function getControlledDrones(scene, shipID) {
-  return [...(scene && scene.dynamicEntities instanceof Map ? scene.dynamicEntities.values() : [])]
-    .filter((entity) => entity && entity.kind === "drone" && Number(entity.controllerID) === Number(shipID));
+  const entities = scene?.dynamicEntities;
+  if (!(entities instanceof Map)) return [];
+  const owner = Number(shipID);
+  const drones = [];
+  if (scene.droneEntityIDs instanceof Set && scene.droneEntityIDs.size > 0) {
+    for (const id of scene.droneEntityIDs) {
+      const entity = entities.get(id);
+      if (entity?.kind === "drone" && Number(entity.controllerID) === owner) drones.push(entity);
+    }
+  } else {
+    for (const entity of entities.values()) {
+      if (entity?.kind === "drone" && Number(entity.controllerID) === owner) drones.push(entity);
+    }
+  }
+  return drones;
 }
 
 function getDroneBayItems(bot, shipID) {
@@ -672,9 +685,9 @@ function launchDrones(bot, session, scene, shipID, selectedTypeID = 0) {
 }
 
 function getCombatContext(bot, scene, entity, operation = null) {
-  const playerBots = require("./playerBotRuntime").listBots();
-  const managedBotIDs = new Set(playerBots.map((entry) => Number(entry.characterID) || 0));
-  const character = require("../character/characterState").getCharacterRecord(bot.characterID) || {};
+  const { hasBotProfile } = require("./playerBotRuntime");
+  const characters = require("../character/characterState");
+  const character = (characters.readSharedCharacterRecord || characters.getCharacterRecord)(bot.characterID) || {};
   const corporationID = normalizeID(character.corporationID || bot.corporationID);
   const corporation = require("../corporation/corporationState").getCorporationRecord(corporationID) || {};
   const crimewatch = require("../security/crimewatchState");
@@ -701,7 +714,7 @@ function getCombatContext(bot, scene, entity, operation = null) {
     systemSecurity: Number(worldData.getSolarSystemByID(Number(scene.systemID))?.security),
     specialSpace: faction.specialSpace === true || faction.wormholeSpace === true,
     position: entity.position,
-    isManagedBot: (characterID) => managedBotIDs.has(Number(characterID)),
+    isManagedBot: hasBotProfile,
     allowManagedBotTargets: botVersusBotCombatEnabled(),
     isFleetMate: (characterID) => {
       if (!ownFleet) return false;

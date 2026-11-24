@@ -43,6 +43,8 @@ function createPlayerBotDashboardRuntime(options = {}) {
   const sovereigntyState = options.sovereigntyState || require("../sovereignty/sovState");
   const killmailState = options.killmailState || require("../killmail/killmailState");
   const corporationPriorities = options.corporationPriorities || require("./playerBotCorporationPriorities");
+  const configuration = options.configuration || require("./playerBotConfigurationRuntime");
+  const activityState = require("./playerBotActivityState");
 
   let snapshot = null;
   let snapshotAtMs = 0;
@@ -53,6 +55,11 @@ function createPlayerBotDashboardRuntime(options = {}) {
   let operationSummaryCache = null;
   let taskSummaryCache = { byCharacter: {} };
   let corporationNameByID = new Map();
+  let corporationTickerByID = new Map();
+  let activityByCharacter = new Map();
+  let onlineBotIDSet = new Set();
+  let inSpaceBotIDSet = new Set();
+  let autoworkCache = { enabled: true, seeding: { active: false } };
   let killboardSnapshot = null;
   let killboardSnapshotAtMs = 0;
   let killboardCharacterNames = new Map();
@@ -293,9 +300,97 @@ function createPlayerBotDashboardRuntime(options = {}) {
     return sharedCharacter(characterID);
   }
 
+  // Names for the IDs the dashboard shows. World data never changes at
+  // runtime; structures and corporations are cached per snapshot.
+  const stationNames = new Map();
+  const typeNames = new Map();
+  let structureNames = new Map();
+  let allianceNames = new Map();
+  function stationName(stationID) {
+    const id = positiveInteger(stationID);
+    if (!id) return "";
+    if (!stationNames.has(id)) {
+      let station = null;
+      try { station = typeof worldData.getStationByID === "function" ? worldData.getStationByID(id) : null; } catch { station = null; }
+      stationNames.set(id, String(station && (station.stationName || station.itemName || station.name) || ""));
+    }
+    return stationNames.get(id);
+  }
+  function structureName(structureID) {
+    const id = positiveInteger(structureID);
+    if (!id) return "";
+    if (!structureNames.has(id)) {
+      let structure = null;
+      try {
+        structure = typeof structureState.getStructureByID === "function"
+          ? structureState.getStructureByID(id, { refresh: false })
+          : null;
+        if (!structure && typeof worldData.getStructureByID === "function") structure = worldData.getStructureByID(id);
+      } catch { structure = null; }
+      structureNames.set(id, String(structure && (structure.itemName || structure.name || structure.structureName) || ""));
+    }
+    return structureNames.get(id);
+  }
+  function typeName(typeID) {
+    const id = positiveInteger(typeID);
+    if (!id) return "";
+    if (!typeNames.has(id)) {
+      let type = null;
+      try { type = require("../inventory/itemTypeRegistry").resolveItemByTypeID(id); } catch { type = null; }
+      typeNames.set(id, String(type && (type.name || type.typeName) || ""));
+    }
+    return typeNames.get(id);
+  }
+  function systemInfo(systemID) {
+    const id = positiveInteger(systemID);
+    if (!id) return { name: "", security: null };
+    const system = worldData.getSolarSystemByID(id) || {};
+    const security = Number(system.security);
+    return { name: String(system.solarSystemName || system.name || ""), security: Number.isFinite(security) ? Math.round(security * 10) / 10 : null };
+  }
+  function allianceName(allianceID) {
+    const id = positiveInteger(allianceID);
+    if (!id) return "";
+    if (!allianceNames.has(id)) {
+      const alliance = typeof corporations.getAllianceRecord === "function" ? corporations.getAllianceRecord(id) : null;
+      allianceNames.set(id, String(alliance && (alliance.allianceName || alliance.name) || ""));
+    }
+    return allianceNames.get(id);
+  }
+  function corporationLabel(corporationID) {
+    const id = positiveInteger(corporationID);
+    if (!id) return { name: "", ticker: "" };
+    if (corporationNameByID.has(id)) return { name: corporationNameByID.get(id), ticker: corporationTickerByID.get(id) || "" };
+    const record = corporations.getCorporationRecord(id) || {};
+    return { name: String(record.corporationName || ""), ticker: String(record.tickerName || "") };
+  }
+
+  function corpCommandsModule() {
+    try { return options.corpCommands || require("./playerBotCorpCommands"); } catch { return null; }
+  }
+
+  function autoworkStatus(rosterCount) {
+    let enabled = true;
+    try { enabled = typeof directorAssignments.isEnabled === "function" ? directorAssignments.isEnabled() !== false : true; } catch { enabled = true; }
+    let settings = {};
+    try { settings = configuration.getSettings() || {}; } catch { settings = {}; }
+    const target = Number(settings.rosterTarget) || Number(playerBots.getConfiguredTarget && playerBots.getConfiguredTarget()) || 0;
+    return {
+      enabled,
+      seeding: {
+        active: settings.rosterSeedEnabled === true && target > 0 && rosterCount < target,
+        enabled: settings.rosterSeedEnabled === true,
+        rosterCount,
+        target,
+      },
+    };
+  }
+
   function refresh() {
     const now = Date.now();
     if (snapshot && now - snapshotAtMs < CACHE_MS) return snapshot;
+    structureNames = new Map();
+    allianceNames = new Map();
 
     roster = typeof playerBots.listBotProfiles === "function"
       ? playerBots.listBotProfiles()
@@ -331,17 +426,17 @@ function createPlayerBotDashboardRuntime(options = {}) {
       }
     }
 
+    const getCachedAssignment = directorAssignments.createDashboardAssignmentReader?.();
+    const getAssignment = getCachedAssignment || (characterID =>
+      directorAssignments.getBotDirectorAssignment?.(characterID));
+    const queuedAssignments = getCachedAssignment ? null
+      : directorAssignments.listQueuedColonySetupAssignments?.(roster.map(bot => bot && bot.characterID));
     queuedColonyByCharacter = new Map();
-    const queuedDirectorAssignments = typeof directorAssignments.listQueuedColonySetupAssignments === "function"
-      ? directorAssignments.listQueuedColonySetupAssignments(roster.map((bot) => bot && bot.characterID))
-      : null;
     for (const bot of roster) {
       const characterID = positiveInteger(bot && bot.characterID);
-      if (!characterID || (!queuedDirectorAssignments && typeof directorAssignments.getBotDirectorAssignment !== "function")) continue;
-      const assignment = queuedDirectorAssignments
-        ? queuedDirectorAssignments[String(characterID)] || null
-        : directorAssignments.getBotDirectorAssignment(characterID) || {};
-      if (!assignment || (!queuedDirectorAssignments && assignment.queuedColonySetup !== true)) continue;
+      if (!characterID) continue;
+      const assignment = queuedAssignments ? queuedAssignments[characterID] : getAssignment(characterID);
+      if (!assignment || (!queuedAssignments && assignment.queuedColonySetup !== true)) continue;
       queuedColonyByCharacter.set(characterID, {
         kind: "colony",
         status: "queued",
@@ -597,6 +692,104 @@ function createPlayerBotDashboardRuntime(options = {}) {
       .map((entry) => ({ ...entry, specialties: [...entry.specialties].sort() }))
       .sort((left, right) => right.botCount - left.botCount || left.corporationID - right.corporationID);
     corporationNameByID = new Map(corporationsList.map((corporation) => [corporation.corporationID, corporation.corporationName]));
+    corporationTickerByID = new Map(corporationsList.map((corporation) => [corporation.corporationID, corporation.ticker]));
+
+    // One activity state per pilot (see playerBotActivityState.js).
+    onlineBotIDSet = onlineBotIDs;
+    inSpaceBotIDSet = inSpaceBotIDs;
+    autoworkCache = autoworkStatus(roster.length);
+    // Standing corporation recalls: whole corporations (minus pilots released
+    // by hand) or listed pilots.
+    const corpCommands = corpCommandsModule();
+    let standingRecalls = [];
+    try {
+      standingRecalls = corpCommands && typeof corpCommands.listStandingRecalls === "function"
+        ? corpCommands.listStandingRecalls()
+        : [];
+    } catch { standingRecalls = []; }
+    const heldCorporations = new Map(standingRecalls.filter((row) => row.whole).map((row) => [row.corporationID, new Set(row.released)]));
+    const heldPilots = new Set(standingRecalls.filter((row) => !row.whole).flatMap((row) => row.characterIDs));
+    const recallRunning = new Set(standingRecalls.filter((row) => row.running).map((row) => row.corporationID));
+    const isHeld = (corporationID, characterID) => heldPilots.has(characterID) ||
+      (heldCorporations.has(corporationID) && !heldCorporations.get(corporationID).has(characterID));
+    activityByCharacter = new Map();
+    const stateCounts = Object.fromEntries(activityState.STATES.map((entry) => [entry.id, 0]));
+    const activityCounts = {};
+    const reasonCounts = {};
+    const cooldownGroups = new Map();
+    const corporationActivity = new Map();
+    for (const bot of roster) {
+      const characterID = positiveInteger(bot && bot.characterID);
+      if (!characterID) continue;
+      const corporationID = positiveInteger(bot.corporationID);
+      let assignment = {};
+      try {
+        assignment = getAssignment(characterID) || {};
+      } catch { assignment = {}; }
+      const tasksForBot = taskSummary.byCharacter && taskSummary.byCharacter[String(characterID)];
+      const classified = activityState.classifyBotActivity({
+        bot,
+        connected: onlineBotIDs.has(characterID),
+        activeWork: activeWorkByCharacter.get(characterID) || null,
+        queuedWork: queuedColonyByCharacter.get(characterID) || null,
+        tasks: Array.isArray(tasksForBot) ? tasksForBot : [],
+        assignment,
+        corpHold: isHeld(corporationID, characterID),
+        corpRecallRunning: recallRunning.has(corporationID),
+        autowork: autoworkCache,
+        now,
+      });
+      activityByCharacter.set(characterID, classified);
+      stateCounts[classified.state] = (stateCounts[classified.state] || 0) + 1;
+      if (classified.activity && ["working", "travelling", "holding"].includes(classified.state)) {
+        activityCounts[classified.activity] = (activityCounts[classified.activity] || 0) + 1;
+      }
+      if (classified.reasonCode && !["working", "travelling"].includes(classified.state)) {
+        reasonCounts[classified.reasonCode] = (reasonCounts[classified.reasonCode] || 0) + 1;
+      }
+      if (classified.reasonGroup) {
+        const group = cooldownGroups.get(classified.reasonGroup) || { example: classified.reason, count: 0 };
+        group.count += 1;
+        cooldownGroups.set(classified.reasonGroup, group);
+      }
+      if (corporationID) {
+        let corp = corporationActivity.get(corporationID);
+        if (!corp) {
+          corp = { states: {}, activities: {} };
+          corporationActivity.set(corporationID, corp);
+        }
+        corp.states[classified.state] = (corp.states[classified.state] || 0) + 1;
+        if (classified.activity && ["working", "travelling", "holding"].includes(classified.state)) {
+          corp.activities[classified.activity] = (corp.activities[classified.activity] || 0) + 1;
+        }
+      }
+    }
+    const botActivity = {
+      generatedAt: new Date(now).toISOString(),
+      total: roster.length,
+      autowork: autoworkCache,
+      states: activityState.STATES.map((entry) => ({ id: entry.id, label: entry.label, count: stateCounts[entry.id] || 0 })),
+      activities: Object.entries(activityCounts)
+        .map(([id, count]) => ({ id, label: activityState.kindLabel(id), count }))
+        .sort((left, right) => right.count - left.count),
+      reasons: Object.entries(reasonCounts)
+        .map(([id, count]) => ({ id, label: activityState.reasonLabel(id), count }))
+        .sort((left, right) => right.count - left.count),
+      cooldownReasons: [...cooldownGroups.values()]
+        .sort((left, right) => right.count - left.count)
+        .slice(0, 8)
+        .map((group) => ({ label: group.example, count: group.count })),
+      heldCorporationIDs: [...heldCorporations.keys()],
+    };
+    for (const corporation of corporationsList) {
+      const corp = corporationActivity.get(corporation.corporationID) || { states: {}, activities: {} };
+      corporation.stateCounts = corp.states;
+      const top = Object.entries(corp.activities).sort((left, right) => right[1] - left[1])[0];
+      corporation.topActivity = top ? { id: top[0], label: activityState.kindLabel(top[0]), count: top[1] } : null;
+      corporation.allianceName = allianceName(corporation.allianceID);
+      corporation.held = heldCorporations.has(corporation.corporationID);
+      corporation.recalledPilots = (standingRecalls.find((row) => !row.whole && row.corporationID === corporation.corporationID) || { characterIDs: [] }).characterIDs.length;
+    }
     const systemsList = [...bySystem.entries()]
       .map(([systemID, botCount]) => {
         const system = worldData.getSolarSystemByID(systemID) || {};
@@ -644,7 +837,12 @@ function createPlayerBotDashboardRuntime(options = {}) {
         };
       }),
       corporationPriorityOptions: corporationPriorities.listPriorityOptions(),
-      systems: systemsList,
+      botActivity,
+      systems: systemsList.map((system) => ({
+        ...system,
+        security: systemInfo(system.systemID).security,
+        overAutonomousLimit: system.botCount > maxPerSystem,
+      })),
       systemCapacity: { autonomousBotsPerSystem: maxPerSystem },
       activity: {
         fleets: fleetRows.length,
@@ -730,64 +928,186 @@ function createPlayerBotDashboardRuntime(options = {}) {
     return snapshot;
   }
 
+  const STATE_ORDER = new Map(activityState.STATES.map((entry, index) => [entry.id, index]));
+  let stateRank = new Map();
+  let stateRankSnapshot = null;
+
+  function botLocation(bot, character, presence) {
+    const systemID = positiveInteger(presence.solarSystemID || character.solarSystemID);
+    const system = systemInfo(systemID);
+    const stationID = positiveInteger(presence.stationID);
+    const structureID = positiveInteger(presence.structureID);
+    const dockedName = stationID ? stationName(stationID) : structureID ? structureName(structureID) : "";
+    let where;
+    if (presence.inSpace) where = `In space · ${system.name || `system ${systemID}`}`;
+    else if (stationID || structureID) where = dockedName || `${stationID ? "Station" : "Structure"} ${stationID || structureID}`;
+    else if (system.name) where = `${presence.connected ? "" : "Last seen in "}${system.name}`;
+    else where = "Location unknown";
+    return { systemID, systemName: system.name, security: system.security, stationID, structureID, dockedName, where };
+  }
+
+  function buildBotRow(bot, operation) {
+    const characterID = Number(bot.characterID);
+    const character = dashboardCharacter(characterID);
+    const presence = space.getBotPresenceInfo(bot, character);
+    const activeWork = activeWorkByCharacter.get(characterID);
+    const queuedWork = queuedColonyByCharacter.get(characterID) || null;
+    const currentWork = activeWork || operation;
+    const location = botLocation(bot, character, presence);
+    const corporationID = positiveInteger(bot.corporationID);
+    const corp = corporationLabel(corporationID);
+    const classified = activityByCharacter.get(characterID) || activityState.classifyBotActivity({ bot, connected: Boolean(presence.connected) });
+    const shipTypeID = positiveInteger(character.shipTypeID);
+    return {
+      characterID,
+      characterName: String(bot.characterName || `Bot ${bot.characterID}`),
+      specialty: String(bot.specialty || "unassigned"),
+      corporationID,
+      corporationName: corp.name,
+      corporationTicker: corp.ticker,
+      status: String(bot.status || "idle"),
+      paused: bot.status === "paused" || bot.autonomyPaused === true,
+      connected: Boolean(presence.connected),
+      inSpace: Boolean(presence.inSpace),
+      solarSystemID: location.systemID,
+      solarSystemName: location.systemName,
+      security: location.security,
+      stationID: location.stationID,
+      structureID: location.structureID,
+      dockedName: location.dockedName,
+      where: location.where,
+      shipTypeID,
+      shipName: typeName(shipTypeID),
+      state: classified.state,
+      stateLabel: activityState.STATE_LABELS[classified.state] || classified.state,
+      doing: classified.doing,
+      reason: classified.reason,
+      reasonCode: classified.reasonCode || "",
+      retryAt: classified.retryAt || "",
+      since: classified.since || "",
+      operation: currentWork ? {
+        operationID: String(currentWork.operationID || currentWork.cycleID || ""),
+        kind: String(currentWork.kind || ""),
+        kindLabel: activityState.describeWork(currentWork.kind, currentWork.stage),
+        status: String(currentWork.status || ""),
+        stage: String(currentWork.stage || ""),
+        updatedAt: String(currentWork.updatedAt || ""),
+        lastAction: String(currentWork.lastAction || "").slice(0, 240),
+      } : null,
+      queuedWork,
+      tasks: Array.isArray(taskSummaryCache.byCharacter && taskSummaryCache.byCharacter[String(characterID)])
+        ? taskSummaryCache.byCharacter[String(characterID)]
+        : [],
+    };
+  }
+
   function listBots(query = {}) {
     const current = refresh();
     const specialty = String(query.specialty || "").trim().toLowerCase();
     const corporationID = positiveInteger(query.corporationID);
     const search = String(query.search || "").trim().toLowerCase().slice(0, 80);
+    const states = new Set(String(query.state || "").toLowerCase().split(",").map((value) => value.trim()).filter((value) => activityState.STATE_IDS.has(value)));
+    const activity = String(query.activity || "").trim().toLowerCase();
+    const reason = String(query.reason || "").trim().toLowerCase();
     const filtered = roster.filter((bot) => {
       if (specialty && String(bot.specialty || "").toLowerCase() !== specialty) return false;
       if (corporationID && Number(bot.corporationID) !== corporationID) return false;
       if (search && !`${bot.characterName || ""} ${bot.characterID}`.toLowerCase().includes(search)) return false;
+      if (states.size || activity || reason) {
+        const classified = activityByCharacter.get(Number(bot.characterID)) || {};
+        if (states.size && !states.has(classified.state)) return false;
+        if (activity && String(classified.activity || "").toLowerCase() !== activity) return false;
+        if (reason && String(classified.reasonCode || "").toLowerCase() !== reason) return false;
+      }
       return true;
     });
+    if (String(query.sort || "") === "state") {
+      // Rank once per snapshot; sorting 15,000 names with localeCompare on
+      // every page request would stall the event loop.
+      if (stateRankSnapshot !== snapshot) {
+        const ranked = [...roster].sort((left, right) => {
+          const a = activityByCharacter.get(Number(left.characterID)) || {};
+          const b = activityByCharacter.get(Number(right.characterID)) || {};
+          const nameA = String(left.characterName || "");
+          const nameB = String(right.characterName || "");
+          return (STATE_ORDER.get(a.state) ?? 99) - (STATE_ORDER.get(b.state) ?? 99) ||
+            (nameA < nameB ? -1 : nameA > nameB ? 1 : 0);
+        });
+        stateRank = new Map(ranked.map((bot, index) => [Number(bot.characterID), index]));
+        stateRankSnapshot = snapshot;
+      }
+      filtered.sort((left, right) => (stateRank.get(Number(left.characterID)) ?? 0) - (stateRank.get(Number(right.characterID)) ?? 0));
+    }
     const limit = boundedInteger(query.limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE) || DEFAULT_PAGE_SIZE;
     const offset = boundedInteger(query.offset, 0, Math.max(0, filtered.length));
     const pageBots = filtered.slice(offset, offset + limit);
     const pageOperationMap = typeof operations.getDashboardOperationsForCharacters === "function"
       ? operations.getDashboardOperationsForCharacters(pageBots.map((bot) => bot.characterID))
       : null;
-    const rows = pageBots.map((bot) => {
-      const character = dashboardCharacter(bot.characterID);
-      const presence = space.getBotPresenceInfo(bot, character);
-      const operation = pageOperationMap
-        ? pageOperationMap[String(bot.characterID)] || null
-        : operationByCharacter.get(Number(bot.characterID)) || null;
-      const activeWork = activeWorkByCharacter.get(Number(bot.characterID));
-      const queuedWork = queuedColonyByCharacter.get(Number(bot.characterID)) || null;
-      const currentWork = activeWork || operation;
-      const systemID = positiveInteger(presence.solarSystemID || character.solarSystemID);
-      const system = systemID ? worldData.getSolarSystemByID(systemID) || {} : {};
-      return {
-        characterID: Number(bot.characterID),
-        characterName: String(bot.characterName || `Bot ${bot.characterID}`),
-        specialty: String(bot.specialty || "unassigned"),
-        corporationID: positiveInteger(bot.corporationID),
-        corporationName: corporationNameByID.get(Number(bot.corporationID)) || "",
-        status: String(bot.status || "idle"),
-        paused: bot.status === "paused" || bot.autonomyPaused === true,
-        connected: Boolean(presence.connected),
-        inSpace: Boolean(presence.inSpace),
-        solarSystemID: systemID,
-        solarSystemName: String(system.solarSystemName || system.name || ""),
-        stationID: positiveInteger(presence.stationID),
-        structureID: positiveInteger(presence.structureID),
-        shipTypeID: positiveInteger(character.shipTypeID),
-        operation: currentWork ? {
-          operationID: String(currentWork.operationID || currentWork.cycleID || ""),
-          kind: String(currentWork.kind || ""),
-          status: String(currentWork.status || ""),
-          stage: String(currentWork.stage || ""),
-          updatedAt: String(currentWork.updatedAt || ""),
-          lastAction: String(currentWork.lastAction || "").slice(0, 240),
-        } : null,
-        queuedWork,
-        tasks: Array.isArray(taskSummaryCache.byCharacter && taskSummaryCache.byCharacter[String(bot.characterID)])
-          ? taskSummaryCache.byCharacter[String(bot.characterID)]
-          : [],
-      };
-    });
+    const rows = pageBots.map((bot) => buildBotRow(bot, pageOperationMap
+      ? pageOperationMap[String(bot.characterID)] || null
+      : operationByCharacter.get(Number(bot.characterID)) || null));
     return { total: filtered.length, offset, limit, rows, generatedAt: current.generatedAt };
+  }
+
+  function getActivity() {
+    const current = refresh();
+    return {
+      ...(current.botActivity || {}),
+      director: current.work && current.work.director || {},
+      directorError: current.work && current.work.directorError || "",
+      addonFailures: current.work && current.work.addonFailures || [],
+      generatedAt: current.generatedAt,
+    };
+  }
+
+  // Everything the pilot drawer shows for one pilot.
+  function getBotDetail(characterID) {
+    refresh();
+    const id = positiveInteger(characterID);
+    const bot = roster.find((entry) => Number(entry.characterID) === id);
+    if (!bot) return null;
+    const operationMap = typeof operations.getDashboardOperationsForCharacters === "function"
+      ? operations.getDashboardOperationsForCharacters([id])
+      : null;
+    const row = buildBotRow(bot, operationMap ? operationMap[String(id)] || null : operationByCharacter.get(id) || null);
+    let current = null;
+    if (row.operation && row.operation.operationID && typeof operations.getDashboardOperationDetails === "function") {
+      try { current = operations.getDashboardOperationDetails(row.operation.operationID); } catch { current = null; }
+    }
+    let recent = [];
+    try {
+      const page = getOperationHistoryPage({ search: String(id), limit: 10, offset: 0 });
+      recent = (page.rows || []).filter((entry) => Number(entry.characterID) === id).slice(0, 5);
+    } catch { recent = []; }
+    let assignment = {};
+    try { assignment = directorAssignments.getBotDirectorAssignment(id) || {}; } catch { assignment = {}; }
+    return {
+      ...row,
+      raceID: positiveInteger(bot.raceID),
+      createdAt: String(bot.createdAt || ""),
+      currentOperation: current ? {
+        operationID: String(current.operationID || current.cycleID || ""),
+        kind: String(current.kind || ""),
+        kindLabel: activityState.describeWork(current.kind, current.stage),
+        status: String(current.status || ""),
+        stage: String(current.stage || ""),
+        startedAt: String(current.createdAt || current.startedAt || ""),
+        updatedAt: String(current.updatedAt || ""),
+        history: Array.isArray(current.history) ? current.history.slice(-12).map((entry) => ({
+          at: String(entry && entry.at || ""),
+          stage: String(entry && entry.stage || ""),
+          stageLabel: activityState.stageLabel(entry && entry.stage),
+          message: String(entry && entry.message || "").slice(0, 240),
+        })) : [],
+      } : null,
+      recentOperations: recent,
+      director: {
+        lastAssignment: String(assignment.lastAssignment || ""),
+        lastMessage: String(assignment.lastMessage || "").slice(0, 240),
+        cooldownUntil: Number(assignment.cooldownUntil) > Date.now() ? new Date(Number(assignment.cooldownUntil)).toISOString() : "",
+      },
+    };
   }
 
   function getOperations(limit = 50) {
@@ -801,7 +1121,30 @@ function createPlayerBotDashboardRuntime(options = {}) {
     };
   }
 
+  // Operation archive page with names and plain labels added to each row.
   function getOperationHistoryPage(query = {}) {
+    const page = rawOperationHistoryPage(query);
+    if (!page || !Array.isArray(page.rows)) return page;
+    return {
+      ...page,
+      rows: page.rows.map((row) => {
+        const corp = corporationLabel(row.corporationID);
+        const system = systemInfo(row.systemID || row.solarSystemID);
+        return {
+          ...row,
+          kindLabel: activityState.kindLabel(row.kind),
+          stageLabel: activityState.stageLabel(row.stage),
+          corporationName: corp.name,
+          corporationTicker: corp.ticker,
+          systemName: system.name,
+          shipName: typeName(row.shipTypeID),
+        };
+      }),
+      kindLabels: Object.fromEntries(Object.keys(page.kindCounts || {}).map((kind) => [kind, activityState.kindLabel(kind)])),
+    };
+  }
+
+  function rawOperationHistoryPage(query = {}) {
     if (typeof operations.getDashboardOperationHistoryPage === "function") {
       return operations.getDashboardOperationHistoryPage(query);
     }
@@ -844,7 +1187,62 @@ function createPlayerBotDashboardRuntime(options = {}) {
     return result;
   }
 
-  return Object.freeze({ getSnapshot: refresh, getKillboardSnapshot, listBots, getOperations, getOperationHistoryPage, getOperationDetails, setCorporationPriorities });
+  // The corporation page: record, activity by state, HQ, standing orders and
+  // the dashboard command log.
+  function getCorporationDetail(corporationID) {
+    const current = refresh();
+    const id = positiveInteger(corporationID);
+    const listed = (current.corporations || []).find((entry) => entry.corporationID === id);
+    if (!listed) return null;
+    const record = corporations.getCorporationRecord(id) || {};
+    const corpCommands = corpCommandsModule();
+    let headquarters = null;
+    let savedHeadquartersID = 0;
+    let orders = [];
+    let log = [];
+    let deposit = null;
+    let ownedStructures = [];
+    if (corpCommands) {
+      try {
+        const hq = corpCommands.getHeadquarters(id);
+        headquarters = hq && !hq.error
+          ? { ...hq, name: hq.name || (hq.kind === "station" ? stationName(hq.stationID) : structureName(hq.stationID)), systemName: systemInfo(hq.systemID).name }
+          : { error: String(hq && hq.error || "No headquarters.").replace(/ Run "\/bots corp hq[^"]*" or choose another with "[^"]*"\./, " Clear the saved HQ or choose another below.") };
+      } catch (error) { headquarters = { error: error.message }; }
+      try { savedHeadquartersID = typeof corpCommands.getSavedHeadquartersID === "function" ? corpCommands.getSavedHeadquartersID(id) : 0; } catch { savedHeadquartersID = 0; }
+      try { orders = typeof corpCommands.describeOrders === "function" ? corpCommands.describeOrders(id) : []; } catch { orders = []; }
+      try { log = typeof corpCommands.getCommandLog === "function" ? corpCommands.getCommandLog(id) : []; } catch { log = []; }
+      try { ownedStructures = typeof corpCommands.listHeadquartersCandidates === "function" ? corpCommands.listHeadquartersCandidates(id) : []; } catch { ownedStructures = []; }
+    }
+    try {
+      const depositRuntime = require("./playerBotCorpDepositRuntime");
+      const info = depositRuntime.describeSettings(id);
+      deposit = { enabled: Boolean(info.enabled), explicit: Boolean(info.explicit), label: String(info.label || ""), target: String(info.target || ""), division: Number(info.division) || 0 };
+    } catch { deposit = null; }
+    const ownStationID = positiveInteger(record.stationID);
+    return {
+      generatedAt: current.generatedAt,
+      corporation: {
+        ...listed,
+        ceoID: positiveInteger(record.ceoID),
+        description: String(record.description || "").slice(0, 400),
+        homeStationID: ownStationID,
+        homeStationName: stationName(ownStationID),
+      },
+      headquarters,
+      savedHeadquartersID,
+      headquartersCandidates: ownedStructures.map((structure) => ({
+        ...structure,
+        systemName: systemInfo(structure.solarSystemID).name,
+      })),
+      deposit,
+      orders,
+      log,
+      autowork: autoworkCache,
+    };
+  }
+
+  return Object.freeze({ getSnapshot: refresh, getKillboardSnapshot, listBots, getActivity, getBotDetail, getCorporationDetail, getOperations, getOperationHistoryPage, getOperationDetails, setCorporationPriorities, invalidate() { snapshot = null; snapshotAtMs = 0; } });
 }
 
 module.exports = { createPlayerBotDashboardRuntime, MAX_PAGE_SIZE };

@@ -43,6 +43,12 @@ function resolveCommandTarget(session, spaceRuntime) {
   return { scene, target, targetID, targetSystemID: positive(scene.systemID) || systemIDForSession(session) };
 }
 
+function rosterMembership(playerBots) {
+  if (typeof playerBots.hasBotProfile === "function") return (id) => playerBots.hasBotProfile(id);
+  const ids = new Set(playerBots.listBots().map((entry) => positive(entry && entry.characterID)));
+  return (id) => ids.has(id);
+}
+
 function listFleetBots(fleet, playerBots) {
   return playerBots.listBots().filter((bot) => fleet.members.has(positive(bot.characterID)));
 }
@@ -271,11 +277,12 @@ async function advanceFleetAttack(operation, bot, dependencies = {}) {
   const fleetID = positive(operation.fleetID);
   const botFleet = kit.fleetRuntime.getMemberFleetForCharacter(botID);
   const requesterFleet = kit.fleetRuntime.getMemberFleetForCharacter(requesterID);
-  const bots = kit.playerBots.listBots();
-  const botIDs = new Set(bots.map((entry) => positive(entry.characterID)));
+  // Per-member lookups in the roster index; rebuilding the whole roster on
+  // every step of every fleet member does not scale with large rosters.
+  const isBot = rosterMembership(kit.playerBots);
   if (!botID || !requesterID || !fleetID || !botFleet || !requesterFleet ||
       Number(botFleet.fleetID) !== fleetID || Number(requesterFleet.fleetID) !== fleetID ||
-      !botFleet.members.has(requesterID) || ![...botFleet.members.keys()].some((id) => !botIDs.has(positive(id)))) {
+      !botFleet.members.has(requesterID) || ![...botFleet.members.keys()].some((id) => !isBot(positive(id)))) {
     return beginRetreat(operation, bot, "The human commander or bot is no longer in the original fleet.", kit);
   }
 

@@ -9408,15 +9408,11 @@ function processMiningObjective(scene, instance, populationHints, options = {}) 
       toInt(entity && entity.miningRemainingQuantity, 0),
     );
     // A rock mined out before this load is no longer in the scene; the site's record still counts it.
-    const recordedRemaining = state
-      ? null
-      : readRecordedMiningRockRemainder(recordedRemainders, entityID);
-    const remaining = Math.max(
-      0,
-      state
-        ? toInt(state.remainingQuantity, initial)
-        : (recordedRemaining === null ? initial : recordedRemaining),
-    );
+    const recordedRemaining = readRecordedMiningRockRemainder(recordedRemainders, entityID);
+    const liveRemaining = state ? toInt(state.remainingQuantity, initial) : initial;
+    const remaining = Math.max(0, recordedRemaining === null
+      ? liveRemaining
+      : Math.min(liveRemaining, recordedRemaining));
     extracted += Math.max(0, initial - remaining);
   }
   if (rockCount > 0 && extracted >= objectiveQuantity) {
@@ -9432,6 +9428,19 @@ function processMiningObjective(scene, instance, populationHints, options = {}) 
     }
   }
   return 0;
+}
+
+// Run the normal finite-rock objective check for one private agent mission.
+function reconcileMissionMiningObjective(scene, instanceID, characterID) {
+  const instance = dungeonRuntime.getInstanceReadOnly(instanceID);
+  if (!instance || instance.lifecycleState !== "active" || instance.instanceScope !== "private" ||
+      instance.ownership?.visibilityScope !== "private" ||
+      instance.ownership?.missionOwnerCharacterID !== characterID ||
+      instance.solarSystemID !== scene?.systemID || !isManagedMissionSiteInstance(instance)) return false;
+  const template = dungeonAuthority.getTemplateByIDReadOnly(instance.templateID);
+  const hints = resolvePopulationHints(instance, template);
+  if (hints?.miningTrigger || normalizeCompletionHints(hints)?.mode === "mining_trigger") return false;
+  return Boolean(processMiningObjective(scene, instance, hints));
 }
 
 // Ore anomalies and gas signatures end once every rock or cloud they placed is mined out; their packs
@@ -13034,6 +13043,7 @@ DungeonUniverseSiteService.maybeSatisfyMissionHackObjective = maybeSatisfyMissio
 DungeonUniverseSiteService.startRuntimeSync = startRuntimeSync;
 DungeonUniverseSiteService.stopRuntimeSync = stopRuntimeSync;
 DungeonUniverseSiteService.tickSceneSiteBehaviors = tickSceneSiteBehaviors;
+DungeonUniverseSiteService.reconcileMissionMiningObjective = reconcileMissionMiningObjective;
 DungeonUniverseSiteService.notifyVisionsModuleCycle = notifyVisionsModuleCycle;
 DungeonUniverseSiteService.maybeCompleteSecurityRoomArrivalObjective = maybeCompleteSecurityRoomArrivalObjective;
 DungeonUniverseSiteService.buildClientWaveValues = buildClientWaveValues;
@@ -13399,6 +13409,7 @@ DungeonUniverseSiteService._testing = {
   spawnEncounterPlan,
   spawnTemplateForSession,
   tickSceneSiteBehaviors,
+  reconcileMissionMiningObjective,
   triggerSiteEncounter,
   enterSiteRoom,
   handleEncounterEntityDestroyed,

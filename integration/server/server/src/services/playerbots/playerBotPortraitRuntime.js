@@ -1,28 +1,15 @@
 "use strict";
 
-// Portraits for playerbot characters. A pilot's portrait is a 3D render the
-// EVE client makes at character creation and uploads (photoUploadSvc.Upload);
-// a server-owned bot has no client to render one. Each bot gets an unused face
-// from a local pool of NPC agent portraits while one is available. Once the
-// finite pool is exhausted, faces are reused deterministically to avoid
-// synchronous render work blocking EveJS during large roster seeds. Without a
-// pool, a generated bust derived from its characterID is used. Files go where
-// uploads go, so every image request, info window and chat list shows the face.
-
-const fs = require("fs");
-const path = require("path");
-const zlib = require("zlib");
+const fs = require("node:fs");
+const path = require("node:path");
+const zlib = require("node:zlib");
+const { randomUUID } = require("node:crypto");
 const {
   findCharacterPortraitPath,
   getCharacterPortraitFilePath,
+  listCharacterPortraitRoots,
 } = require("../character/portraitImageStore");
-const { publishFileAtomicSync } = require("../_shared/atomicFilePublication");
 
-const SIZES = [32, 64, 128, 256, 512];
-// EveJS and its clients may ask for the profile-image size separately. The
-// portrait store supports all of these sizes, so a partial set must never
-// make a pilot appear to have no photo at one of the requested resolutions.
-const REQUIRED_SIZES = [32, 64, 128, 256, 512, 1024];
 const SKIN = [[241, 204, 177], [224, 172, 135], [198, 134, 94], [141, 85, 58], [94, 59, 39], [233, 190, 160]];
 const HAIR = [[30, 24, 20], [74, 46, 28], [140, 96, 52], [196, 160, 98], [120, 120, 125], [160, 40, 30], [20, 20, 30]];
 const SUIT = [[40, 52, 70], [70, 40, 40], [36, 60, 48], [60, 60, 66], [84, 66, 36], [30, 30, 36]];
@@ -154,219 +141,263 @@ function renderPortraitPng(characterID, size) {
   ]);
 }
 
-const POOL_SIZES = [32, 64, 128, 256, 512];
-const ASSIGNMENT_COMPACT_THRESHOLD = 1_024;
-let poolAgentsCache = null;
-let poolAgentsDirectoryMtimeMs = null;
-let assignmentCacheDirectory = null;
-let assignmentCache = null;
-let assignedPoolAgents = new Set();
-let nextPoolAgentIndex = 0;
-let assignmentLogEntries = 0;
-
-function getImagesRoot() {
-  return path.dirname(path.dirname(getCharacterPortraitFilePath(1, 64, "jpg")));
-}
+const BUILTIN_DIR = path.resolve(__dirname, "../../../playerbots-native/portraits");
+const BUILTIN_COUNT = 32;
+const CHECK_DELAY_MS = 125;
+const LOAD_DELAY_MS = 1000;
+const BATCH_SIZE = 8;
+const MAX_QUEUE_CHECKS_PER_BATCH = 128;
+let poolPromise;
+const pending = new Set();
+const priority = new Set();
+let existing = null;
+const running = new Set();
+let timer;
+let inFlight;
+let started = false;
+let nextWarningAt = 0;
+let migration = null;
+let startupProfiles = null;
+const PORTRAIT_FILE = /^(\d+)_(?:32|64|128|256|512|1024)\.(?:jpg|png)$/i;
 
 function getPoolDir() {
-  return path.join(getImagesRoot(), "PlayerBotPortraitPool");
+  return path.join(path.dirname(path.dirname(getCharacterPortraitFilePath(1, 64, "jpg"))), "PlayerBotPortraitPool");
 }
 
-function listPoolAgents() {
-  const poolDir = getPoolDir();
+async function listPoolAgents() {
   try {
-    const directoryMtimeMs = fs.statSync(poolDir).mtimeMs;
-    if (poolAgentsCache && poolAgentsDirectoryMtimeMs === directoryMtimeMs) {
-      return poolAgentsCache.slice();
-    }
-    const files = new Set(fs.readdirSync(poolDir));
-    poolAgentsCache = [...new Set([...files].map((name) => (name.match(/^(\d+)_256\.jpg$/) || [])[1]).filter(Boolean))]
-      .map(Number)
-      .filter((agentID) => POOL_SIZES.every((size) => files.has(`${agentID}_${size}.jpg`)))
-      .sort((left, right) => left - right);
-    poolAgentsDirectoryMtimeMs = directoryMtimeMs;
-    nextPoolAgentIndex = 0;
-    return poolAgentsCache.slice();
+    const entries = await fs.promises.readdir(getPoolDir(), { withFileTypes: true });
+    return entries.filter(entry => entry.isFile()).flatMap(entry => {
+      const match = /^(\d+)_256\.jpg$/.exec(entry.name);
+      return match ? [Number(match[1])] : [];
+    }).sort((a, b) => a - b);
   } catch (error) {
-    poolAgentsCache = null;
-    poolAgentsDirectoryMtimeMs = null;
+    if (error.code !== "ENOENT") throw error;
     return [];
   }
 }
 
-function readAssignments() {
-  const poolDir = getPoolDir();
-  if (assignmentCache && assignmentCacheDirectory === poolDir) return assignmentCache;
-  const assignmentsPath = path.join(poolDir, "assignments.json");
-  try {
-    assignmentCache = JSON.parse(fs.readFileSync(assignmentsPath, "utf8"));
-  } catch (error) {
-    assignmentCache = {};
-  }
-  if (!assignmentCache || typeof assignmentCache !== "object" || Array.isArray(assignmentCache)) {
-    assignmentCache = {};
-  }
-  let logText = "";
-  try { logText = fs.readFileSync(path.join(poolDir, "assignments.log"), "utf8"); } catch (error) { logText = ""; }
-  assignmentLogEntries = 0;
-  for (const line of logText.split(/\r?\n/)) {
-    if (!line) continue;
+function portraitIndex(id, count) {
+  const hash = Math.imul(id ^ (id >>> 16), 0x45d9f3b);
+  return ((hash ^ (hash >>> 16)) >>> 0) % count;
+}
+
+async function readPortraitIndex() {
+  const ids = new Set();
+  const oldFiles = new Map();
+  for (const [index, root] of listCharacterPortraitRoots().entries()) {
     try {
-      const record = JSON.parse(line);
-      const characterID = Number(record && record.characterID);
-      const agentID = Number(record && record.agentID);
-      if (
-        Number.isSafeInteger(characterID) && characterID > 0 &&
-        Number.isSafeInteger(agentID) && agentID > 0
-      ) {
-        assignmentCache[String(characterID)] = agentID;
-        assignmentLogEntries += 1;
+      const entries = await fs.promises.readdir(root, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isFile()) continue;
+        const match = PORTRAIT_FILE.exec(entry.name);
+        if (!match) continue;
+        const id = Number(match[1]);
+        ids.add(id);
+        if (migration?.pending.has(id)) {
+          if (!oldFiles.has(id)) oldFiles.set(id, []);
+          oldFiles.get(id).push({ root, index, name: entry.name });
+        }
       }
     } catch (error) {
-      // Ignore a partial final append after an interrupted process.
+      if (error.code !== "ENOENT") throw error;
     }
   }
-  assignmentCacheDirectory = poolDir;
-  assignedPoolAgents = new Set(Object.values(assignmentCache).map(Number).filter((id) => Number.isSafeInteger(id) && id > 0));
-  nextPoolAgentIndex = 0;
-  return assignmentCache;
+  if (migration) migration.oldFiles = oldFiles;
+  return ids;
 }
 
-function persistAssignment(characterID, agentID) {
-  const poolDir = getPoolDir();
-  const assignments = readAssignments();
-  fs.appendFileSync(
-    path.join(poolDir, "assignments.log"),
-    `${JSON.stringify({ characterID, agentID })}\n`,
-  );
-  assignments[String(characterID)] = agentID;
-  assignedPoolAgents.add(agentID);
-  assignmentLogEntries += 1;
+function builtinPortrait(id) {
+  return path.join(BUILTIN_DIR, String(portraitIndex(id, BUILTIN_COUNT)).padStart(2, "0") + ".jpg");
+}
 
-  if (assignmentLogEntries >= ASSIGNMENT_COMPACT_THRESHOLD) {
-    const assignmentsPath = path.join(poolDir, "assignments.json");
-    publishFileAtomicSync(assignmentsPath, JSON.stringify(assignments, null, 2));
-    fs.writeFileSync(path.join(poolDir, "assignments.log"), "");
-    assignmentLogEntries = 0;
+async function openMigration(profiles) {
+  if (process.env.EVEJS_PLAYER_BOTS_REFRESH_EXISTING_PORTRAITS === "0") return null;
+  const backup = path.join(path.dirname(getPoolDir()), "PlayerBotPortraitBackup-v1");
+  const journal = path.join(backup, "refresh.log");
+  let history = "";
+  try { history = await fs.promises.readFile(journal, "utf8"); }
+  catch (error) { if (error.code !== "ENOENT") throw error; }
+  const complete = new Set(history.split("\n").filter(Boolean));
+  if (complete.has("done") || !profiles.size) return null;
+  await fs.promises.mkdir(backup, { recursive: true });
+  return { backup, journal, pending: new Set([...profiles].filter(id => !complete.has(String(id)))), oldFiles: null };
+}
+
+async function refreshPortrait(id, state) {
+  const source = builtinPortrait(id);
+  const destination = getCharacterPortraitFilePath(id, 256, "jpg");
+  const oldFiles = state.oldFiles.get(id) || [];
+  if (oldFiles.length === 1 && path.join(oldFiles[0].root, oldFiles[0].name) === destination) {
+    // A previous pass may have installed this exact file before saving the journal.
+    try {
+      const expected = await fs.promises.readFile(source);
+      if ((await fs.promises.stat(destination)).size === expected.length &&
+          (await fs.promises.readFile(destination)).equals(expected)) return;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  const temp = destination + ".refresh-" + randomUUID();
+  await fs.promises.mkdir(path.dirname(destination), { recursive: true });
+  // Stage the replacement before moving any old image out of the serving path.
+  await fs.promises.copyFile(source, temp, fs.constants.COPYFILE_EXCL);
+  try {
+    for (const { root, index, name } of oldFiles) {
+      const old = path.join(root, name);
+      const archived = path.join(state.backup, `${index}-${randomUUID()}-${name}`);
+      try { await fs.promises.rename(old, archived); }
+      catch (error) {
+        if (error.code === "ENOENT") continue;
+        if (error.code !== "EXDEV") throw error;
+        await fs.promises.copyFile(old, archived, fs.constants.COPYFILE_EXCL);
+        await fs.promises.unlink(old);
+      }
+    }
+    await fs.promises.rename(temp, destination);
+  } finally {
+    await fs.promises.rm(temp, { force: true });
   }
 }
 
-// Give the bot an unused pool face while one is available, replacing only a
-// portrait this module generated. Once the bundled catalog is exhausted, reuse
-// a stable pool face instead of doing expensive synchronous image rendering
-// in EveJS's roster-seeding path. Returns true when files were written.
-function assignPoolPortrait(characterID) {
-  const agents = listPoolAgents();
-  if (!agents.length) return false;
-  const assignments = readAssignments();
-  let agentID = Number(assignments[String(characterID)]) || 0;
-  if (!agentID || !agents.includes(agentID)) {
-    while (nextPoolAgentIndex < agents.length && assignedPoolAgents.has(agents[nextPoolAgentIndex])) {
-      nextPoolAgentIndex += 1;
+async function copyPortrait(id, source, destination) {
+  if (findCharacterPortraitPath(id, 256)) return false;
+  await fs.promises.mkdir(path.dirname(destination), { recursive: true });
+  const temp = destination + ".tmp-" + randomUUID();
+  try {
+    await fs.promises.copyFile(source, temp, fs.constants.COPYFILE_EXCL);
+    try { await fs.promises.link(temp, destination); }
+    catch (error) {
+      if (!["EPERM", "ENOTSUP", "EXDEV"].includes(error.code)) throw error;
+      // A data root on a filesystem without hard-link support still gets
+      // an exclusive copy and can never replace an uploaded JPEG.
+      await fs.promises.copyFile(temp, destination, fs.constants.COPYFILE_EXCL);
     }
-    if (nextPoolAgentIndex < agents.length) {
-      agentID = agents[nextPoolAgentIndex];
-      nextPoolAgentIndex += 1;
-    } else {
-      // The bundled portrait catalog is finite. A profile image is mandatory
-      // for every bot, so reuse a deterministic face after all distinct pool
-      // portraits have been assigned rather than blocking the game loop to
-      // render a new high-resolution PNG for every remaining pilot.
-      const random = seeded(characterID);
-      agentID = agents[Math.floor(random() * agents.length)] || 0;
-      if (!agentID) return false;
-    }
-    persistAssignment(Number(characterID), agentID);
-  }
-  for (const size of POOL_SIZES) {
-    const target = getCharacterPortraitFilePath(characterID, size, "jpg");
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.copyFileSync(path.join(getPoolDir(), `${agentID}_${size}.jpg`), target);
-    const generated = getCharacterPortraitFilePath(characterID, size, "png");
-    if (fs.existsSync(generated)) fs.unlinkSync(generated);
-  }
-  // Pool downloads intentionally stop at 512. Reuse the 512 asset for the
-  // 1024 request: clients can scale it, and still receive a real portrait.
-  const largestPoolPortrait = getCharacterPortraitFilePath(characterID, 512, "jpg");
-  const largestRequestedPortrait = getCharacterPortraitFilePath(characterID, 1024, "jpg");
-  publishFileAtomicSync(largestRequestedPortrait, fs.readFileSync(largestPoolPortrait));
-  return true;
-}
-
-function hasOnlyGeneratedPortrait(characterID) {
-  const existing = findCharacterPortraitPath(characterID, 64);
-  return Boolean(existing && existing.endsWith(".png") &&
-    !fs.existsSync(getCharacterPortraitFilePath(characterID, 64, "jpg")));
-}
-
-function hasExactPortrait(characterID, size) {
-  for (const root of require("../character/portraitImageStore").listCharacterPortraitRoots()) {
-    for (const extension of ["jpg", "png"]) {
-      if (fs.existsSync(path.join(root, `${Number(characterID)}_${size}.${extension}`))) return true;
-    }
-  }
-  return false;
-}
-
-// Make sure a bot has a portrait. Never overwrites an uploaded (jpg) one.
-function ensurePortrait(characterID) {
-  const numericCharacterID = Number(characterID);
-  if (!Number.isSafeInteger(numericCharacterID) || numericCharacterID <= 0) {
-    throw new TypeError("PLAYERBOT_PORTRAIT_INVALID_CHARACTER_ID");
-  }
-
-  const missingSizes = () => REQUIRED_SIZES.filter(
-    (size) => !hasExactPortrait(numericCharacterID, size),
-  );
-  let missing = missingSizes();
-  if (!missing.length) return false;
-
-  const existing = findCharacterPortraitPath(numericCharacterID);
-  if ((!existing || hasOnlyGeneratedPortrait(numericCharacterID)) && assignPoolPortrait(numericCharacterID)) {
-    missing = missingSizes();
-  }
-
-  // A character can already have one uploaded or generated size. Fill every
-  // missing size from that image without replacing the pilot's existing face.
-  // This also repairs incomplete portrait sets left by interrupted seeding.
-  const sourcePath = [...REQUIRED_SIZES].reverse()
-    .map((size) => findCharacterPortraitPath(numericCharacterID, size))
-    .find(Boolean);
-  if (sourcePath) {
-    const sourceBytes = fs.readFileSync(sourcePath);
-    const extension = path.extname(sourcePath).slice(1).toLowerCase() || "png";
-    for (const size of missing) {
-      publishFileAtomicSync(
-        getCharacterPortraitFilePath(numericCharacterID, size, extension),
-        sourceBytes,
-      );
-    }
-  } else {
-    for (const size of SIZES) {
-      const filePath = getCharacterPortraitFilePath(numericCharacterID, size, "png");
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      publishFileAtomicSync(filePath, renderPortraitPng(numericCharacterID, size));
-    }
-    // Generate the expensive 1024x1024 render only when it is the sole size
-    // available. Reusing the 512 image keeps bulk roster creation bounded.
-    publishFileAtomicSync(
-      getCharacterPortraitFilePath(numericCharacterID, 1024, "png"),
-      fs.readFileSync(getCharacterPortraitFilePath(numericCharacterID, 512, "png")),
-    );
-  }
-
-  const stillMissing = missingSizes();
-  if (stillMissing.length) {
-    const error = new Error(`PLAYERBOT_PORTRAIT_INCOMPLETE:${stillMissing.join(",")}`);
-    error.code = "PLAYERBOT_PORTRAIT_INCOMPLETE";
+    return true;
+  } catch (error) {
+    if (error.code === "EEXIST") return false;
     throw error;
+  } finally {
+    await fs.promises.rm(temp, { force: true });
   }
-  return true;
 }
 
-module.exports = {
-  ensurePortrait,
-  getPoolDir,
-  listPoolAgents,
-  renderPortraitPng,
-};
+async function ensurePortrait(characterID) {
+  const id = Number(characterID);
+  if (!Number.isSafeInteger(id) || id <= 0) throw new TypeError("PLAYERBOT_PORTRAIT_INVALID_CHARACTER_ID");
+  const target = getCharacterPortraitFilePath(id, 256, "jpg");
+  const agents = await (poolPromise ||= listPoolAgents()).catch(() => []);
+  // One source file is sufficient. Stock EveJS serves it for every portrait
+  // size when an exact-size file is unavailable.
+  if (agents.length) {
+    const agent = agents[portraitIndex(id, agents.length)];
+    try { return await copyPortrait(id, path.join(getPoolDir(), agent + "_256.jpg"), target); }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+  }
+  return copyPortrait(id, builtinPortrait(id), target);
+}
+
+function warn(error) {
+  const now = Date.now();
+  if (now < nextWarningAt) return;
+  nextWarningAt = now + 60_000;
+  require("../../utils/logger").warn("[PlayerBots] Portrait repair paused: " + error.message);
+}
+
+function schedule(delay = CHECK_DELAY_MS) {
+  if (!started || timer || inFlight || (!startupProfiles && !migration && !pending.size && !priority.size)) return;
+  timer = setTimeout(() => {
+    timer = null;
+    if (require("./playerBotLoadController").getPlayerBotLoadController().shouldPauseLowPriorityWork()) {
+      schedule(LOAD_DELAY_MS);
+      return;
+    }
+    let delayAfter = CHECK_DELAY_MS;
+    inFlight = drainBatch().catch(error => {
+      warn(error);
+      delayAfter = LOAD_DELAY_MS;
+    }).finally(() => { inFlight = null; schedule(delayAfter); });
+  }, delay);
+  timer.unref();
+}
+
+async function drainBatch() {
+  if (startupProfiles) {
+    migration = await openMigration(startupProfiles);
+    startupProfiles = null;
+  }
+  existing ??= await readPortraitIndex();
+  const state = migration;
+  const ids = [];
+  let checked = 0;
+  for (const queue of [priority, pending]) {
+    for (const id of queue) {
+      if (ids.length === BATCH_SIZE || checked === MAX_QUEUE_CHECKS_PER_BATCH) break;
+      checked += 1;
+      queue.delete(id);
+      if (state?.pending.has(id) || !existing.has(id)) ids.push(id);
+    }
+    if (ids.length === BATCH_SIZE || checked === MAX_QUEUE_CHECKS_PER_BATCH) break;
+  }
+  const bots = require("./playerBotRuntime");
+  const refreshed = [];
+  let failure;
+  await Promise.all(ids.map(async id => {
+    const refreshing = state?.pending.has(id);
+    if (!bots.hasBotProfile(id)) {
+      if (refreshing) refreshed.push(id);
+      return;
+    }
+    running.add(id);
+    try {
+      if (refreshing) { await refreshPortrait(id, state); refreshed.push(id); }
+      else await ensurePortrait(id);
+      existing.add(id);
+    } catch (error) {
+      if (refreshing && started) pending.add(id);
+      failure ||= error;
+    }
+    finally { running.delete(id); }
+  }));
+  if (state && refreshed.length) {
+    try { await fs.promises.appendFile(state.journal, "\n" + refreshed.join("\n") + "\n"); }
+    catch (error) {
+      if (started) for (const id of refreshed) pending.add(id);
+      throw error;
+    }
+    for (const id of refreshed) { state.pending.delete(id); state.oldFiles.delete(id); }
+  }
+  if (state && !state.pending.size) {
+    await fs.promises.appendFile(state.journal, "\ndone\n");
+    migration = null;
+  }
+  if (failure) throw failure;
+}
+
+function queuePortrait(characterID, urgent = false) {
+  const id = Number(characterID);
+  if (!Number.isSafeInteger(id) || id <= 0 || (existing?.has(id) && !migration?.pending.has(id)) || running.has(id)) return;
+  if (urgent) { pending.delete(id); priority.add(id); }
+  else if (!priority.has(id)) pending.add(id);
+  schedule();
+}
+
+function startPortraitRepair(profiles) {
+  started = true;
+  startupProfiles = new Set(profiles.map(row => Number(row.characterID)).filter(id => Number.isSafeInteger(id) && id > 0));
+  for (const id of startupProfiles) queuePortrait(id);
+  schedule();
+}
+
+async function stopPortraitRepair() {
+  started = false;
+  clearTimeout(timer); timer = null;
+  pending.clear(); priority.clear();
+  await inFlight;
+  existing = null;
+  poolPromise = null;
+  startupProfiles = null;
+  migration = null;
+}
+
+module.exports = { ensurePortrait, getPoolDir, listPoolAgents, renderPortraitPng, queuePortrait, startPortraitRepair, stopPortraitRepair };

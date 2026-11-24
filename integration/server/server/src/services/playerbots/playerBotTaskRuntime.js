@@ -1,9 +1,11 @@
 "use strict";
 
+const { isDeepStrictEqual } = require("node:util");
 const { createTableRepository } = require("../../gameStore/tableRepository");
 
 const TABLE = "playerBots";
 const STORAGE_PATH = "/_tasks";
+const RECORDS_PATH = "/_taskRecords";
 const MAX_ATTEMPTS = 3;
 const LEASE_MS = 60_000;
 const HISTORY_LIMIT = 500;
@@ -16,14 +18,16 @@ function readQueue() {
   const data = result.success && result.data && typeof result.data === "object"
     ? result.data
     : {};
-  const tasks = data.tasks && typeof data.tasks === "object" ? data.tasks : {};
-  const queue = {
-    nextSequence: Math.max(1, Math.trunc(Number(data.nextSequence) || 1)),
-    // Reads share GameStore's cached map. The write path creates a shallow
-    // copy on its first mutation, so read-only checks don't copy queue history.
-    tasks,
+  const legacy = data.tasks && typeof data.tasks === "object";
+  const records = legacy ? data.tasks : repo.read(TABLE, RECORDS_PATH).data;
+  const nextSequence = Math.max(1, Math.trunc(Number(data.nextSequence) || 1));
+  return {
+    nextSequence,
+    initialSequence: nextSequence,
+    tasks: records && typeof records === "object" ? records : {},
+    changed: new Set(),
+    legacy,
   };
-  return queue;
 }
 
 function mutableTaskMap(queue) {
@@ -46,19 +50,38 @@ function mutableTask(queue, taskID) {
   if (!current || typeof current !== "object") return null;
   const task = { ...current };
   mutableTaskMap(queue)[key] = task;
+  queue.changed.add(key);
   return task;
 }
 
 function insertTask(queue, taskID, task) {
-  mutableTaskMap(queue)[String(taskID)] = task;
+  mutableTaskMap(queue)[taskID] = task;
+  queue.changed.add(taskID);
 }
 
 function saveQueue(queue) {
-  // Every caller writes only after a durable queue change. The queue can hold
-  // hundreds of retained tasks, so do not deep-compare the entire subtree to
-  // rediscover that fact before persistence.
-  const result = repo.write(TABLE, STORAGE_PATH, queue, { force: true });
-  if (!result.success) throw new Error(result.errorMsg || "PLAYERBOT_TASK_QUEUE_WRITE_FAILED");
+  function check(result) {
+    if (!result.success) throw new Error(result.errorMsg || "PLAYERBOT_TASK_QUEUE_WRITE_FAILED");
+  }
+
+  if (queue.legacy) {
+    // The legacy row and all migrated records enter the same fenced commit.
+    // Until metadata changes, reads continue to use the old representation.
+    check(repo.write(TABLE, RECORDS_PATH, queue.tasks));
+  } else {
+    for (const taskID of queue.changed) {
+      const path = `${RECORDS_PATH}/${taskID}`;
+      const task = queue.tasks[taskID];
+      if (task) check(repo.write(TABLE, path, task));
+      else {
+        const result = repo.remove(TABLE, path);
+        if (result.errorMsg !== "ENTRY_NOT_FOUND") check(result);
+      }
+    }
+  }
+  if (queue.legacy || queue.nextSequence !== queue.initialSequence) {
+    check(repo.write(TABLE, STORAGE_PATH, { nextSequence: queue.nextSequence }));
+  }
   const flush = repo.flushTableSync(TABLE);
   if (!flush || flush.success !== true) {
     throw new Error(flush && flush.errorMsg || "PLAYERBOT_TASK_QUEUE_FLUSH_FAILED");
@@ -77,7 +100,10 @@ function pruneHistory(queue) {
   const expired = completed.slice(HISTORY_LIMIT);
   if (!expired.length) return;
   const tasks = mutableTaskMap(queue);
-  for (const task of expired) delete tasks[task.taskID];
+  for (const task of expired) {
+    delete tasks[task.taskID];
+    queue.changed.add(task.taskID);
+  }
 }
 
 function enqueueTasks(entries = []) {
@@ -279,18 +305,20 @@ function claimNextTask(options = {}) {
   if (!supportedKinds.size) return null;
   const excludedTaskIDs = new Set((Array.isArray(options.excludeTaskIDs) ? options.excludeTaskIDs : [])
     .map((taskID) => String(taskID || "").trim().toUpperCase()));
-  const allowedProviderIDs = Array.isArray(options.providerCharacterIDs)
+  const allowedProviderIDs = options.providerCharacterIDSet instanceof Set ? options.providerCharacterIDSet : Array.isArray(options.providerCharacterIDs)
     ? new Set(options.providerCharacterIDs.map((characterID) => Math.trunc(Number(characterID) || 0)))
     : null;
   if (options.skipReconcile !== true) reconcileLeases();
   const queue = readQueue();
-  const bots = require("./playerBotRuntime").listBots();
   const tasks = Object.values(queue.tasks)
     .filter((task) => task && task.status === "queued" && supportedKinds.has(task.kind) &&
       !excludedTaskIDs.has(String(task.taskID || "").toUpperCase()) &&
       (!options.taskID || task.taskID === String(options.taskID).trim().toUpperCase()) &&
       (!Number(task.nextAttemptAtMs) || Number(task.nextAttemptAtMs) <= Date.now()))
     .sort((left, right) => Number(right.priority) - Number(left.priority) || Date.parse(left.createdAt) - Date.parse(right.createdAt));
+  if (!tasks.length) return null;
+  const runtime = require("./playerBotRuntime");
+  const bots = allowedProviderIDs ? Array.from(allowedProviderIDs, id => runtime.getBotByCharacterID(id)).filter(Boolean) : runtime.listBots();
   for (const task of tasks) {
     const provider = getAvailableProviders(task, bots).find((candidate) =>
       (!allowedProviderIDs || allowedProviderIDs.has(Number(candidate.characterID))) &&
@@ -325,9 +353,7 @@ function claimNextTask(options = {}) {
 
 function releaseProvider(task) {
   if (!task || !task.providerCharacterID) return;
-  const provider = require("./playerBotRuntime").listBots().find((bot) =>
-    Number(bot.characterID) === Number(task.providerCharacterID),
-  );
+  const provider = require("./playerBotRuntime").getBotByCharacterID(task.providerCharacterID);
   if (!provider) return;
   if (String(provider.currentTask || "") === String(task.taskID)) {
     require("./playerBotRuntime").setBotAutonomyState(provider.characterID, {
@@ -369,11 +395,17 @@ function updateTaskProgress(taskID, leaseToken, progress = {}) {
   if (!current || current.status !== "leased" || current.leaseToken !== leaseToken) {
     return { success: false, stale: true };
   }
-  const task = mutableTask(queue, key);
-  task.progress = {
-    ...(task.progress && typeof task.progress === "object" ? task.progress : {}),
+  const nextProgress = {
+    ...(current.progress && typeof current.progress === "object" ? current.progress : {}),
     ...(progress && typeof progress === "object" ? progress : {}),
   };
+  if (isDeepStrictEqual(current.progress, nextProgress)) {
+    // Retry a previous failed fence even when the requested state is identical.
+    if (!repo.flushTableSync(TABLE)?.success) throw new Error("PLAYERBOT_TASK_QUEUE_FLUSH_FAILED");
+    return { success: true, task: cloneTask(current) };
+  }
+  const task = mutableTask(queue, key);
+  task.progress = nextProgress;
   task.updatedAt = new Date().toISOString();
   saveQueue(queue);
   return { success: true, task: cloneTask(task) };

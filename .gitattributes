@@ -1,1 +1,2 @@
 integration/server/** -text
+windows-native/** -text

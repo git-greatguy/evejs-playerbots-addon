@@ -1,6 +1,6 @@
 "use strict";
 
-const { getCharacterRecord, getActiveShipRecord } = require("../character/characterState");
+const { getCharacterRecord, readSharedCharacterRecord, getActiveShipRecord } = require("../character/characterState");
 const playerBots = require("./playerBotRuntime");
 const spaceRuntime = require("../../space/runtime");
 const worldData = require("../../space/worldData");
@@ -25,6 +25,7 @@ const CORPORATION_BOT_RECONCILE_INTERVAL_MS = 30_000;
 const ROUTE_SECURITY_COST = Object.freeze({ highsec: 1, lowsec: 3, nullsec: 9 });
 
 const actorSessions = new Map();
+const registeredActors = new Map();
 const stargateRouteCache = new Map();
 let desiredConnectedCharacterIDs = new Set();
 let lastConnectionPlan = null;
@@ -262,8 +263,8 @@ function popRouteCandidate(heap) {
   return first;
 }
 
-function createActorSession(bot) {
-  const session = playerBots.createBotSession(bot);
+function createActorSession(bot, character) {
+  const session = playerBots.createBotSession(bot, character);
   const characterID = normalizePositiveID(bot && bot.characterID);
   if (!characterID) throw new Error("PLAYERBOT_CHARACTER_ID_REQUIRED");
   const clientID = -characterID;
@@ -352,13 +353,13 @@ function syncActorSession(session, character, fallbackCharacterID = 0) {
 function getActorSession(bot) {
   const characterID = normalizePositiveID(bot && bot.characterID);
   if (!characterID) throw new Error("PLAYERBOT_CHARACTER_ID_REQUIRED");
+  const character = readSharedCharacterRecord(characterID);
+  if (!character) throw new Error(`PLAYERBOT_CHARACTER_NOT_FOUND:${characterID}`);
   let session = actorSessions.get(characterID);
   if (!session) {
-    session = createActorSession(bot);
+    session = createActorSession(bot, character);
     actorSessions.set(characterID, session);
   }
-  const character = getCharacterRecord(characterID);
-  if (!character) throw new Error(`PLAYERBOT_CHARACTER_NOT_FOUND:${characterID}`);
   syncActorSession(session, character, characterID);
   if (started && desiredConnectedCharacterIDs.has(characterID)) registerPresence(session, characterID);
   return session;
@@ -368,24 +369,22 @@ function registerPresence(session, characterID) {
   const id = normalizePositiveID(characterID);
   if (!id || !desiredConnectedCharacterIDs.has(id)) return false;
   const sessionRegistry = require("../chat/sessionRegistry");
-  if (!sessionRegistry.isRegisteredSession(session)) {
-    const limit = require("./playerBotConnectionScheduleRuntime").getMaxConnected();
-    if (connectedActorCount >= limit) return false;
+  if (sessionRegistry.isRegisteredSession(session)) {
+    registeredActors.set(id, session);
+    return true;
   }
-  try {
-    require("./playerBotPortraitRuntime").ensurePortrait(id);
-  } catch (error) {
-    log.warn(`[PlayerBots] Portrait generation failed char=${id}: ${error.message}`);
-  }
-  if (!sessionRegistry.isRegisteredSession(session)) {
-    sessionRegistry.register(session);
-    connectedActorCount += 1;
-    require("../online/onlineStatusRuntime").notifyCharacterOnlineState(id, true);
-  }
+  const limit = require("./playerBotConnectionScheduleRuntime").getMaxConnected();
+  if (connectedActorCount >= limit) return false;
+  sessionRegistry.register(session);
+  registeredActors.set(id, session);
+  connectedActorCount += 1;
+  require("./playerBotPortraitRuntime").queuePortrait(id, true);
+  require("../online/onlineStatusRuntime").notifyCharacterOnlineState(id, true);
   return true;
 }
 
 function unregisterPresence(session, characterID) {
+  registeredActors.delete(characterID);
   const sessionRegistry = require("../chat/sessionRegistry");
   const xmpp = require("../chat/xmppStubServer");
   if (session && session._playerBotLocalRoom) {
@@ -418,10 +417,8 @@ function syncLocalPresence() {
     return;
   }
   const sessionRegistry = require("../chat/sessionRegistry");
-  for (const session of sessionRegistry.getSessions()) {
-    if (!session || session._playerBotActor !== true) continue;
-    const characterID = normalizePositiveID(session.characterID || session.charID || session.charid);
-    if (!characterID) continue;
+  for (const [characterID, session] of registeredActors) {
+    if (!sessionRegistry.isRegisteredSession(session)) continue;
     try {
       const roomName = chatRuntime.getLocalChatRoomNameForSession(session) || "";
       if (roomName === (session._playerBotLocalRoom || "")) continue;
@@ -442,10 +439,8 @@ function syncScopedChannelPresence() {
     return;
   }
   const sessionRegistry = require("../chat/sessionRegistry");
-  for (const session of sessionRegistry.getSessions()) {
-    if (!session || session._playerBotActor !== true) continue;
-    const characterID = normalizePositiveID(session.characterID || session.charID || session.charid);
-    if (!characterID) continue;
+  for (const [characterID, session] of registeredActors) {
+    if (!sessionRegistry.isRegisteredSession(session)) continue;
     try {
       const currentRooms = xmpp.getPlayerBotScopedRoomNames(session);
       const previousRooms = new Set(session._playerBotScopedPresenceRooms || []);
@@ -558,10 +553,8 @@ function getHumanConnectedCorporationIDs() {
     if (!session || capacity.isPlayerBotSession(session)) continue;
     const characterID = normalizePositiveID(session.characterID || session.charID || session.charid);
     if (!characterID) continue;
-    const character = getCharacterRecord(characterID) || {};
-    const corporationID = normalizePositiveID(
-      session.corporationID || session.corpid || character.corporationID,
-    );
+    const corporationID = normalizePositiveID(session.corporationID || session.corpid ||
+      readSharedCharacterRecord(characterID)?.corporationID);
     if (corporationID) corporationIDs.add(corporationID);
   }
   return corporationIDs;
@@ -653,7 +646,6 @@ function reconcileActorConnections(options = {}) {
     if (!bot) continue;
     try {
       const session = getActorSession(bot);
-      registerPresence(session, characterID);
       if (activeWork.has(characterID) && !isDockedSession(session) &&
           bot.status !== "paused" && bot.autonomyPaused !== true) {
         const scene = session._space && spaceRuntime.getSceneForSession(session);
@@ -703,6 +695,9 @@ function reconcileConnectedCorporations() {
   require("./playerBotDirectorRuntime").enforceConcurrentWorkLimit({ skipUpgradeMarketPlanning: true });
   const corporationIDs = getHumanConnectedCorporationIDs();
   const presence = reconcileActorConnections({ humanCorporations: corporationIDs });
+  if (require("./playerBotLoadController").getPlayerBotLoadController().shouldPauseLowPriorityWork()) {
+    return [{ ...presence, corporations: corporationIDs.size }];
+  }
   for (const corporationID of corporationIDs) {
     try {
       const director = require("./playerBotDirectorRuntime");
@@ -1192,7 +1187,7 @@ function getSpaceState(bot) {
     inSpace: true,
     docked: false,
     systemID: normalizePositiveID(session.solarsystemid),
-    busy: entity.mode === "WARP" || Boolean(session._transitionState),
+    busy: entity.mode === "WARP" || Boolean(entity.pendingWarp || session._transitionState),
     isCapsule: Number(session.shipTypeID) === 670 || Number(entity.typeID) === 670,
     shield: Number.isFinite(Number(condition.shieldCharge)) ? Number(condition.shieldCharge) : 1,
     armorDamage: Number(condition.armorDamage) || 0,
@@ -1318,15 +1313,35 @@ async function mineNearestAsteroid(bot, miningModules, approachMeters, marketSta
   }
   const active = entity.activeModuleEffects instanceof Map ? entity.activeModuleEffects : new Map();
   const busyModules = miningModules.filter((module) => active.has(Number(module.itemID)));
-  const mining = require("../mining/miningNpcOperations");
-  const candidates = mining.resolveAvailableMineableTargetEntries(scene, null, entity, { localGridOnly: true })
-    .filter((entry) => entry && entry.state && entry.state.yieldKind === "ore");
+  const matchesOre = entry => entry?.state?.yieldKind === "ore" &&
+      (!options.missionInstanceID ||
+        (entry.entity.dungeonMaterializedMiningRock === true &&
+         Number(entry.entity.dungeonSiteInstanceID) === options.missionInstanceID &&
+         Number(entry.state.yieldTypeID) === options.yieldTypeID));
   const activeTargetIDs = [...new Set(busyModules.map((module) =>
     Number(active.get(Number(module.itemID)) && active.get(Number(module.itemID)).targetID) || 0,
   ).filter(Boolean))];
-  let target = activeTargetIDs.length === 1
-    ? candidates.find((entry) => Number(entry.entity && entry.entity.itemID) === activeTargetIDs[0]) || null
-    : null;
+  let target = null;
+  const grid = activeTargetIDs.length === 1 && scene.getGridBubbleIDForEntity?.(entity);
+  if (grid) {
+    const rock = scene.getEntityByID(activeTargetIDs[0]);
+    const miningState = require("../mining/miningRuntimeState");
+    if (rock?.staticVisibilityScope === "bubble" && scene.getGridBubbleIDForEntity(rock) === grid &&
+        miningState.isMineableStaticEntity(rock) &&
+        require("../../space/destiny/identity/interactionScope").canEntitiesInteractLocally(entity, rock)) {
+      const state = miningState.getMineableState(scene, rock.itemID);
+      const entry = { entity: rock, state };
+      if (Number(state?.remainingQuantity) > 0 && matchesOre(entry)) target = entry;
+    }
+  }
+  // A bot already mining a live local rock needs one resource lookup. Discover
+  // new rocks only when the current target can no longer receive a cycle.
+  const candidates = target ? [] : require("../mining/miningNpcOperations")
+    .resolveAvailableMineableTargetEntries(scene, null, entity, { localGridOnly: true })
+    .filter(matchesOre);
+  if (!target && activeTargetIDs.length === 1) {
+    target = candidates.find(entry => Number(entry.entity.itemID) === activeTargetIDs[0]) || null;
+  }
   if (busyModules.length && !target) {
     // A depleted or stale target must not leave the lasers apparently active
     // forever. Stop only mining modules, then choose and lock a fresh asteroid.
@@ -1348,8 +1363,15 @@ async function mineNearestAsteroid(bot, miningModules, approachMeters, marketSta
       (Number(left.z) - Number(right.z)) ** 2;
   };
   if (!target) {
-    target = candidates.sort((left, right) => distanceSquared(left) - distanceSquared(right) ||
-      Number(left.entity.itemID) - Number(right.entity.itemID))[0] || null;
+    let bestDistance = Infinity;
+    for (const candidate of candidates) {
+      const distance = distanceSquared(candidate);
+      if (distance < bestDistance ||
+          (distance === bestDistance && Number(candidate.entity.itemID) < Number(target?.entity.itemID))) {
+        target = candidate;
+        bestDistance = distance;
+      }
+    }
   }
   if (!activeTargetIDs.length && marketStationID && candidates.length > 1) {
     const values = new Map();
@@ -1376,8 +1398,12 @@ async function mineNearestAsteroid(bot, miningModules, approachMeters, marketSta
   const asteroid = target.entity;
   const BeyonceService = require("../ship/beyonceService");
   const distanceToAsteroid = getSurfaceDistanceBetweenEntities(entity, asteroid);
+  const followRock = (range) => {
+    if (entity.mode === "FOLLOW" && Number(entity.targetEntityID) === Number(asteroid.itemID)) return;
+    new BeyonceService().Handle_CmdFollowBall([asteroid.itemID, range], session);
+  };
   if (distanceToAsteroid > approachMeters) {
-    new BeyonceService().Handle_CmdFollowBall([asteroid.itemID, Math.round(approachMeters / 2)], session);
+    followRock(Math.round(approachMeters / 2));
     return { success: true, phase: "approach", targetID: Number(asteroid.itemID),
       yieldTypeID: Number(target.state && target.state.yieldTypeID) || 0,
       message: `Approaching asteroid ${asteroid.itemID} (${Math.round(distanceToAsteroid / 1000)} km).` };
@@ -1392,7 +1418,10 @@ async function mineNearestAsteroid(bot, miningModules, approachMeters, marketSta
         if (locked && locked.errorMsg === "TARGET_OUT_OF_RANGE") {
           // Drifted past lock range; close in and lock on the next step.
           const decision = locked.data && locked.data.rangeDecision || {};
-          new BeyonceService().Handle_CmdFollowBall([asteroid.itemID, 1000], session);
+          if (entity.mode !== "FOLLOW" || Number(entity.targetEntityID) !== Number(asteroid.itemID) ||
+              Number(entity.followRange) > 1_000) {
+            new BeyonceService().Handle_CmdFollowBall([asteroid.itemID, 1000], session);
+          }
           return {
             success: true,
             // Out-of-range is a movement step, not a failed lock attempt.
@@ -1433,7 +1462,9 @@ async function mineNearestAsteroid(bot, miningModules, approachMeters, marketSta
   if (!confirmedTarget) {
     return { success: false, message: `Mining lasers were not activated because asteroid ${asteroid.itemID} is not locked.` };
   }
-  log.info(`[PlayerBots] Actor mining char=${bot.characterID} asteroid=${asteroid.itemID} yieldType=${Number(target.state && target.state.yieldTypeID) || 0} modules=${miningModules.map((module) => Number(module.itemID)).join(",")}.`);
+  if (activatedModuleIDs.length) {
+    log.info(`[PlayerBots] Actor mining char=${bot.characterID} asteroid=${asteroid.itemID} yieldType=${Number(target.state && target.state.yieldTypeID) || 0} modules=${activatedModuleIDs.join(",")}.`);
+  }
   return { success: true, phase: "mining", targetID: Number(asteroid.itemID),
     yieldTypeID: Number(target.state && target.state.yieldTypeID) || 0,
     moduleIDs: activeMiningModuleIDs, activatedModuleIDs,
@@ -1514,10 +1545,12 @@ function getBotPresenceInfo(bot, characterRecord = null) {
 
 function getStatusSummary() {
   let inSpace = 0;
-  for (const session of require("../chat/sessionRegistry").getSessions()) {
-    if (session && session._playerBotActor === true && session._space && spaceRuntime.getSceneForSession(session)) {
+  const sessionRegistry = require("../chat/sessionRegistry");
+  for (const session of registeredActors.values()) {
+    if (!session._space || !sessionRegistry.isRegisteredSession(session)) continue;
+    if (spaceRuntime.getSceneForSession(session)) {
       inSpace += 1;
-    } else if (session && session._playerBotActor === true && session._space) {
+    } else {
       session._space = null;
     }
   }
@@ -1525,7 +1558,7 @@ function getStatusSummary() {
     activeActors: inSpace,
     cachedActors: actorSessions.size,
     connectedActors: connectedActorCount,
-    totalBots: playerBots.listBots().length,
+    totalBots: playerBots.getBotCount(),
     connectionSchedule: lastConnectionPlan ? {
       maxConnected: lastConnectionPlan.maxConnected,
       selected: lastConnectionPlan.selectedCount,
@@ -1541,13 +1574,13 @@ function getStatusSummary() {
 function start() {
   if (started) return getStatusSummary();
   started = true;
+  require("./playerBotPortraitRuntime").startPortraitRepair(playerBots.listBotProfiles());
   const bots = playerBots.listBots();
   const capacity = require("./playerBotDirectorRuntime").enforceConcurrentWorkLimit();
   const connection = reconcileActorConnections({ bots });
   const attachedCount = connection.attached;
   const failedCount = Math.max(0, connection.selected - connection.connected);
   const presentCount = connection.connected;
-  reconcileConnectedCorporations();
   localPresenceTimer = setInterval(() => {
     syncLocalPresence();
     syncScopedChannelPresence();
@@ -1569,14 +1602,14 @@ function start() {
   return { ...status, attachedCount, failedCount };
 }
 
-function shutdown() {
-  if (!started && actorSessions.size === 0) return true;
+async function shutdown() {
   started = false;
   const deadline = Date.now() + SHUTDOWN_TIMEOUT_MS;
   if (localPresenceTimer) clearInterval(localPresenceTimer);
   localPresenceTimer = null;
   if (corporationBotPresenceTimer) clearInterval(corporationBotPresenceTimer);
   corporationBotPresenceTimer = null;
+  await require("./playerBotPortraitRuntime").stopPortraitRepair();
   for (const [characterID, session] of actorSessions) {
     unregisterPresence(session, characterID);
   }
@@ -1592,6 +1625,7 @@ function shutdown() {
     if (Date.now() >= deadline) break;
   }
   actorSessions.clear();
+  registeredActors.clear();
   desiredConnectedCharacterIDs = new Set();
   lastConnectionPlan = null;
   connectedActorCount = 0;

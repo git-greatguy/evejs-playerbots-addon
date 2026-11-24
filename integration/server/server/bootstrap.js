@@ -21,6 +21,13 @@
  * gameStore transitively.
  */
 
+// Windows launcher builds ship server/playerbots-native/native.cjs, which
+// applies the launcher's settings and runs the add-on as a worker thread.
+// Docker builds run the add-on as its own container and do not ship it.
+const nativePlayerbotsPath = require("path").join(__dirname, "playerbots-native", "native.cjs");
+const nativePlayerbots = require("fs").existsSync(nativePlayerbotsPath) ? require(nativePlayerbotsPath) : null;
+if (nativePlayerbots) nativePlayerbots.configure();
+
 const fs = require("fs");
 const path = require("path");
 const { resolveDataRootPath } = require(path.join(__dirname, "./src/config/dataRoot"));
@@ -635,6 +642,15 @@ async function bootWorld(options = {}) {
         `[PlayerBots] Space actor recovery complete attached=${actorRecovery.attachedCount} ` +
           `active=${actorRecovery.activeActors} failed=${actorRecovery.failedCount}.`,
       );
+      if (playerBotAddonApiRuntime) {
+        if (nativePlayerbots) {
+          const driver = nativePlayerbots.startDriver(config.imageServerUrl);
+          database.registerShutdownHook("playerbots-native-driver", () => driver.shutdown());
+        }
+        const recruits = require("./src/services/playerbots/playerBotPlayerCorporationRecruitment");
+        database.registerShutdownHook("playerbots-corporation-recruitment", recruits.shutdown);
+        recruits.startAutomaticRecruitment();
+      }
     }
   } catch (error) {
     // Unwind exactly what index.js unwound before it exited, then hand the

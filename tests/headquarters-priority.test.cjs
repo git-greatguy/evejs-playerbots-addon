@@ -156,3 +156,34 @@ test("marked Upwell HQ is selected and used as the hauling depot", () => {
   assert.equal(extractor.marketStationID, 1001);
   assert.equal(extractor.depositOnly, true);
 });
+
+test("structure upkeep is assigned before the caretaker's HQ mining loop", () => {
+  const fs = require("node:fs");
+  const source = fs.readFileSync(require.resolve(
+    "../integration/server/server/src/services/playerbots/playerBotDirectorRuntime.js"), "utf8");
+  const start = source.indexOf("let assignment = escortAssignment || (coreInstallPlan");
+  const chain = source.slice(start, source.indexOf(";", start));
+  assert.ok(start > 0);
+  assert.ok(chain.indexOf("structureMaintenanceAssignment") < chain.indexOf("localHQMiningAssignment"));
+  assert.ok(chain.indexOf("structureMaintenanceAssignment") < chain.indexOf("prioritizeHeadquarters"));
+});
+
+test("structure maintenance keeps every owned structure and only ranks the HQ first", () => {
+  const fs = require("node:fs");
+  const source = fs.readFileSync(require.resolve(
+    "../integration/server/server/src/services/playerbots/playerBotStructureRuntime.js"), "utf8");
+  assert.ok(!source.includes(".filter((structure) => isCorporationHeadquartersStructure(structure, corporationID))"));
+  assert.ok(source.includes("const headquartersFirst = Number(right.headquarters) - Number(left.headquarters);"));
+});
+
+test("pilots outside the PI cohort still collect their own launches before they decay", () => {
+  const { shouldCollectLaunch, PI_LAUNCH_URGENT_AGE_MS } = require("../integration/server/server/src/services/playerbots/playerBotPiWorkPolicy");
+  const now = Date.parse("2026-11-24T12:00:00Z");
+  const fresh = { createdAt: new Date(now - 60_000).toISOString() };
+  const aging = { createdAt: new Date(now - PI_LAUNCH_URGENT_AGE_MS).toISOString() };
+  assert.equal(shouldCollectLaunch({ characterID: 8 }, fresh, now), true, "cohort pilots collect at once");
+  assert.equal(shouldCollectLaunch({ characterID: 9 }, fresh, now), false, "others leave fresh launches");
+  assert.equal(shouldCollectLaunch({ characterID: 9 }, aging, now), true, "others collect before decay");
+  assert.equal(shouldCollectLaunch({ characterID: 9 }, null, now), false);
+  assert.equal(shouldCollectLaunch({ characterID: 9 }, { createdAt: "not a date" }, now), false);
+});

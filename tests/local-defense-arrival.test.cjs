@@ -1,4 +1,13 @@
 "use strict";
+// Needs unmodified EveJS engine files that this repository does not carry.
+// Without EVEJS_ROOT the script reports itself as skipped.
+if (!process.env.EVEJS_ROOT) {
+  require("node:test").test(__filename.split(/[\\/]/).pop(), {
+    skip: "set EVEJS_ROOT to a compatible EveJS 261115.2 checkout to run this",
+  }, () => {});
+  return;
+}
+require("./engine-checkout.cjs");
 function ignoreReportDirectory() {}
 function printReport(_path, value) {
   console.log(value);

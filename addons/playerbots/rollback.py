@@ -45,6 +45,12 @@ def main() -> int:
                 shutil.copy2(saved, destination)
             else:
                 destination.unlink(missing_ok=True)
+        # Files the install removed as obsolete go back where they were.
+        for relative in state.get("removedFiles", []):
+            saved = backup / relative
+            if saved.is_file():
+                (target / relative).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(saved, target / relative)
         created_directories = sorted(
             {(target / relative).parent for relative in managed},
             key=lambda directory: len(directory.parts),

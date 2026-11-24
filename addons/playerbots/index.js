@@ -1,5 +1,9 @@
 "use strict";
 
+// The Windows build runs this file as a worker thread inside the EveJS
+// server; Docker runs it as its own container process.
+const { parentPort } = require("node:worker_threads");
+
 const API_URL = String(process.env.EVEJS_PLAYER_BOTS_ADDON_URL || "http://127.0.0.1:26004").replace(/\/+$/, "");
 const TOKEN = String(process.env.EVEJS_PLAYER_BOTS_ADDON_TOKEN || "").trim();
 const dashboardServer = require("./dashboard-server").createDashboardServer({
@@ -234,13 +238,17 @@ async function runRosterSeedWorker() {
 
 async function main() {
   if (TOKEN.length < 32) {
-    log("ERROR", "configure EVEJS_PLAYER_BOTS_ADDON_TOKEN with at least 32 random characters in the EveJS .env file");
+    log("ERROR", parentPort
+      ? "the Windows server did not supply a Playerbots session token"
+      : "configure EVEJS_PLAYER_BOTS_ADDON_TOKEN with at least 32 random characters in the EveJS .env file");
     while (!stopping) await wait(60_000);
     return;
   }
   try {
     const dashboard = await dashboardServer.start();
-    log("INFO", `dashboard listening on container port ${dashboard.port}; host publication is controlled by Compose`);
+    log("INFO", parentPort
+      ? `dashboard listening at http://127.0.0.1:${dashboard.port}/`
+      : `dashboard listening on container port ${dashboard.port}; host publication is controlled by Compose`);
   } catch (error) {
     log("WARN", `dashboard did not start (${String(error && error.message || error).slice(0, 180)}); bot cycles remain available`);
   }
@@ -249,7 +257,7 @@ async function main() {
   } catch (error) {
     log("WARN", `could not load saved runtime settings (${String(error && error.message || error).slice(0, 180)}); using environment defaults`);
   }
-  log("INFO", `started as a separate process; API=${API_URL}; concurrency=${BOT_CONCURRENCY}; per-bot delay=${BOT_DELAY_MS}ms; cycle interval=${CYCLE_INTERVAL_MS}ms`);
+  log("INFO", `started as ${parentPort ? "a Windows server worker" : "a separate process"}; API=${API_URL}; concurrency=${BOT_CONCURRENCY}; per-bot delay=${BOT_DELAY_MS}ms; cycle interval=${CYCLE_INTERVAL_MS}ms`);
   void runRosterSeedWorker();
   let failureCount = 0;
   while (!stopping) {
@@ -274,6 +282,11 @@ async function requestStop() {
   for (const wake of [...shutdownWaiters]) wake();
   await dashboardServer.shutdown();
 }
+
+// The Windows server posts a message to stop the worker cleanly.
+parentPort?.once("message", () => {
+  void requestStop().finally(() => parentPort.close());
+});
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => { void requestStop(); });

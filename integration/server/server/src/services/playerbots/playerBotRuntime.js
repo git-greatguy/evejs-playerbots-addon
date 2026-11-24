@@ -30,8 +30,10 @@ const MIN_BOTS_PER_CORPORATION = 5;
 const BOT_CORPORATION_TARGET_SIZE = 250;
 const MAX_BOTS_PER_CORPORATION = 300;
 // Player-owned corporations that accept bots and managed specialist shards
-// share the 300-member ceiling, including a human CEO's corporation.
-const MAX_BOTS_PER_PLAYER_CORPORATION = 300;
+// Player corporation bot seats are independent of specialist shard sizes.
+const configuredCorpLimit = Number(process.env.EVEJS_PLAYER_BOTS_PLAYER_CORPORATION_BOT_LIMIT || 1000);
+const MAX_BOTS_PER_PLAYER_CORPORATION = Number.isInteger(configuredCorpLimit) && configuredCorpLimit >= 1 && configuredCorpLimit <= 15000
+  ? configuredCorpLimit : 1000;
 const DEFAULT_ROSTER_SEED_BATCH_SIZE = 5;
 const MAX_ROSTER_SEED_BATCH_SIZE = 25;
 const SPECIALTIES = Object.freeze([
@@ -44,6 +46,7 @@ const SPECIALTIES = Object.freeze([
 ]);
 const CORP_INVITED_BY_CORPORATION = 8;
 const CORP_ACCEPTED_BY_CHARACTER = 2;
+const CORP_ACCEPTED_BY_CORPORATION = 6;
 const MAX_FUNDING_TRANSFER_ISK = 1_000_000_000;
 let botProfilesCache = null;
 let botProfilesByCharacterID = null;
@@ -83,11 +86,25 @@ function listBotProfiles() {
 }
 
 function loadBotProfiles() {
-  botProfilesCache = Object.values(readBots())
-    .filter((record) => record && Number(record.characterID) > 0)
-    .sort((left, right) => Number(left.characterID) - Number(right.characterID))
-    .map((record) => Object.freeze({ ...record }));
-  botProfilesByCharacterID = new Map(botProfilesCache.map((record) => [Number(record.characterID), record]));
+  ensureBotProfileIndex();
+  botProfilesCache = [...botProfilesByCharacterID.values()]
+    .sort((left, right) => Number(left.characterID) - Number(right.characterID));
+}
+
+function ensureBotProfileIndex() {
+  if (!botProfilesByCharacterID) {
+    botProfilesByCharacterID = new Map();
+    for (const record of Object.values(readBots())) {
+      if (record && Number(record.characterID) > 0) {
+        botProfilesByCharacterID.set(Number(record.characterID), Object.freeze({ ...record }));
+      }
+    }
+  }
+}
+
+function hasBotProfile(characterID) {
+  ensureBotProfileIndex();
+  return botProfilesByCharacterID.has(Number(characterID));
 }
 
 function hydrateBotProfiles(profiles, freeze) {
@@ -115,14 +132,14 @@ function getPlanningRoster() {
 }
 
 function getBotCount() {
-  if (botProfilesCache) return botProfilesCache.length;
+  if (botProfilesByCharacterID) return botProfilesByCharacterID.size;
   return Object.values(readBots()).filter((record) => record && Number.isSafeInteger(Number(record.characterID)) && Number(record.characterID) > 0).length;
 }
 
 function getBotByCharacterID(characterID) {
   const id = Math.trunc(Number(characterID) || 0);
   if (!Number.isSafeInteger(id) || id <= 0) return null;
-  if (!botProfilesByCharacterID) getPlanningRoster();
+  ensureBotProfileIndex();
   const record = botProfilesByCharacterID && botProfilesByCharacterID.get(id);
   if (!record) return null;
   const { readSharedCharacterRecord } = require("../character/characterState");
@@ -144,7 +161,7 @@ function saveBot(record, options = {}) {
     throw new Error(result.errorMsg || "PLAYERBOT_WRITE_FAILED");
   }
   botProfilesCache = null;
-  botProfilesByCharacterID = null;
+  botProfilesByCharacterID?.set(characterID, Object.freeze({ ...record }));
   planningRosterCache = null;
   planningRosterCacheAt = 0;
   if (options.rosterMembershipChanged === true && !creatingRosterSeedBot) {
@@ -160,7 +177,7 @@ function removeBotRecord(characterID) {
   if (!Number.isSafeInteger(id) || id <= 0) return { success: false, message: "PLAYERBOT_CHARACTER_ID_REQUIRED" };
   const result = repo.remove(TABLE, `/${id}`);
   botProfilesCache = null;
-  botProfilesByCharacterID = null;
+  if (result?.success !== false) botProfilesByCharacterID?.delete(id);
   planningRosterCache = null;
   planningRosterCacheAt = 0;
   rosterSeedContextVersion += 1;
@@ -174,8 +191,9 @@ function setBotAutonomyState(characterID, state = {}) {
   if (!Number.isSafeInteger(normalizedCharacterID) || normalizedCharacterID <= 0) {
     return { success: false, message: "PLAYERBOT_CHARACTER_ID_REQUIRED" };
   }
-  const records = readBots();
-  const current = records[normalizedCharacterID];
+  repo.ensureTable(TABLE);
+  const row = repo.read(TABLE, `/${normalizedCharacterID}`);
+  const current = row.success ? row.data : null;
   if (!current) return { success: false, message: "PLAYERBOT_NOT_FOUND" };
   const next = { ...current };
   if (typeof state.paused === "boolean") {
@@ -319,8 +337,7 @@ function findTeamCorporation(specialtyID, records = listBots()) {
   return findTeamCorporationShard(specialtyID, 0, records) || findTeamCorporations(specialtyID, records)[0] || null;
 }
 
-function createBotSession(bot) {
-  const character = getCharacterRecord(bot.characterID);
+function createBotSession(bot, character = getCharacterRecord(bot.characterID)) {
   if (!character) throw new Error(`PLAYERBOT_CHARACTER_NOT_FOUND:${bot.characterID}`);
   const corporationID = Number(character.corporationID || bot.corporationID) || 0;
   const session = {
@@ -423,9 +440,15 @@ function createCorporationForSpecialty(specialty, founderID, shardIndex = 0, sel
     foundingOperationID,
   });
   if (!result.success) throw new Error(result.errorMsg || "PLAYERBOT_CORP_CREATE_FAILED");
+  // New bot corporations get a random emblem from the client's logo library
+  // unless EVEJS_PLAYER_BOTS_CORPORATION_EMBLEMS=0.
   const initialized = require("../corporation/corporationRuntimeState").updateCorporationRecord(
     result.data.corporationRecord.corporationID,
-    { description: specialty.name, ...(selectedName ? { tickerName: selectedName.ticker } : {}) },
+    {
+      description: specialty.name,
+      ...(selectedName ? { tickerName: selectedName.ticker } : {}),
+      ...require("./playerBotCorporationEmblemRuntime").emblemForNewCorporation(),
+    },
   );
   if (!initialized.success) throw new Error(initialized.errorMsg || "PLAYERBOT_CORP_INITIALIZATION_FAILED");
   return initialized.data?.corporationRecord || getCorporationRecord(result.data.corporationRecord.corporationID);
@@ -479,6 +502,10 @@ function joinRevengeCorporation(characterID) {
     foundingOperationID: wildfire.REVENGE_FOUNDING_OPERATION_ID,
   });
   if (!result.success) throw new Error(result.errorMsg || "PLAYERBOT_CORP_CREATE_FAILED");
+  const emblem = require("./playerBotCorporationEmblemRuntime").emblemForNewCorporation();
+  if (Object.keys(emblem).length) {
+    require("../corporation/corporationRuntimeState").updateCorporationRecord(result.data.corporationRecord.corporationID, emblem);
+  }
   ensureCharacterMemberState(Number(result.data.corporationRecord.corporationID), characterID);
   return Number(result.data.corporationRecord.corporationID);
 }
@@ -492,10 +519,15 @@ function createBotInTeam(specialty, corporationID, founder = false, shardIndex =
     corporationID = 0;
   }
   const { origin, characterName } = chooseNewBotIdentity();
-  // Check an optional library before creating a founder, so exhaustion cannot create orphan pilots.
-  const selectedName = !revenge && (founder || !Number(corporationID)) &&
-    !findCorporationByFoundingOperationID(foundingOperationIDForShard(specialty.id, shardIndex))
-    ? require("./playerBotNameLibraryRuntime").getRuntime().chooseName(origin?.raceID || 1, "corporations")
+  // Check the name library before creating a founder, so exhaustion cannot
+  // create orphan pilots. Without library names for this empire, new
+  // corporations take an unused famous sci-fi company name, and fall back to
+  // the specialty name once those run out.
+  const newCorporation = !revenge && (founder || !Number(corporationID)) &&
+    !findCorporationByFoundingOperationID(foundingOperationIDForShard(specialty.id, shardIndex));
+  const selectedName = newCorporation
+    ? require("./playerBotNameLibraryRuntime").getRuntime().chooseName(origin?.raceID || 1, "corporations") ||
+      require("./playerBotSciFiCorporationNames").chooseCorporationName()
     : null;
   const characterResult = require("../character/charService").createPlayerBotCharacter(
     characterName,
@@ -511,10 +543,6 @@ function createBotInTeam(specialty, corporationID, founder = false, shardIndex =
     throw new Error(characterResult.errorMsg || "PLAYERBOT_CHARACTER_CREATE_FAILED");
   }
   const characterID = Number(characterResult.data.characterID);
-  // A client asks the image service for a character portrait independently
-  // of the roster record. Do not publish a new bot unless every supported
-  // portrait URL already resolves to an image.
-  require("./playerBotPortraitRuntime").ensurePortrait(characterID);
   let actualCorporationID = Number(corporationID) || 0;
   if (revenge) {
     actualCorporationID = joinRevengeCorporation(characterID);
@@ -544,6 +572,7 @@ function createBotInTeam(specialty, corporationID, founder = false, shardIndex =
     } : {}),
   };
   saveBot(bot, { rosterMembershipChanged: true });
+  require("./playerBotPortraitRuntime").queuePortrait(characterID, true);
   return bot;
 }
 
@@ -878,8 +907,11 @@ function getCorpService() {
   return new CorpRegistryRuntimeService();
 }
 
-function countBotsInCorporation(corporationID, records = listBots()) {
-  return botRecordsForCorporation(corporationID, records).length;
+function countBotsInCorporation(corporationID) {
+  const { getCharacterIDsInCorporation } = require("../corporation/corporationState");
+  let count = 0;
+  for (const id of getCharacterIDsInCorporation(corporationID)) if (hasBotProfile(id)) count++;
+  return count;
 }
 
 function inviteBotToPlayerCorporation(session, botQuery) {
@@ -890,8 +922,10 @@ function inviteBotToPlayerCorporation(session, botQuery) {
   if (!playerCharacterID || !targetCorporationID) return { success: false, message: "Select a character in a corporation before inviting bots." };
   const currentCorporationID = Number(bot.corporationID) || 0;
   if (currentCorporationID === targetCorporationID) return { success: false, message: `${bot.characterName} is already in your corporation.` };
-  if (countBotsInCorporation(targetCorporationID) >= MAX_BOTS_PER_PLAYER_CORPORATION) {
-    return { success: false, message: `Your corporation already has the maximum of ${MAX_BOTS_PER_PLAYER_CORPORATION} playerbots.` };
+  const target = getCorporationRecord(targetCorporationID);
+  const cap = hasBotProfile(target?.ceoID) ? MAX_BOTS_PER_CORPORATION : MAX_BOTS_PER_PLAYER_CORPORATION;
+  if (countBotsInCorporation(targetCorporationID) >= cap) {
+    return { success: false, message: `Your corporation already has the maximum of ${cap} playerbots.` };
   }
   if (currentCorporationID === Number(bot.specialtyCorporationID) &&
       countBotsInCorporation(currentCorporationID) <= MIN_BOTS_PER_CORPORATION) {
@@ -901,34 +935,64 @@ function inviteBotToPlayerCorporation(session, botQuery) {
     return { success: false, message: `${bot.characterName} is the CEO of a specialist corporation and cannot leave it.` };
   }
 
-  const service = getCorpService();
+  return acceptBotCorporationInvitation(getCorpService(), session, bot, targetCorporationID, true);
+}
+
+function acceptBotCorporationInvitation(service, session, bot, targetCorporationID, resetTask = false) {
+  const { isNpcCorporationID } = require("../corporation/corporationState");
+  const { getCorporationRuntime } = require("../corporation/corporationRuntimeState");
+  const { effectiveCorporationMemberLimit, hasRoomForAnotherMember } = require("../corporation/corporationMemberLimit");
+  const characterID = Number(bot.characterID);
   try {
-    service.Handle_InsertInvitation([bot.characterID], session);
-    const runtime = require("../corporation/corporationRuntimeState").getCorporationRuntime(targetCorporationID) || {};
-    const application = Object.values(runtime.applications || {})
-      .filter((item) => Number(item.characterID) === Number(bot.characterID) &&
-        Number(item.status) === CORP_INVITED_BY_CORPORATION)
-      .sort((left, right) => Number(right.applicationID) - Number(left.applicationID))[0];
-    if (!application) throw new Error("INVITATION_NOT_RECORDED");
+    const profile = repo.read(TABLE, `/${characterID}`);
+    const character = getCharacterRecord(characterID);
+    if (!profile.success || Number(profile.data?.characterID) !== characterID ||
+        !character || character.isDeleted || character.deletedAt ||
+        Number(character.corporationID) === targetCorporationID) {
+      return { success: false, ineligible: true, message: "This bot is no longer eligible." };
+    }
+    if (!service.canManageRecruitment(targetCorporationID, session)) {
+      return { success: false, message: "Corporation recruitment permission is required." };
+    }
+    const target = getCorporationRecord(targetCorporationID);
+    if (target?.deleted || target?.isNPC !== false ||
+        !hasRoomForAnotherMember(effectiveCorporationMemberLimit(target), target.memberCount)) {
+      return { success: false, message: "The target corporation cannot accept another member." };
+    }
+    const botSession = createBotSession(bot);
+    if (!isNpcCorporationID(character.corporationID)) {
+      const [canLeave, reason] = service.Handle_CanLeaveCurrentCorporation([], botSession);
+      if (!canLeave) return { success: false, ineligible: true, message: reason || "The bot cannot leave its corporation." };
+    }
+
+    const runtime = getCorporationRuntime(targetCorporationID) || {};
+    const pending = Object.values(runtime.applications || {}).find((application) =>
+      !application.deleted && Number(application.characterID) === characterID &&
+      [CORP_INVITED_BY_CORPORATION, CORP_ACCEPTED_BY_CORPORATION].includes(Number(application.status)));
+    let applicationID = pending?.applicationID;
+    if (!applicationID) {
+      const invitationID = service.Handle_InsertInvitation([characterID], session);
+      applicationID = getCorporationRuntime(targetCorporationID)?.invitations?.[String(invitationID)]?.applicationID;
+    }
+    if (!applicationID) throw new Error("INVITATION_NOT_RECORDED");
     service.Handle_UpdateApplicationOffer([
-      application.applicationID,
-      bot.characterID,
-      targetCorporationID,
-      "",
-      CORP_ACCEPTED_BY_CHARACTER,
-      "",
-    ], createBotSession(bot));
-    const updated = {
-      ...bot,
+      applicationID, characterID, targetCorporationID, "", CORP_ACCEPTED_BY_CHARACTER, "",
+    ], botSession);
+    if (Number(getCharacterRecord(characterID)?.corporationID) !== targetCorporationID) {
+      throw new Error("CORPORATION_MEMBERSHIP_NOT_RECORDED");
+    }
+    saveBot({
+      ...profile.data,
       corporationID: targetCorporationID,
-      status: "idle",
-      currentTask: null,
+      ...(resetTask ? { status: "idle", currentTask: null } : {}),
       joinedPlayerCorporationAt: new Date().toISOString(),
-    };
-    saveBot(updated, { rosterMembershipChanged: true });
-    const corporation = getCorporationRecord(targetCorporationID);
-    return { success: true, message: `${bot.characterName} accepted the invitation and joined ${corporation?.corporationName || "your corporation"}.` };
+    }, { rosterMembershipChanged: true });
+    return { success: true, message: `${bot.characterName} accepted the invitation and joined ${target.corporationName}.` };
   } catch (error) {
+    if (Number(getCharacterRecord(characterID)?.corporationID) === targetCorporationID) {
+      require("../../utils/logger").warn(`[PlayerBots] Bot ${characterID} joined corporation ${targetCorporationID}, but follow-up failed: ${error.message}`);
+      return { success: true, message: `${bot.characterName} joined. See the server log for a follow-up warning.` };
+    }
     return { success: false, message: `Could not complete the corporation invitation: ${error.message}` };
   }
 }
@@ -1034,6 +1098,9 @@ module.exports = {
   getStatusMessage,
   fundBotFromPlayer,
   inviteBotToPlayerCorporation,
+  acceptBotCorporationInvitation,
+  hasBotProfile,
+  countBotsInCorporation,
   invitePlayerToBotCorporation,
   invitePlayerToBotFleet,
   listBotProfiles,

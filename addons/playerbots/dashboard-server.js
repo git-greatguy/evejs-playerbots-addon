@@ -11,6 +11,7 @@ const MAX_SHIP_RENDER_BYTES = 512 * 1024;
 const MAX_CHARACTER_PORTRAIT_BYTES = 2 * 1024 * 1024;
 const SHIP_RENDER_SIZES = new Set([32, 64, 128, 256, 512]);
 const CHARACTER_PORTRAIT_SIZES = new Set([32, 64, 128, 256, 512, 1024]);
+const CHARACTER_PORTRAIT_TYPES = new Set(["image/jpeg", "image/png"]);
 const SHIP_RENDER_CACHE_MS = 6 * 60 * 60 * 1000;
 const MIN_DASHBOARD_API_TIMEOUT_MS = 10_000;
 const MAX_DASHBOARD_API_TIMEOUT_MS = 30_000;
@@ -18,6 +19,16 @@ const MAX_DASHBOARD_API_TIMEOUT_MS = 30_000;
 function positiveInteger(value, fallback, maximum) {
   const parsed = Math.trunc(Number(value));
   return Number.isSafeInteger(parsed) ? Math.max(0, Math.min(maximum, parsed)) : fallback;
+}
+
+function defaultLocalPortraitFinder() {
+  let store;
+  try {
+    store = require("../src/services/character/portraitImageStore");
+  } catch (_) {
+    return () => null;
+  }
+  return (id, size) => store.findCharacterPortraitPath(id, size);
 }
 
 function createDashboardServer(options = {}) {
@@ -29,6 +40,9 @@ function createDashboardServer(options = {}) {
   const token = String(options.token ?? process.env.EVEJS_PLAYER_BOTS_ADDON_TOKEN ?? "");
   const fetchImpl = options.fetch || fetch;
   const timeoutSignal = options.timeoutSignal || AbortSignal.timeout;
+  // The Windows build runs inside the EveJS server tree and can read saved
+  // portraits directly; the Docker add-on cannot and always proxies.
+  const findLocalPortrait = options.findLocalPortrait || defaultLocalPortraitFinder();
   const staticRoot = options.staticRoot || STATIC_ROOT;
   const logger = options.logger || { info() {}, warn() {} };
   const shipRenderCache = new Map();
@@ -167,14 +181,32 @@ function createDashboardServer(options = {}) {
     const extension = String(url.searchParams.get("ext") || "jpg").toLowerCase();
     if (!Number.isSafeInteger(rawCharacterID) || characterID <= 0 || characterID > 10_000_000_000 ||
         !Number.isSafeInteger(rawSize) || !CHARACTER_PORTRAIT_SIZES.has(size) ||
-        !new Set(["jpg", "png"]).has(extension)) {
+        (extension !== "jpg" && extension !== "png")) {
       send(response, 400, "application/json; charset=utf-8", JSON.stringify({ error: "A valid character and portrait size are required." }));
       return;
+    }
+    const head = request.method === "HEAD";
+    try {
+      const localPath = findLocalPortrait(characterID, size);
+      if (localPath) {
+        const stat = await fs.promises.stat(localPath);
+        if (stat.isFile() && stat.size > 0 && stat.size <= MAX_CHARACTER_PORTRAIT_BYTES) {
+          const body = head ? Buffer.alloc(0) : await fs.promises.readFile(localPath);
+          const type = path.extname(localPath) === ".png" ? "image/png" : "image/jpeg";
+          send(response, 200, type, body, {
+            "cache-control": "public, max-age=300",
+            "content-length": head ? stat.size : body.length,
+          });
+          return;
+        }
+      }
+    } catch (_) {
+      // Runtime images may be migrating or served by another image edge.
     }
     try {
       const upstream = await fetchImpl(`${imageServerURL}/Character/${characterID}_${size}.${extension}`, {
         method: request.method,
-        headers: { accept: extension === "png" ? "image/png" : "image/jpeg" },
+        headers: { accept: "image/jpeg, image/png" },
         signal: AbortSignal.timeout(8_000),
       });
       if (!upstream.ok) {
@@ -182,18 +214,19 @@ function createDashboardServer(options = {}) {
         return;
       }
       const contentType = String(upstream.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
-      if (!new Set(["image/jpeg", "image/png"]).has(contentType)) {
+      if (!CHARACTER_PORTRAIT_TYPES.has(contentType)) {
         send(response, 502, "application/json; charset=utf-8", "");
         return;
       }
-      const body = Buffer.from(await upstream.arrayBuffer());
-      if (!body.length || body.length > MAX_CHARACTER_PORTRAIT_BYTES) {
+      const body = head ? Buffer.alloc(0) : Buffer.from(await upstream.arrayBuffer());
+      const length = head ? Number(upstream.headers.get("content-length")) : body.length;
+      if (!Number.isSafeInteger(length) || length <= 0 || length > MAX_CHARACTER_PORTRAIT_BYTES) {
         send(response, 502, "application/json; charset=utf-8", "");
         return;
       }
-      send(response, 200, contentType, request.method === "HEAD" ? Buffer.alloc(0) : body, {
+      send(response, 200, contentType, body, {
         "cache-control": "public, max-age=300",
-        "content-length": body.length,
+        "content-length": length,
       });
     } catch (error) {
       logger.warn(`[PlayerBotsDashboard] Character portrait request failed for ${characterID}: ${String(error && error.message || error).slice(0, 180)}`);
@@ -247,6 +280,15 @@ function createDashboardServer(options = {}) {
   }
 
   async function route(request, response) {
+    // Bound to loopback, only loopback host names are accepted, so a web page
+    // cannot reach the dashboard through a rebound DNS name.
+    if (host === "127.0.0.1") {
+      const port = server.address().port;
+      if (![`127.0.0.1:${port}`, `localhost:${port}`].includes(String(request.headers.host || "").toLowerCase())) {
+        send(response, 403, "text/plain; charset=utf-8", `Open the dashboard at http://127.0.0.1:${port}/.`);
+        return;
+      }
+    }
     if (request.method !== "GET" && request.method !== "HEAD" && request.method !== "POST") {
       send(response, 405, "text/plain; charset=utf-8", "Method not allowed.", { allow: "GET, HEAD, POST" });
       return;
@@ -374,21 +416,49 @@ function createDashboardServer(options = {}) {
       const offset = positiveInteger(url.searchParams.get("offset"), 0, 10_000_000);
       const limit = positiveInteger(url.searchParams.get("limit"), 50, 100) || 50;
       const query = new URLSearchParams({ offset: String(offset), limit: String(limit) });
-      for (const key of ["specialty", "corporationID", "search"]) {
+      for (const key of ["specialty", "corporationID", "search", "state", "activity", "reason", "sort"]) {
         const value = String(url.searchParams.get(key) || "").trim().slice(0, 80);
         if (value) query.set(key, value);
       }
       return proxyApi(response, "/v1/dashboard/bots", `?${query}`);
     }
+    if (url.pathname === "/api/activity") {
+      if (request.method !== "GET") {
+        send(response, 405, "text/plain; charset=utf-8", "Method not allowed.", { allow: "GET" });
+        return;
+      }
+      return proxyApi(response, "/v1/dashboard/activity");
+    }
+    if (url.pathname === "/api/bot" || url.pathname === "/api/corporation") {
+      if (request.method !== "GET") {
+        send(response, 405, "text/plain; charset=utf-8", "Method not allowed.", { allow: "GET" });
+        return;
+      }
+      const key = url.pathname === "/api/bot" ? "characterID" : "corporationID";
+      const id = positiveInteger(url.searchParams.get(key), 0, 9_000_000_000);
+      if (!id) {
+        send(response, 400, "application/json; charset=utf-8", JSON.stringify({ error: `A valid ${key} is required.` }));
+        return;
+      }
+      return proxyApi(response, `/v1/dashboard/${url.pathname.slice(5)}`, `?${new URLSearchParams({ [key]: String(id) })}`);
+    }
+    if (url.pathname === "/api/corp-command" || url.pathname === "/api/bot-command") {
+      if (request.method !== "POST") {
+        send(response, 405, "text/plain; charset=utf-8", "Method not allowed.", { allow: "POST" });
+        return;
+      }
+      if (!isSameOriginRequest(request)) {
+        send(response, 403, "application/json; charset=utf-8", JSON.stringify({ error: "Cross-origin dashboard commands are blocked." }));
+        return;
+      }
+      return proxyMutation(response, `/v1/dashboard/${url.pathname.slice(5)}`, "POST", await readJsonBody(request));
+    }
 
-    const assets = {
-      "/": ["index.html", "text/html; charset=utf-8"],
-      "/index.html": ["index.html", "text/html; charset=utf-8"],
-      "/app.js": ["app.js", "text/javascript; charset=utf-8"],
-      "/styles.css": ["styles.css", "text/css; charset=utf-8"],
-      "/favicon.svg": ["favicon.svg", "image/svg+xml"],
-    };
-    const asset = assets[url.pathname];
+    // Static files: index.html, styles, the favicon and the ES modules under
+    // js/. Names are restricted so no request can leave the dashboard folder.
+    const contentTypes = { html: "text/html; charset=utf-8", js: "text/javascript; charset=utf-8", css: "text/css; charset=utf-8", svg: "image/svg+xml" };
+    const assetMatch = url.pathname === "/" ? ["/index.html", "index.html", "html"] : url.pathname.match(/^\/((?:js\/)?[a-z0-9][a-z0-9-]*\.(html|js|css|svg))$/);
+    const asset = assetMatch ? [assetMatch[1], contentTypes[assetMatch[2]]] : null;
     if (!asset) {
       send(response, 404, "text/plain; charset=utf-8", "Not found.");
       return;
@@ -396,7 +466,11 @@ function createDashboardServer(options = {}) {
     let body;
     try {
       body = fs.readFileSync(path.join(staticRoot, asset[0]));
-    } catch {
+    } catch (error) {
+      if (error && error.code === "ENOENT" && asset[0] !== "index.html") {
+        send(response, 404, "text/plain; charset=utf-8", "Not found.");
+        return;
+      }
       send(response, 503, "text/plain; charset=utf-8", "Dashboard assets are missing from this add-on package.");
       return;
     }

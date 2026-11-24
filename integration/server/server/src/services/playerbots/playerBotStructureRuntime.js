@@ -37,10 +37,29 @@ const STRUCTURE_CARETAKER_ROLE = 2048n;
 const STRUCTURE_CARETAKER_CACHE_MS = 30_000;
 const structureCaretakerCache = new Map();
 const missingHeadquartersCache = new Map();
+// Structure-manager authority changes rarely; the director asks for it for
+// every candidate pilot, so remember each answer as long as the caretaker.
+const structureManagerCache = new Map();
+// A failed autonomous purchase search (no reachable system, no complete
+// market package, not enough funds) is retried at most once a minute per
+// pilot instead of on every director pass.
+const PURCHASE_PLAN_RETRY_MS = 60_000;
+const purchasePlanMissCache = new Map();
 
 function positiveID(value) {
   const number = Math.trunc(Number(value));
   return Number.isSafeInteger(number) && number > 0 ? number : 0;
+}
+
+// Read-only view of every structure. listStructures() advances structure
+// timers and deep-copies every row in the universe, which is far too costly
+// for the per-pilot checks below; peekStructures() returns the live rows.
+// Callers must not modify what this returns.
+function readStructuresForPlanning() {
+  const structureState = require("../structure/structureState");
+  return typeof structureState.peekStructures === "function"
+    ? structureState.peekStructures()
+    : structureState.listStructures();
 }
 
 function getStructureType(typeID) {
@@ -133,7 +152,7 @@ function isMissingCorporationHeadquarters(bot) {
   if (!corporationID) return false;
   const cached = missingHeadquartersCache.get(corporationID);
   if (cached && cached.expiresAt > Date.now()) return cached.missing;
-  const missing = !require("../structure/structureState").listStructures().some((structure) =>
+  const missing = !readStructuresForPlanning().some((structure) =>
     Number(structure && (structure.ownerCorpID || structure.ownerID)) === corporationID &&
     !structure.destroyedAt && !structure.unanchoring &&
     getStructureType(structure.typeID)?.dockable === true,
@@ -143,6 +162,18 @@ function isMissingCorporationHeadquarters(bot) {
     expiresAt: Date.now() + STRUCTURE_CARETAKER_CACHE_MS,
   });
   return missing;
+}
+
+function generateCorporationHeadquartersName(bot, corporationID, fallbackName) {
+  const corporation = require("../corporation/corporationState").getCorporationRecord(positiveID(corporationID)) || {};
+  const existingNames = new Set(readStructuresForPlanning()
+    .map((structure) => String(structure && (structure.name || structure.itemName) || "").trim().toLowerCase())
+    .filter(Boolean));
+  return require("./playerBotHeadquartersNameRuntime").generateHeadquartersName({
+    corporationName: corporation.corporationName || bot && bot.corporationName || fallbackName,
+    random: bot && bot.headquartersNameRandom,
+    isAvailable: (candidate) => !existingNames.has(candidate.toLowerCase()),
+  });
 }
 
 function isCorporationHeadquartersStructure(structure, corporationID) {
@@ -158,20 +189,58 @@ function isCorporationHeadquartersStructure(structure, corporationID) {
   }
 }
 
+// 0 = this pilot leads its corporation's structure work: a structure manager
+// while the corporation has no dockable structure, or the caretaker once it
+// has one. Both answers come from 30-second caches, so the director can rank
+// every candidate without building an actor session for each.
 function getHeadquartersPriority(bot) {
   if (!bot) return 1;
+  const characterID = positiveID(bot.characterID);
   const corporationID = positiveID(
-    (require("../character/characterState").getCharacterRecord(bot.characterID) || {}).corporationID || bot.corporationID,
+    (require("../character/characterState").getCharacterRecord(characterID) || {}).corporationID || bot.corporationID,
   );
-  if (!corporationID || !isStructureManager(bot)) return 1;
-  if (isMissingCorporationHeadquarters(bot)) return 0;
-  const caretaker = getStructureCaretakerAssignment(corporationID);
-  if (caretaker && caretaker.characterID === positiveID(bot.characterID)) return 0;
-  return 1;
+  if (!characterID || !corporationID) return 1;
+  if (!isMissingCorporationHeadquarters(bot)) {
+    // The caretaker is always a natural or delegated structure manager.
+    const caretaker = getStructureCaretakerAssignment(corporationID);
+    return caretaker && caretaker.characterID === characterID ? 0 : 1;
+  }
+  return isStructureManagerCached(bot) ? 0 : 1;
+}
+
+function isStructureManagerCached(bot) {
+  const characterID = positiveID(bot && bot.characterID);
+  if (!characterID) return false;
+  const now = Date.now();
+  const cached = structureManagerCache.get(characterID);
+  if (cached && cached.expiresAt > now) return cached.manager;
+  let manager = false;
+  try { manager = isStructureManager(bot); } catch (_) { manager = false; }
+  if (structureManagerCache.size >= 10_000) structureManagerCache.clear();
+  structureManagerCache.set(characterID, { manager, expiresAt: now + STRUCTURE_CARETAKER_CACHE_MS });
+  return manager;
 }
 
 function findAutonomousPurchasePlan(bot) {
-  if (!bot || !isStructureManager(bot)) return null;
+  if (!bot) return null;
+  // Cheap, cached checks first: most pilots belong to a corporation that
+  // already has a structure, and most pilots are not structure managers.
+  if (!isMissingCorporationHeadquarters(bot)) return null;
+  if (!isStructureManagerCached(bot)) return null;
+  const characterID = positiveID(bot.characterID);
+  const missUntil = purchasePlanMissCache.get(characterID);
+  if (missUntil && missUntil > Date.now()) return null;
+  const plan = buildAutonomousPurchasePlan(bot);
+  if (plan) purchasePlanMissCache.delete(characterID);
+  else {
+    if (purchasePlanMissCache.size >= 10_000) purchasePlanMissCache.clear();
+    purchasePlanMissCache.set(characterID, Date.now() + PURCHASE_PLAN_RETRY_MS);
+  }
+  return plan;
+}
+
+function buildAutonomousPurchasePlan(bot) {
+  if (!isStructureManager(bot)) return null;
   const corporationID = positiveID((require("../character/characterState").getCharacterRecord(bot.characterID) || {}).corporationID || bot.corporationID);
   if (!corporationID) return null;
   const typeID = positiveID(
@@ -187,8 +256,7 @@ function findAutonomousPurchasePlan(bot) {
   if (positiveID(type.defaultQuantumCoreTypeID) &&
       !packageNeeds.some((need) => need.typeID === positiveID(type.defaultQuantumCoreTypeID))) return null;
 
-  const state = require("../structure/structureState");
-  const existingStructure = state.listStructures().some((structure) =>
+  const existingStructure = readStructuresForPlanning().some((structure) =>
     Number(structure && (structure.ownerCorpID || structure.ownerID)) === corporationID &&
     !structure.destroyedAt && !structure.unanchoring);
   if (existingStructure) return null;
@@ -252,15 +320,7 @@ function findAutonomousPurchasePlan(bot) {
     fundingSource = "seed-capital";
   }
 
-  const corporation = require("../corporation/corporationState").getCorporationRecord(corporationID) || {};
-  const existingNames = new Set(require("../structure/structureState").listStructures()
-    .map((structure) => String(structure && (structure.name || structure.itemName) || "").trim().toLowerCase())
-    .filter(Boolean));
-  const structureName = require("./playerBotHeadquartersNameRuntime").generateHeadquartersName({
-    corporationName: corporation.corporationName || bot.corporationName || type.name,
-    random: bot.headquartersNameRandom,
-    isAvailable: (candidate) => !existingNames.has(candidate.toLowerCase()),
-  });
+  const structureName = generateCorporationHeadquartersName(bot, corporationID, type.name);
   return {
     typeID,
     coreTypeID: positiveID(type.defaultQuantumCoreTypeID),
@@ -816,13 +876,17 @@ function findStructureMaintenancePlan(bot) {
     .filter((structure) => Number(structure && (structure.ownerCorpID || structure.ownerID)) === corporationID)
     .filter((structure) => !structure.destroyedAt && !structure.unanchoring && structure.hasQuantumCore === true)
     .filter((structure) => structureState.isDockingServiceOnline(structure))
-    .filter((structure) => isCorporationHeadquartersStructure(structure, corporationID))
     .filter((structure) => !activeTargets.has(positiveID(structure.structureID)))
+    .map((structure) => ({ structure, headquarters: isCorporationHeadquartersStructure(structure, corporationID) }))
+    // Every owned structure stays maintained; the corporation headquarters
+    // is served first, then low-power structures, then by ID.
     .sort((left, right) => {
-      const lowPowerFirst = Number(Number(right.upkeepState) === constants.STRUCTURE_UPKEEP_STATE.LOW_POWER) -
-        Number(Number(left.upkeepState) === constants.STRUCTURE_UPKEEP_STATE.LOW_POWER);
-      return lowPowerFirst || positiveID(left.structureID) - positiveID(right.structureID);
-    });
+      const headquartersFirst = Number(right.headquarters) - Number(left.headquarters);
+      const lowPowerFirst = Number(Number(right.structure.upkeepState) === constants.STRUCTURE_UPKEEP_STATE.LOW_POWER) -
+        Number(Number(left.structure.upkeepState) === constants.STRUCTURE_UPKEEP_STATE.LOW_POWER);
+      return headquartersFirst || lowPowerFirst || positiveID(left.structure.structureID) - positiveID(right.structure.structureID);
+    })
+    .map((entry) => entry.structure);
   if (!structures.length) return null;
 
   const itemTypeByID = new Map(itemTypes.listItemTypes()
@@ -1801,7 +1865,7 @@ function getStructureCaretakerAssignment(corporationID) {
     structureCaretakerCache.set(numericCorporationID, { assignment: null, expiresAt: now + STRUCTURE_CARETAKER_CACHE_MS });
     return null;
   }
-  const hasOwnedStructure = structureState.listStructures().some((structure) =>
+  const hasOwnedStructure = readStructuresForPlanning().some((structure) =>
     Number(structure && (structure.ownerCorpID || structure.ownerID)) === numericCorporationID &&
     !structure.destroyedAt && !structure.unanchoring && structureState.getStructureTypeByID(structure.typeID)?.dockable === true,
   );
@@ -2091,9 +2155,6 @@ function start(bot, itemID, systemID = null, options = {}) {
   if (!objective) return { success: false, message: positiveID(systemID) ? `System ${systemID} is not a reachable claimable null-sec system within ${MAX_DEPLOYMENT_ROUTE_HOPS} jumps.` : "No reachable null-sec structure deployment system is available." };
   const character = require("../character/characterState").getCharacterRecord(bot.characterID) || {};
   const corporationID = positiveID(character.corporationID || bot.corporationID);
-  const corporation = corporationID
-    ? require("../corporation/corporationState").getCorporationRecord(corporationID) || {}
-    : {};
   const corporationHasStructure = corporationID && !isMissingCorporationHeadquarters(bot);
   const headquarters = options.headquarters === true || !corporationHasStructure;
   const operation = tools.baseOperation("structure-deployment", bot, {
@@ -2104,7 +2165,7 @@ function start(bot, itemID, systemID = null, options = {}) {
     typeID: Number(item.typeID),
     corporationID,
     structureName: headquarters
-      ? `${corporation.corporationName || bot.corporationName || type.name} Headquarters`.slice(0, 200)
+      ? generateCorporationHeadquartersName(bot, corporationID, type.name).slice(0, 200)
       : String(item.itemName || type.name || `Structure ${item.typeID}`).slice(0, 200),
     headquarters,
     sourceStationID: inHangar ? sourceStationID : null,

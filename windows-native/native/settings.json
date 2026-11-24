@@ -1,0 +1,285 @@
+{
+  "rosterTarget": {
+    "label": "Roster target",
+    "group": "Population",
+    "type": "integer",
+    "default": 500,
+    "minimum": 30,
+    "maximum": 15000,
+    "env": "TARGET"
+  },
+  "rosterCeiling": {
+    "label": "Roster ceiling",
+    "group": "Population",
+    "type": "integer",
+    "default": 1500,
+    "minimum": 30,
+    "maximum": 15000,
+    "advanced": true,
+    "env": "ROSTER_CEILING"
+  },
+  "maxOnline": {
+    "label": "Maximum online bots",
+    "group": "Population",
+    "type": "integer",
+    "default": 300,
+    "minimum": 1,
+    "maximum": 5000,
+    "env": "MAX_ONLINE"
+  },
+  "maxPerSystem": {
+    "label": "Maximum bots per system",
+    "group": "Population",
+    "type": "integer",
+    "default": 30,
+    "minimum": 1,
+    "maximum": 300,
+    "env": "MAX_PER_SYSTEM"
+  },
+  "rosterSeedEnabled": {
+    "label": "Gradually create roster",
+    "group": "Population",
+    "type": "boolean",
+    "default": true,
+    "env": "ROSTER_SEED_ENABLED"
+  },
+  "rosterSeedBatchSize": {
+    "label": "Roster seed batch size",
+    "group": "Population",
+    "type": "integer",
+    "default": 5,
+    "minimum": 1,
+    "maximum": 10,
+    "advanced": true,
+    "env": "ROSTER_SEED_BATCH_SIZE"
+  },
+  "rosterSeedMaxProcessCpuPercent": {
+    "label": "Pause roster seeding above EveJS CPU (%)",
+    "group": "Population",
+    "type": "integer",
+    "default": 85,
+    "minimum": 25,
+    "maximum": 900,
+    "advanced": true,
+    "env": "ROSTER_SEED_MAX_PROCESS_CPU_PERCENT"
+  },
+  "autoworkEnabled": {
+    "label": "Autonomous bot work",
+    "group": "Behaviour",
+    "type": "boolean",
+    "default": true,
+    "env": "AUTOWORK"
+  },
+  "botVersusBot": {
+    "label": "Bot versus bot combat",
+    "group": "Behaviour",
+    "type": "boolean",
+    "default": true,
+    "env": "BOT_VERSUS_BOT"
+  },
+  "engagement": {
+    "label": "Engagement",
+    "group": "Behaviour",
+    "type": "boolean",
+    "default": true,
+    "advanced": true,
+    "env": "ENGAGEMENT"
+  },
+  "wildfire": {
+    "label": "Wildfire",
+    "group": "Behaviour",
+    "type": "boolean",
+    "default": true,
+    "advanced": true,
+    "env": "WILDFIRE"
+  },
+  "marketMaking": {
+    "label": "Market making",
+    "group": "Behaviour",
+    "type": "boolean",
+    "default": true,
+    "env": "MARKET_MAKING"
+  },
+  "addonConcurrency": {
+    "label": "Driver concurrency",
+    "group": "Performance",
+    "type": "integer",
+    "default": 16,
+    "minimum": 1,
+    "maximum": 100,
+    "advanced": true,
+    "env": "ADDON_CONCURRENCY"
+  },
+  "addonCycleIntervalMs": {
+    "label": "Driver interval (ms)",
+    "group": "Performance",
+    "type": "integer",
+    "default": 300000,
+    "minimum": 30000,
+    "maximum": 86400000,
+    "advanced": true,
+    "env": "ADDON_INTERVAL_MS"
+  },
+  "addonBotDelayMs": {
+    "label": "Delay between bot actions (ms)",
+    "group": "Performance",
+    "type": "integer",
+    "default": 0,
+    "minimum": 0,
+    "maximum": 5000,
+    "advanced": true,
+    "env": "ADDON_BOT_DELAY_MS"
+  },
+  "recruitmentCorporation": {
+    "label": "Target corporation",
+    "description": "Enter an exact player corporation name or ticker. Use name: or ticker: to resolve an ambiguous match. Blank disables corporation recruitment.",
+    "group": "Corporation recruitment",
+    "type": "string",
+    "default": "",
+    "maxLength": 96,
+    "env": "RECRUITMENT_CORPORATION"
+  },
+  "autoRecruitCorporation": {
+    "label": "Automatically recruit eligible bots",
+    "description": "Periodically recruit into the target corporation while Game is running, including newly created bots. Leave off to recruit only with /bots corp inviteall.",
+    "group": "Corporation recruitment",
+    "type": "boolean",
+    "default": false,
+    "env": "AUTO_RECRUIT_CORPORATION"
+  },
+  "dashboardPort": {
+    "label": "Dashboard port",
+    "description": "Open http://127.0.0.1:PORT/ after starting Game.",
+    "group": "Local dashboard",
+    "type": "integer",
+    "default": 8080,
+    "minimum": 1024,
+    "maximum": 65535,
+    "env": "DASHBOARD_CONTAINER_PORT"
+  },
+  "apiPort": {
+    "label": "Private API port",
+    "description": "Local connection between Game and the bot driver.",
+    "group": "Local dashboard",
+    "type": "integer",
+    "default": 26004,
+    "minimum": 1024,
+    "maximum": 65535,
+    "advanced": true,
+    "env": "ADDON_API_PORT"
+  },
+  "playerCorporationBotLimit": {
+    "label": "Player corporation bot limit",
+    "description": "Maximum recruited bots per player corporation. Human pilots also count toward the separate total member limit.",
+    "group": "Corporation recruitment",
+    "type": "integer",
+    "default": 1000,
+    "minimum": 1,
+    "maximum": 15000,
+    "env": "PLAYER_CORPORATION_BOT_LIMIT"
+  },
+  "playerCorporationMemberLimit": {
+    "label": "Player corporation member limit",
+    "description": "Total seats for corporations with a player CEO, including the CEO. Set 0 to use the normal CEO skill limit.",
+    "group": "Corporation recruitment",
+    "type": "integer",
+    "default": 15000,
+    "minimum": 0,
+    "maximum": 15000,
+    "env": "PLAYER_CORPORATION_MEMBER_LIMIT"
+  },
+  "recruitmentBatchSize": {
+    "label": "Bots processed per recruitment batch",
+    "description": "Process 1 to 16 candidates per batch. Smaller batches keep tick work low.",
+    "group": "Corporation recruitment",
+    "type": "integer",
+    "default": 4,
+    "minimum": 1,
+    "maximum": 16,
+    "env": "RECRUITMENT_BATCH_SIZE"
+  },
+  "playerCorpProfitSharePercent": {
+    "label": "Player corporation bot profit share (%)",
+    "description": "Share of each bot\u2019s cumulative net profit paid to its player-led corporation. Set 0 to disable new contributions.",
+    "group": "Corporation income",
+    "type": "integer",
+    "default": 75,
+    "minimum": 0,
+    "maximum": 100,
+    "env": "PLAYER_CORP_PROFIT_SHARE_PERCENT"
+  },
+  "botCorpOperationSharePercent": {
+    "label": "Bot-led corporation operation share (%)",
+    "description": "Share of successful operation profit paid to corporations with a bot CEO.",
+    "group": "Corporation income",
+    "type": "integer",
+    "default": 35,
+    "minimum": 0,
+    "maximum": 100,
+    "env": "BOT_CORP_OPERATION_SHARE_PERCENT"
+  },
+  "corpMinProfitShareISK": {
+    "label": "Minimum corporation payout (ISK)",
+    "description": "Accumulate small player-corporation contributions until the owed amount reaches this minimum.",
+    "group": "Corporation income",
+    "type": "integer",
+    "default": 1,
+    "minimum": 1,
+    "maximum": 1000000,
+    "env": "CORP_MIN_PROFIT_SHARE_ISK"
+  },
+  "refreshExistingPortraits": {
+    "label": "Refresh existing bot portraits once",
+    "description": "On Game startup, back up existing bot portraits and replace them with the bundled avatars. Runs once per GameStore. Turn off before starting Game to keep existing bot portraits.",
+    "group": "Portraits",
+    "type": "boolean",
+    "default": true,
+    "env": "REFRESH_EXISTING_PORTRAITS"
+  },
+  "scifiCorporationNames": {
+    "label": "Famous sci-fi names for new bot corporations",
+    "description": "New bot corporations take an unused name from a list of famous science fiction companies (Weyland-Yutani, Tyrell Corporation, Kuat Drive Yards and more). Names in the dashboard's name library come first. Turn off to name them after their specialty.",
+    "group": "New corporations",
+    "type": "boolean",
+    "default": true,
+    "env": "SCIFI_CORPORATION_NAMES"
+  },
+  "corporationEmblems": {
+    "label": "Random emblems for new bot corporations",
+    "description": "New bot corporations get a random emblem from the game's corporation logo shapes and colours. Turn off to keep EveJS's default emblem, for example when another add-on supplies PNG logos.",
+    "group": "New corporations",
+    "type": "boolean",
+    "default": true,
+    "env": "CORPORATION_EMBLEMS"
+  },
+  "agentMissionsEnabled": {
+    "label": "Assign agent missions automatically",
+    "description": "When autonomous work is enabled, fitted pilots can take level 1 Security, Mining, and Distribution jobs from nearby high-security agents.",
+    "group": "Agent missions",
+    "type": "boolean",
+    "default": true,
+    "env": "AGENT_MISSIONS_ENABLED"
+  },
+  "maxConcurrentAgentMissions": {
+    "label": "Maximum concurrent agent missions",
+    "description": "Cap new mission assignments across the server. Use 0 to stop new assignments while active missions can finish.",
+    "group": "Agent missions",
+    "type": "integer",
+    "default": 12,
+    "minimum": 0,
+    "maximum": 32,
+    "env": "MAX_AGENT_MISSIONS"
+  },
+  "mapSaveSeconds": {
+    "type": "integer",
+    "default": 60,
+    "minimum": 2,
+    "maximum": 120,
+    "env": "MAP_SAVE_SECONDS"
+  },
+  "verboseTraceFiles": {
+    "type": "boolean",
+    "default": false,
+    "env": "VERBOSE_TRACE_FILES"
+  }
+}

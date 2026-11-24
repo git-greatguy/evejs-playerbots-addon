@@ -62,9 +62,12 @@ function roster(t) {
       const id = nextID++; characters.set(id, { characterID: id, characterName: name });
       return { success: true, data: { characterID: id, characterName: name } };
     } },
-    "./playerBotPortraitRuntime": { ensurePortrait() {} },
+    "./playerBotPortraitRuntime": { ensurePortrait() {}, queuePortrait() {} },
     "./playerBotEconomyRuntime": { hubStationForRace: () => 60000001 },
     "./playerBotProvisioningRuntime": { reconcileManagedCorporationMemberLimits() {} },
+    "./playerBotCorporationEmblemRuntime": require(path.join(root, "playerBotCorporationEmblemRuntime")),
+    "./playerBotSciFiCorporationNames": { chooseCorporationName: () =>
+      require(path.join(root, "playerBotSciFiCorporationNames")).chooseCorporationName({ authority }) },
   });
   return { api, context, names, authority, bots, characters, corporations };
 }
@@ -86,6 +89,80 @@ test("real roster seeding retains all six specialties and founding identities wh
   const next = h.api.seedRoster(30, 6); assert.equal(next.created, 6, next.error);
   assert.deepEqual([...h.corporations.keys()], ids);
   assert.equal(Object.keys(h.bots).length, 12);
+});
+
+test("without library names, new corporations take famous sci-fi names and random emblems", (t) => {
+  const h = roster(t);
+  h.names.saveText(JSON.stringify(namesModule.emptyLibrary()));
+  const scifi = require(path.join(root, "playerBotSciFiCorporationNames"));
+  const emblems = require(path.join(root, "playerBotCorporationEmblemRuntime"));
+  const result = h.api.seedRoster(30, 6); assert.equal(result.created, 6, result.error);
+  const tickers = new Set();
+  for (const corp of h.corporations.values()) {
+    assert.ok(scifi.NAMES.includes(corp.corporationName), corp.corporationName);
+    assert.match(corp.tickerName, /^[A-Z]{2,5}$/);
+    tickers.add(corp.tickerName);
+    assert.ok(emblems.SHAPES.includes(corp.shape1), `shape1 ${corp.shape1}`);
+    assert.ok(emblems.COLORS.includes(corp.color1), `color1 ${corp.color1}`);
+    for (const layer of [2, 3]) {
+      if (corp[`shape${layer}`] === emblems.NO_SHAPE) assert.equal(corp[`color${layer}`], null);
+      else assert.ok(emblems.COLORS.includes(corp[`color${layer}`]));
+    }
+  }
+  assert.equal(tickers.size, 6);
+});
+
+test("the sci-fi names and random emblems can each be turned off", (t) => {
+  const saved = { names: process.env.EVEJS_PLAYER_BOTS_SCIFI_CORPORATION_NAMES, emblems: process.env.EVEJS_PLAYER_BOTS_CORPORATION_EMBLEMS };
+  t.after(() => {
+    for (const [key, value] of [["EVEJS_PLAYER_BOTS_SCIFI_CORPORATION_NAMES", saved.names], ["EVEJS_PLAYER_BOTS_CORPORATION_EMBLEMS", saved.emblems]]) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  });
+  process.env.EVEJS_PLAYER_BOTS_SCIFI_CORPORATION_NAMES = "0";
+  process.env.EVEJS_PLAYER_BOTS_CORPORATION_EMBLEMS = "0";
+  const h = roster(t);
+  h.names.saveText(JSON.stringify(namesModule.emptyLibrary()));
+  const result = h.api.seedRoster(30, 6); assert.equal(result.created, 6, result.error);
+  for (const corp of h.corporations.values()) {
+    assert.ok(corp.corporationName.startsWith("EVEJS "), corp.corporationName);
+    assert.equal(corp.shape1, undefined);
+  }
+});
+
+test("emblems use only the client's logo shapes and colours, with distinct layers", () => {
+  const emblems = require(path.join(root, "playerBotCorporationEmblemRuntime"));
+  assert.equal(emblems.SHAPES[0], 416);
+  assert.equal(emblems.SHAPES.at(-1), 578);
+  assert.deepEqual([emblems.COLORS[0], emblems.COLORS.at(-1)], [671, 685]);
+  let layers = 0;
+  for (let i = 0; i < 2000; i += 1) {
+    const e = emblems.chooseEmblem();
+    const shapes = [e.shape1, e.shape2, e.shape3].filter((shape) => shape !== emblems.NO_SHAPE);
+    const colors = [e.color1, e.color2, e.color3].filter((color) => color !== null);
+    assert.equal(new Set(shapes).size, shapes.length);
+    assert.equal(new Set(colors).size, colors.length);
+    assert.equal(shapes.length, colors.length);
+    layers += shapes.length;
+  }
+  assert.ok(layers > 2000 * 1.5 && layers < 2000 * 2.3, `average layers ${layers / 2000}`);
+  assert.deepEqual(emblems.emblemForNewCorporation({ env: { EVEJS_PLAYER_BOTS_CORPORATION_EMBLEMS: "0" } }), {});
+});
+
+test("every sci-fi name fits the client and gets its own ticker", () => {
+  const scifi = require(path.join(root, "playerBotSciFiCorporationNames"));
+  assert.ok(scifi.NAMES.length >= 100);
+  assert.equal(new Set(scifi.NAMES.map((name) => name.toLowerCase())).size, scifi.NAMES.length);
+  const corps = new Set(), tickers = new Set();
+  const authority = { findCorporationByName: (name) => corps.has(name), findAllianceByExactName: () => false,
+    findCorporationByTickerName: (ticker) => tickers.has(ticker), findAllianceByShortName: () => false };
+  for (let i = 0; i < scifi.NAMES.length; i += 1) {
+    const choice = scifi.chooseCorporationName({ authority });
+    assert.ok(choice, `ran out after ${i}`);
+    assert.ok(choice.name.length >= 4 && choice.name.length <= 50 && /^[A-Za-z0-9 .-]+$/.test(choice.name), choice.name);
+    corps.add(choice.name); tickers.add(choice.ticker);
+  }
+  assert.equal(scifi.chooseCorporationName({ authority }), null);
 });
 
 test("name exhaustion fails before creating a founder character", (t) => {

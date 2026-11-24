@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Build the version-pinned standalone playerbots ZIP for EveJS 261115.2."""
+"""Build the Docker add-on release ZIP from this repository.
+
+    python3 tools/playerbots/build-addon-package.py                 # dist/evejs-playerbots-addon-v<version>.zip
+    python3 tools/playerbots/build-addon-package.py --manifest-only # refresh integration/manifest.json only
+    python3 tools/playerbots/build-addon-package.py --compat-root /path/to/stock/EveJS-261115.2
+
+The server files come from integration/server/ and the add-on from
+addons/playerbots/. Before packaging, integration/manifest.json is refreshed:
+the installed hashes of every managed server file and the add-on file hashes.
+The stock hashes (baseSha256) are kept as recorded, or re-read from a stock
+EveJS checkout when --compat-root is given (for moving to a new EveJS version).
+"""
 
 from __future__ import annotations
 
@@ -11,15 +22,14 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-
-ROOT = Path(__file__).resolve().parents[2]
-VERSION = "0.2.152"
-EVEJS_VERSION = "261115.2"
-PACKAGE_NAME = f"EveJS-Playerbots-Addon-v{VERSION}"
-OUTPUT = ROOT / "dist" / f"evejs-playerbots-addon-v{VERSION}.zip"
-EXTERNAL_OVERLAY_LIST = ROOT / "tools/playerbots/addon-overlay-files.txt"
-ADDON_SOURCE = ROOT / "addons/playerbots"
+REPO = Path(__file__).resolve().parents[2]
+ADDON_SOURCE = REPO / "addons" / "playerbots"
+OVERLAY = REPO / "integration" / "server"
+MANIFEST = REPO / "integration" / "manifest.json"
+# Package-level tools: placed at the package root, not inside addons/playerbots.
 INSTALLER_FILES = {"install.sh", "install.py", "rollback.py", "verify.py"}
+# Documents shipped at the package root.
+DOCS = ("README.md", "GUIDE.md", "CHANGELOG.md", "PLAYERBOTS_ROADMAP.md", "LICENSE", "THIRD_PARTY_NOTICES.md")
 # Keep in step with addons/playerbots/verify.py.
 SUBSYSTEM_PREFIXES = (
     ("server/src/services/playerbots/", "playerbots-core"),
@@ -56,8 +66,31 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def version_at(root: Path, relative: str) -> str:
-    return str(json.loads((root / relative).read_text(encoding="utf-8")).get("version", ""))
+def addon_files() -> list[Path]:
+    return [path for path in sorted(ADDON_SOURCE.rglob("*"))
+            if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
+            and path.relative_to(ADDON_SOURCE).as_posix() not in INSTALLER_FILES]
+
+
+def refresh_manifest(compat_root: Path | None) -> dict:
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    files = manifest["files"]
+    on_disk = sorted(path.relative_to(OVERLAY).as_posix() for path in OVERLAY.rglob("*") if path.is_file())
+    for relative in on_disk:
+        record = files.setdefault(relative, {"baseSha256": None, "subsystem": subsystem_for(relative)})
+        record["sourceSha256"] = record["overlaySha256"] = sha256(OVERLAY / relative)
+        if compat_root is not None:
+            stock = compat_root / relative
+            record["baseSha256"] = sha256(stock) if stock.is_file() else None
+    missing = sorted(set(files) - set(on_disk))
+    if missing:
+        raise SystemExit(f"integration/manifest.json lists files that are not in integration/server: {', '.join(missing[:5])}")
+    manifest["files"] = {key: files[key] for key in sorted(files)}
+    manifest["addonFiles"] = {
+        f"addons/playerbots/{path.relative_to(ADDON_SOURCE).as_posix()}": sha256(path) for path in addon_files()
+    }
+    MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return manifest
 
 
 def copy_file(source: Path, destination: Path) -> None:
@@ -66,68 +99,51 @@ def copy_file(source: Path, destination: Path) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--compat-root",
-        required=True,
-        help="path to the original EveJS 261115.2 source tree used to generate base hashes",
-    )
-    parser.add_argument("--output", default=str(OUTPUT), help="output ZIP path")
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--compat-root", help="stock EveJS checkout to re-read stock hashes from")
+    parser.add_argument("--manifest-only", action="store_true", help="refresh integration/manifest.json and stop")
+    parser.add_argument("--output", help="output ZIP path (default: dist/evejs-playerbots-addon-v<version>.zip)")
     args = parser.parse_args()
-    compat_root = Path(args.compat_root).expanduser().resolve()
-    output = Path(args.output).expanduser().resolve()
 
-    if version_at(ROOT, "package.json") != EVEJS_VERSION or version_at(ROOT, "server/package.json") != EVEJS_VERSION:
-        raise SystemExit(f"Working tree must be EveJS {EVEJS_VERSION}.")
-    if version_at(compat_root, "package.json") != EVEJS_VERSION or version_at(compat_root, "server/package.json") != EVEJS_VERSION:
-        raise SystemExit(f"Compatibility source must be EveJS {EVEJS_VERSION}: {compat_root}")
+    compat_root = Path(args.compat_root).expanduser().resolve() if args.compat_root else None
+    if compat_root is not None and not (compat_root / "server/package.json").is_file():
+        raise SystemExit(f"Not an EveJS checkout: {compat_root}")
+    manifest = refresh_manifest(compat_root)
+    if args.manifest_only:
+        print(f"Refreshed {MANIFEST.relative_to(REPO)}: {len(manifest['files'])} server files, "
+              f"{len(manifest['addonFiles'])} add-on files.")
+        return 0
 
-    external = [line.strip() for line in EXTERNAL_OVERLAY_LIST.read_text(encoding="utf-8").splitlines()
-                if line.strip() and not line.lstrip().startswith("#")]
-    playerbot_files = sorted(path.relative_to(ROOT).as_posix()
-                             for path in (ROOT / "server/src/services/playerbots").rglob("*.js"))
-    overlay_files = sorted(set(external + playerbot_files))
-    records = {}
-    for relative in overlay_files:
-        current = ROOT / relative
-        original = compat_root / relative
-        if not current.is_file():
-            raise SystemExit(f"Current integration file is missing: {relative}")
-        records[relative] = {
-            "baseSha256": sha256(original) if original.is_file() else None,
-            "sourceSha256": sha256(current),
-            "overlaySha256": sha256(current),
-            "subsystem": subsystem_for(relative),
-        }
+    version = str(json.loads((ADDON_SOURCE / "manifest.json").read_text(encoding="utf-8"))["version"])
+    package_name = f"EveJS-Playerbots-Addon-v{version}"
+    output = Path(args.output).expanduser().resolve() if args.output else REPO / "dist" / f"evejs-playerbots-addon-v{version}.zip"
 
-    output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="evejs-playerbots-package-") as temporary:
-        stage = Path(temporary) / PACKAGE_NAME
-        (stage / "integration/server").mkdir(parents=True)
-        for relative in overlay_files:
-            copy_file(ROOT / relative, stage / "integration/server" / relative)
-
-        addon_files = {}
-        for source in sorted(ADDON_SOURCE.rglob("*")):
-            if not source.is_file() or "__pycache__" in source.parts or source.suffix == ".pyc":
-                continue
-            relative = source.relative_to(ADDON_SOURCE).as_posix()
-            if relative in INSTALLER_FILES:
-                continue
-            copy_file(source, stage / "addons/playerbots" / relative)
-            addon_files[f"addons/playerbots/{relative}"] = sha256(source)
-
-        copy_file(ADDON_SOURCE / "install.py", stage / "install.py")
-        copy_file(ADDON_SOURCE / "rollback.py", stage / "rollback.py")
-        copy_file(ADDON_SOURCE / "verify.py", stage / "verify.py")
-        copy_file(ROOT / "addons/playerbots/compose.override.yaml", stage / "compose.override.yaml")
-        copy_file(ADDON_SOURCE / "README.md", stage / "README.md")
-        for name in ("INSTALLATION.md", "OPERATIONS.md", "TROUBLESHOOTING.md", "GUIDE.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "LOCAL_DEFENSE.md"):
+        stage = Path(temporary) / package_name
+        for relative in manifest["files"]:
+            copy_file(OVERLAY / relative, stage / "integration/server" / relative)
+        copy_file(MANIFEST, stage / "integration/manifest.json")
+        for path in addon_files():
+            copy_file(path, stage / "addons/playerbots" / path.relative_to(ADDON_SOURCE))
+        for name in ("install.py", "rollback.py", "verify.py"):
             copy_file(ADDON_SOURCE / name, stage / name)
-        copy_file(ROOT / "doc/COMMUNITY_FITTINGS.md", stage / "COMMUNITY_FITTINGS.md")
-        copy_file(ROOT / "doc/PLAYERBOTS_CAPACITY_MODEL.md", stage / "PLAYERBOTS_CAPACITY_MODEL.md")
-        copy_file(ROOT / "doc/PLAYERBOTS_ROADMAP.md", stage / "PLAYERBOTS_ROADMAP.md")
-        copy_file(ROOT / "doc/name-library-template.json", stage / "doc/name-library-template.json")
+        copy_file(ADDON_SOURCE / "compose.override.yaml", stage / "compose.override.yaml")
+        package_manifest = json.dumps({
+            "id": "evejs.playerbots",
+            "name": "EveJS Playerbots Add-on",
+            "version": version,
+            "evejsVersion": manifest["evejsVersion"],
+            "apiVersion": 1,
+            "runtime": "node >= 24",
+            "process": "standalone",
+            "sourceOverlay": "integration/manifest.json",
+        }, indent=2) + "\n"
+        (stage / "manifest.json").write_text(package_manifest, encoding="utf-8")
+        # The repository root doubles as an unpacked package for git installs.
+        (REPO / "manifest.json").write_text(package_manifest, encoding="utf-8")
+        for name in DOCS:
+            copy_file(REPO / name, stage / name)
+        copy_file(REPO / "doc/name-library-template.json", stage / "doc/name-library-template.json")
         (stage / "install.sh").write_text(
             "#!/usr/bin/env bash\nset -Eeuo pipefail\n"
             "PACKAGE_DIR=\"$(cd -- \"$(dirname -- \"${BASH_SOURCE[0]}\")\" && pwd)\"\n"
@@ -135,32 +151,30 @@ def main() -> int:
             encoding="utf-8",
         )
         (stage / "install.sh").chmod(0o755)
-        (stage / "manifest.json").write_text(json.dumps({
-            "id": "evejs.playerbots",
-            "name": "EveJS Playerbots Add-on",
-            "version": VERSION,
-            "evejsVersion": EVEJS_VERSION,
-            "apiVersion": 1,
-            "runtime": "node >= 24",
-            "process": "standalone",
-            "sourceOverlay": "integration/manifest.json",
-        }, indent=2) + "\n", encoding="utf-8")
-        (stage / "integration/manifest.json").write_text(json.dumps({
-            "schemaVersion": 3,
-            "evejsVersion": EVEJS_VERSION,
-            "files": records,
-            "addonFiles": addon_files,
-        }, indent=2) + "\n", encoding="utf-8")
+        copy_file(REPO / "install.cmd", stage / "install.cmd")
+        # Carry the native (EVEJS Launcher) package so one download covers
+        # both choices the installer offers. Build it first.
+        native = sorted((REPO / "dist").glob("evejs-playerbots-windows-v*.zip"),
+                        key=lambda path: tuple(int(part) for part in path.stem.rsplit("-v", 1)[-1].split(".")))
+        if native:
+            copy_file(native[-1], stage / native[-1].name)
+        else:
+            print("Note: no native package in dist/; build it first with build-windows-native.py.")
 
+        output.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
             for path in sorted(stage.rglob("*")):
                 if path.is_file():
-                    archive.write(path, (Path(PACKAGE_NAME) / path.relative_to(stage)).as_posix())
+                    info = zipfile.ZipInfo((Path(package_name) / path.relative_to(stage)).as_posix(),
+                                           date_time=(2026, 1, 1, 0, 0, 0))
+                    info.external_attr = (0o755 if path.name == "install.sh" else 0o644) << 16
+                    info.compress_type = zipfile.ZIP_DEFLATED
+                    archive.writestr(info, path.read_bytes(), compresslevel=9)
 
-    subsystems = sorted({record["subsystem"] for record in records.values()})
-    print(f"Created {output} ({output.stat().st_size:,} bytes, {len(overlay_files)} guarded source files "
-          f"in {len(subsystems)} subsystems, {len(addon_files)} add-on process files).")
-    print(f"Compatibility base: EveJS {EVEJS_VERSION} at {compat_root}")
+    subsystems = sorted({record["subsystem"] for record in manifest["files"].values()})
+    print(f"Created {output.relative_to(REPO) if output.is_relative_to(REPO) else output} "
+          f"({output.stat().st_size:,} bytes): {len(manifest['files'])} server files in "
+          f"{len(subsystems)} subsystems, {len(manifest['addonFiles'])} add-on files.")
     return 0
 
 
