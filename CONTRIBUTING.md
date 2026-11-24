@@ -14,7 +14,8 @@ project's long-form plan and test evidence in
 | `addons/playerbots/index.js` | The add-on process that drives the bots |
 | `addons/playerbots/dashboard-server.js`, `dashboard/` | The dashboard: plain HTML, CSS and ES modules, no build step |
 | `addons/playerbots/playerbots.py` | Start, stop, rebuild, status and logs for Docker installs; installed into the EveJS folder |
-| `addons/playerbots/install.py`, `verify.py`, `rollback.py` | Installer, checker and rollback; copied to the package root at build time |
+| `addons/playerbots/install.py`, `verify.py`, `rollback.py` | Installer (Docker and native, interactive when run without options), checker and rollback; copied to the package root at build time |
+| `install.cmd` | Double-click launcher for the installer on Windows |
 | `install.py`, `verify.py`, `rollback.py`, `compose.override.yaml` | The same files at the repository root, so a git checkout installs like an unpacked ZIP. Keep them identical to `addons/playerbots/`; a test checks this. |
 | `integration/server/` | The EveJS server files the add-on installs over a stock 261115.2 tree |
 | `integration/manifest.json` | Stock and installed SHA-256 for every managed file, and the add-on file hashes |
@@ -63,9 +64,11 @@ skipped without one:
 - The engagement host contract: set `EVEJS_SOURCE_ROOT` to a checkout with
   the add-on installed.
 
-`tests/installer.test.cjs` runs `install.py` and `playerbots.py` against a
-throwaway folder with a stand-in `docker` command, so it needs Python 3.10+
-but no Docker.
+`tests/installer.test.cjs` and `tests/installer-native.test.cjs` run
+`install.py` and `playerbots.py` against a throwaway folder with stand-in
+`docker` and `node` commands, so they need Python 3.10+ but no Docker or
+Node.js 24. They cover the interactive questions, both native routes, and
+check that the real launcher helper accepts the installer's request.
 
 ## Changing server files
 
@@ -80,9 +83,12 @@ need a manifest entry with `"subsystem"` set as in `verify.py`.
 Both packages build from this repository alone.
 
 ```sh
-python3 tools/playerbots/build-addon-package.py      # dist/evejs-playerbots-addon-v<version>.zip
 python3 tools/playerbots/build-windows-native.py     # dist/evejs-playerbots-windows-v<version>.zip
+python3 tools/playerbots/build-addon-package.py      # dist/evejs-playerbots-addon-v<version>.zip
 ```
+
+Build the native package first: the release ZIP carries it, so the
+installer's native choice works from one download.
 
 The Docker ZIP takes its version from `addons/playerbots/manifest.json`, the
 Windows package from `windows-native/evejs-launcher.mod.json`. Before raising

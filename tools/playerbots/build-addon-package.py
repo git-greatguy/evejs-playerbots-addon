@@ -151,6 +151,15 @@ def main() -> int:
             encoding="utf-8",
         )
         (stage / "install.sh").chmod(0o755)
+        copy_file(REPO / "install.cmd", stage / "install.cmd")
+        # Carry the native (EVEJS Launcher) package so one download covers
+        # both choices the installer offers. Build it first.
+        native = sorted((REPO / "dist").glob("evejs-playerbots-windows-v*.zip"),
+                        key=lambda path: tuple(int(part) for part in path.stem.rsplit("-v", 1)[-1].split(".")))
+        if native:
+            copy_file(native[-1], stage / native[-1].name)
+        else:
+            print("Note: no native package in dist/; build it first with build-windows-native.py.")
 
         output.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:

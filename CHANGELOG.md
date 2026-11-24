@@ -6,7 +6,30 @@ the Windows launcher package adds a fourth number for its own releases.
 ## Unreleased: housekeeping
 
 On the `housekeeping` branch of the ubermidas fork, not yet offered upstream.
-Docker add-on 0.2.152, Windows package 0.2.152.12.
+Docker add-on 0.2.152, native package 0.2.152.13.
+
+### Install natively or with Docker
+
+- `python3 install.py` (or double-click `install.cmd` on Windows) asks for
+  your EveJS folder and whether EveJS runs in Docker or natively.
+- **Native** installs go through EVEJS Launcher (the installer shows the
+  package to import), or directly for `StartServer.bat` setups: the
+  installer runs the package's own helper the way the launcher does, upgrades
+  a direct install in place, and `--remove` restores the original files.
+- The release ZIP carries the native package, so one download covers both.
+
+### Luna 0.2.152.13 by @rizonx
+
+Merged from rizonx's native package; the native package built here installs
+byte-identical files.
+
+- The dashboard reads director assignments once per snapshot instead of once
+  per pilot.
+- The one-time portrait refresh skips a bot whose identical bundled portrait
+  is already in place.
+- The launcher-settings lookup is resolved once instead of checking the disk
+  on every call.
+- Native installs upgrade in place from both builds named 0.2.152.11.
 
 ### Faster under load
 
@@ -49,7 +72,6 @@ Docker add-on 0.2.152, Windows package 0.2.152.12.
   (the operator's handbook), CHANGELOG, CONTRIBUTING, the roadmap, the
   Windows package README and the license notices. Older dated test logs stay
   in git history.
-- The Windows package upgrades 0.2.152.10 and 0.2.152.11 installs in place.
 
 ## Fork changes, 22–23 Nov 2026 (Windows 0.2.152.11)
 

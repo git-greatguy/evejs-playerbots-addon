@@ -43,6 +43,33 @@ The `playerbots-addon` log reports cycle ID, roster progress, completed bots,
 failures, retry delays and shutdown. Stopping the add-on interrupts its
 waits and in-flight requests, so it does not wait out its five-minute cycle.
 
+### Native installs
+
+On a native EveJS (Node.js, no Docker), Playerbots runs inside the game
+server: the bots start and stop with Game, and the dashboard is at
+`http://127.0.0.1:8080` while Game runs. Install it with `install.py` in
+one of two ways (stop Game first):
+
+- **EVEJS Launcher** (1.0.91 or later): `python3 install.py /path/to/evejs --native`
+  shows the package to import under **Mods → Import**. The launcher then
+  installs, disables, removes and recovers it, and its **Configure** page
+  edits the settings.
+- **Directly**, for servers started with `StartServer.bat` or `node`:
+  `python3 install.py /path/to/evejs --native --method direct` runs the
+  package's own helper exactly as the launcher would. The package is kept in
+  `_local/playerbots-native/package`; settings are in
+  `config/playerbots-native.json` (missing settings use their defaults);
+  `--remove` restores the original EveJS files.
+
+Either way the original EveJS files are backed up in
+`_local/playerbots-native/stock` (and `stock-multicore` for the multicore TCP
+file), a file someone edited by hand is kept and named rather than
+overwritten, and bot data stays in the game store. To upgrade a direct
+install, run the new release's installer the same way; it restores the old
+version's files first. A launcher-managed install is upgraded through the
+launcher. Settings, recruitment, income and portraits are described in
+[`windows-native/README.md`](windows-native/README.md).
+
 ### Other Compose setups
 
 If your EveJS uses more Compose files or a project name, give them to

@@ -13,8 +13,8 @@ Compose**, or on Windows as a mod for **EVEJS Launcher** with no Docker.
 
 | | |
 | --- | --- |
-| **Version** | 0.2.152 (Windows launcher package 0.2.152.12), experimental test build |
-| **Works with** | EveJS `261115.2`, with Docker Compose or EVEJS Launcher 1.0.91+ on Windows |
+| **Version** | 0.2.152 (native package 0.2.152.13), experimental test build |
+| **Works with** | EveJS `261115.2`, with Docker Compose, or natively with EVEJS Launcher 1.0.91+ or `StartServer.bat` |
 | **Dashboard** | `http://127.0.0.1:8080` on the server machine |
 | **License** | AGPL-3.0-only |
 
@@ -28,51 +28,66 @@ Compose**, or on Windows as a mod for **EVEJS Launcher** with no Docker.
 
 ## Quick start
 
+Unpack `dist/evejs-playerbots-addon-v0.2.152.zip` (or clone this repository),
+then run the installer from that folder and answer its questions:
+
+```sh
+python3 install.py
+```
+
+On Windows, double-click `install.cmd`, or run `python install.py`.
+
+It asks for your EveJS folder and how you run EveJS:
+
+1. **Docker Compose**
+2. **Native**: Node.js on this PC, through EVEJS Launcher or `StartServer.bat`
+
+Every route checks your EveJS version and every file it will replace before
+writing anything, backs up what it replaces, and never touches the game
+database. **Upgrading** is the same: run the new release's installer. It
+recognises what the last install wrote and only asks about server files
+someone changed by hand.
+
 ### Docker
 
-You need an EveJS **261115.2** source folder set up with Docker, **Docker**
-with the Compose v2 plugin, **Python 3.10+**, and EveJS's **Market** service
-running (EveJS's own tools build the market; see `doc/SETUP.md` in EveJS).
+You need EveJS **261115.2** set up with Docker, **Docker** with the Compose
+v2 plugin, **Python 3.10+**, and EveJS's **Market** service running
+(EveJS's own tools build the market; see `doc/SETUP.md` in EveJS).
 
-1. **Get the add-on.** Unpack `dist/evejs-playerbots-addon-v0.2.152.zip`, or
-   clone this repository; both have the same layout.
-2. **Install and start it** from that folder:
+The installer copies the add-on in, writes a private API token into `.env`,
+rebuilds the EveJS image, starts the server, waits until it is healthy, and
+starts the bots. Without questions:
 
-   ```sh
-   python3 install.py /path/to/evejs --start
-   ```
+```sh
+python3 install.py /path/to/evejs --start
+```
 
-   On Windows, use `python .\install.py "C:\path\to\evejs" --start`.
-
-   The installer checks your EveJS version and every file it will replace
-   before writing anything. It then copies the add-on in, backs up each file
-   it replaces, writes a private API token into `.env`, rebuilds the EveJS
-   image, starts the server, waits until it is healthy, and starts the bots.
-   It never touches the game database. Add `--dry-run` first if you want a
-   report without changes.
-3. **Open the dashboard** at `http://127.0.0.1:8080`. The roster grows
-   toward 500 pilots, a few at a time, once the server has taken two load
-   readings.
-
-**Upgrading** is the same command with the new release. The installer
-recognises the files it wrote last time; it only stops for server files
-someone changed by hand, and lists them. Re-run with `--replace-conflicts`
-once you have looked.
-
-**Using EVEJS Launcher's Docker mode or Server Panel?** Tell the installer
-your extra Compose files once (`--compose-file`, `--project-name`); see
+Add `--dry-run` for a report without changes. Using EVEJS Launcher's Docker
+mode or Server Panel? Give the installer your extra Compose files once; see
 [Other Compose setups](GUIDE.md#other-compose-setups).
 
-### Windows, with EVEJS Launcher (no Docker)
+### Native: EVEJS Launcher or StartServer.bat (no Docker)
 
-1. Stop **Game** and **Market** in EVEJS Launcher and back up your EveJS
-   folder.
-2. Open **Mods → Import** and choose
-   `dist/evejs-playerbots-windows-v0.2.152.12.zip`.
-3. Turn on **Playerbots**, set it up under **Configure**, then **Start Stack**.
-4. Open `http://127.0.0.1:8080`.
+You need EveJS **261115.2** run natively with **Node.js 24+**, and Python
+3.10+ for the installer. The native package is
+`evejs-playerbots-windows-v0.2.152.13.zip`, built from the same source as the
+Docker add-on and carrying the Luna update by @rizonx.
 
-Upgrades, removal and the multicore build: [`windows-native/README.md`](windows-native/README.md).
+- **Through EVEJS Launcher (1.0.91+), recommended if you use it.** The
+  installer shows you the package; in the launcher stop Game and Market,
+  open **Mods → Import**, choose it, turn on **Playerbots**, set it up under
+  **Configure**, then **Start Stack**. Without questions:
+  `python3 install.py /path/to/evejs --native`
+- **Directly, for `StartServer.bat` setups.** Stop Game, then let the
+  installer apply the package the same way the launcher would:
+  `python3 install.py /path/to/evejs --native --method direct`. Start Game as
+  usual; the bots start with it. Settings are in
+  `config/playerbots-native.json`. To undo, run it again with `--remove`.
+
+Then open the dashboard at `http://127.0.0.1:8080`. The roster grows toward
+500 pilots, a few at a time, once the server has taken two load readings.
+More: [Native installs](GUIDE.md#native-installs) and
+[`windows-native/README.md`](windows-native/README.md).
 
 ---
 
@@ -137,9 +152,11 @@ server memory.
 
 ## Running it
 
-Run these from your EveJS folder (`python` instead of `python3` on Windows).
-They remember your Compose setup, always start the server before the bots,
-and never touch Market.
+**Native installs** need no commands: the bots start and stop with Game, in
+EVEJS Launcher or `StartServer.bat`. For **Docker**, run these from your
+EveJS folder (`python` instead of `python3` on Windows). They remember your
+Compose setup, always start the server before the bots, and never touch
+Market.
 
 | To | Run |
 | --- | --- |
