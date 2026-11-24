@@ -649,7 +649,9 @@ function remainingBudget(cycle) {
 }
 
 function resolveBotByID(characterID) {
-  return getPlayerBots().listBots().find((bot) => Number(bot.characterID) === Number(characterID)) || null;
+  const playerBots = getPlayerBots();
+  if (typeof playerBots.getBotByCharacterID === "function") return playerBots.getBotByCharacterID(characterID);
+  return playerBots.listBots().find((bot) => Number(bot.characterID) === Number(characterID)) || null;
 }
 
 function block(cycle, status, reason) {
