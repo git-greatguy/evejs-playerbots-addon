@@ -11,6 +11,9 @@
 - The dashboard also accepts `localhost` as well as `127.0.0.1`.
 - New bot corporations take famous sci-fi company names and random in-game
   emblems (Configure → New corporations).
+- A built-in **Guide** page on the dashboard: plain-language topics, worked
+  examples, a searchable command reference with copy buttons, and links to
+  the pages each topic describes.
 
 # 0.2.152.7
 

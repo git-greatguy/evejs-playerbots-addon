@@ -45,8 +45,8 @@ them; it stops on anything else.
 ## What's included
 
 - **The new dashboard**: Activity, Corporations (with whole-corporation and
-  per-pilot orders), History, World, Performance and Settings. These are
-  described in the Playerbots repository README.
+  per-pilot orders), History, World, Performance and Settings, plus a
+  built-in **Guide** that explains every page and command in plain words.
 - **Corporation recruitment** into a player corporation, by command or
   automatically (below).
 - **Corporation income** settings (below).

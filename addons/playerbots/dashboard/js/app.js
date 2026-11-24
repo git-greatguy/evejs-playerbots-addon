@@ -9,12 +9,14 @@ import * as history from "./view-history.js";
 import * as world from "./view-world.js";
 import * as performance from "./view-performance.js";
 import * as settings from "./view-settings.js";
+import * as guide from "./view-guide.js";
+import { PAGE_TOPICS } from "./guide-content.js";
 
 const REFRESH_MS = 15_000;
-const VIEWS = { activity, corporations, history, world, performance, settings };
-const TITLES = { activity: "Activity", corporations: "Corporations", history: "History", world: "World", performance: "Performance", settings: "Settings" };
+const VIEWS = { activity, corporations, history, world, performance, settings, guide };
+const TITLES = { activity: "Activity", corporations: "Corporations", history: "History", world: "World", performance: "Performance", settings: "Settings", guide: "Guide" };
 // Old hashes from the previous dashboard keep working.
-const ALIASES = { overview: "activity", pilots: "activity", operations: "history", priorities: "corporations", systems: "world", territory: "world/territory", killboard: "world/killboard" };
+const ALIASES = { help: "guide", docs: "guide", overview: "activity", pilots: "activity", operations: "history", priorities: "corporations", systems: "world", territory: "world/territory", killboard: "world/killboard" };
 
 export const store = { summary: null, summaryAt: 0, route: { view: "activity", param: "" } };
 
@@ -57,6 +59,12 @@ async function show(force = false) {
   store.route = route;
   document.querySelectorAll(".nav-link").forEach((link) => link.classList.toggle("active", link.dataset.view === route.view));
   if (changed || force) setCrumbs([{ label: TITLES[route.view] }]);
+  // The top bar's Guide button opens the topic for the page being viewed.
+  const help = $("guide-link");
+  if (help) {
+    help.href = PAGE_TOPICS[route.view] ? `#guide/${PAGE_TOPICS[route.view]}` : "#guide";
+    help.classList.toggle("hidden", route.view === "guide");
+  }
   const view = VIEWS[route.view];
   const fresh = changed || force;
   try {

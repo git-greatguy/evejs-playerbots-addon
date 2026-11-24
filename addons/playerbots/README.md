@@ -283,6 +283,7 @@ network you trust.
 | **World** | Systems (security, how many bots, over-limit warnings), territory (fleets, wars, structures, sovereignty) and the killboard. |
 | **Performance** | Server load, how long the director takes, and long server ticks. |
 | **Settings** | Autonomous work and seeding, population and work limits, advanced timings, the name library, and Delete all bots. |
+| **Guide** | This documentation in plain words, built in: 25 topics from your first hour to troubleshooting, a searchable list of every chat command with copy buttons, and links that open the page being described. The **Guide** button in the top bar opens the topic for whichever page you are on. |
 
 The dashboard refreshes every 15 seconds and keeps your filters, selections
 and unsaved edits. If something goes wrong it says so in plain words. For
@@ -690,6 +691,18 @@ limit for player corporations.
   Windows). The emblem switch is there for a future add-on that replaces
   corporation logos with PNG images; that work is kept separately and is not
   part of Playerbots.
+
+### Built-in guide (this copy)
+
+- The dashboard has a **Guide** page (`#guide`) adapted from this README and
+  the GUIDE, OPERATIONS, LOCAL_DEFENSE and TROUBLESHOOTING files: grouped
+  topics, step-by-step instructions, worked examples, a searchable command
+  reference with copy buttons, and "Open …" links to the dashboard page each
+  topic describes.
+- A **Guide** button in the top bar opens the topic for the current page.
+- Dashboard files only (`js/guide-content.js`, `js/view-guide.js`, and small
+  changes to `index.html`, `js/app.js` and `styles.css`); no server change
+  and no rebuild of the server image is needed beyond updating the add-on.
 
 ### Installing a patch
 

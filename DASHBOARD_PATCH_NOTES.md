@@ -287,6 +287,29 @@ changed, so every file merged cleanly.
   separate, parked add-on project outside this repository. Playerbots
   does not include or depend on it.
 
+## Built-in guide (23 Nov 2026)
+
+- New **Guide** page (`#guide`, also `#help` and `#docs`) with 25 topics in
+  six groups: getting started, watching your bots, corporations, playing
+  alongside bots, running the server, and reference. Written from README,
+  GUIDE, OPERATIONS, LOCAL_DEFENSE and TROUBLESHOOTING in plain words, with
+  numbered steps, worked examples, tips and warnings.
+- Every topic links to the dashboard page it describes ("Open Corporations →")
+  and to related topics; Previous / Next walk the whole guide in order.
+- Command reference: every chat command grouped by purpose, with an example
+  and a Copy button. Copy uses the clipboard and falls back to a hidden text
+  field where the clipboard API is not allowed.
+- Search across topic titles, summaries, keywords and commands, without
+  losing focus while typing.
+- A **Guide** button in the top bar opens the topic for the current page.
+- Static content only: the page does not refresh on the timer, and works
+  with the server down (the connection status still updates).
+- Files: `js/guide-content.js` (content), `js/view-guide.js` (page),
+  `index.html`, `js/app.js`, `styles.css`.
+- Checked with Playwright at 1440 and 390 px: all 25 topics render with no
+  horizontal scroll, every internal link resolves, copy, search, deep links,
+  Previous / Next and the top-bar button work, no console errors.
+
 ## Known limits
 
 - Resuming a held pilot with the `/playerbots resume` chat command does not
