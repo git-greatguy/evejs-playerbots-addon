@@ -11,6 +11,18 @@ function isPiWorkCohort(bot, cohortSize) {
   return characterID > 0 && size > 0 && characterID % size === 0;
 }
 
+// Launch containers decay after five days. Pilots outside the collection
+// cohort still collect their own launches once they are three days old, so a
+// colony they already own never loses its output.
+const PI_LAUNCH_URGENT_AGE_MS = 3 * 24 * 60 * 60 * 1000;
+
+function shouldCollectLaunch(bot, launch, now = Date.now()) {
+  if (!launch) return false;
+  if (isPiWorkCohort(bot, PI_COLLECTION_COHORT_SIZE)) return true;
+  const createdAt = Date.parse(String(launch.createdAt || ""));
+  return Number.isFinite(createdAt) && now - createdAt >= PI_LAUNCH_URGENT_AGE_MS;
+}
+
 function chooseHeadquartersAssignment({
   hasOwnedStructure,
   structurePackage,
@@ -63,6 +75,8 @@ module.exports = {
   PI_COLLECTION_COHORT_SIZE,
   PI_SETUP_COHORT_SIZE,
   isPiWorkCohort,
+  shouldCollectLaunch,
+  PI_LAUNCH_URGENT_AGE_MS,
   chooseHeadquartersAssignment,
   canStartHeadquartersAssignment,
   headquartersWorkTakesPriority,
