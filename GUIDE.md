@@ -96,8 +96,17 @@ Rebuilding never touches Market or the database volumes.
 ### Rolling back
 
 Stop the bots and the server (`playerbots.py stop --all`), then run
-`python3 rollback.py /path/to/evejs` from the release folder and rebuild with
-`playerbots.py rebuild` if you keep the server running. The
+`python3 rollback.py /path/to/evejs` from the release folder. Rolling back to
+a release from before `playerbots.py` existed also removes that script, so
+rebuild and start the restored version with Compose directly:
+
+```sh
+docker compose -f compose.yaml -f addons/playerbots/compose.override.yaml build init
+docker compose -f compose.yaml -f addons/playerbots/compose.override.yaml up -d --no-deps server
+docker compose -f compose.yaml -f addons/playerbots/compose.override.yaml up -d --no-deps playerbots-addon
+```
+
+Start the bots only once `ps server` shows it healthy. The
 script restores the latest installer-managed source files and `.env` from the
 matching timestamped backup. If any installed file changed after setup, it
 stops and reports the conflict rather than replacing the new content.

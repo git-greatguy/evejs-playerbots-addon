@@ -149,7 +149,7 @@ and never touch Market.
 | Apply an update or code change | `python3 addons/playerbots/playerbots.py rebuild` |
 | Check state / read the log | `python3 addons/playerbots/playerbots.py status` / `logs -f` |
 | Check the install matches the release | `python3 verify.py /path/to/evejs` (from the release folder, read-only) |
-| Undo the latest install | `python3 rollback.py /path/to/evejs`, then `playerbots.py rebuild` |
+| Undo the latest install | `python3 rollback.py /path/to/evejs`, then rebuild ([Rolling back](GUIDE.md#rolling-back)) |
 
 To let a big roster seed before the bots start working, switch **Autonomous
 work** off on the Settings page, and back on when seeding is done.
