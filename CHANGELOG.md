@@ -15,9 +15,10 @@ On the `corp-logos` branch of the ubermidas fork.
 - **Logos across the dashboard:** next to the corporation's name on the
   corporation list and page, pilot rows, the pilot panel, History and the
   killboard.
-- **In game** the logos need the separate corporation-logo add-on, which
-  patches the client at login to draw corporations with a PNG from it. The
-  Logo panel says whether it is installed.
+- **In game** the logos need the separate
+  [corporation-logo add-on](https://github.com/ubermidas/evejs-corporation-logos), which patches the client at login to
+  draw corporations with a PNG from it. The Logo panel says whether it is
+  installed.
 
 ## Unreleased: housekeeping
 

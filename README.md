@@ -208,8 +208,10 @@ PNG, JPEG, WebP or GIF, makes square PNGs from 32 to 1024 pixels in the
 browser, and stores them in EveJS's image folder
 (`<runtime images>/Corporation/<id>_<size>.png`). The logo then shows next to
 the corporation's name across the dashboard. In game, the client keeps
-drawing the emblem unless the separate corporation-logo add-on is installed
-on the server; with it, players see the logo from their next login.
+drawing the emblem unless the separate
+[corporation-logo add-on](https://github.com/ubermidas/evejs-corporation-logos) is installed on the server; with it, players
+see the logo from their next login. That add-on also sets logos without
+Playerbots, from the command line.
 
 ---
 

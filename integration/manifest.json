@@ -581,8 +581,8 @@
     "server/src/services/playerbots/playerBotCorporationLogoStore.js": {
       "baseSha256": null,
       "subsystem": "playerbots-core",
-      "sourceSha256": "b2d026d868723a534580dcc142129492298fc8aaf441a26a5180051a50289416",
-      "overlaySha256": "b2d026d868723a534580dcc142129492298fc8aaf441a26a5180051a50289416"
+      "sourceSha256": "acc88ddb4caf3d7a3c5cfa4a564528c977ebeb9bd6ebce3b62eb3a471e11c941",
+      "overlaySha256": "acc88ddb4caf3d7a3c5cfa4a564528c977ebeb9bd6ebce3b62eb3a471e11c941"
     },
     "server/src/services/playerbots/playerBotCorporationPriorities.js": {
       "baseSha256": null,
@@ -1104,11 +1104,11 @@
     "addons/playerbots/dashboard/js/api.js": "dcb7c40bbeed47b6ed5279bc1c013b693e7a308fd321aa4676101f0f9dd99fa9",
     "addons/playerbots/dashboard/js/app.js": "a5adc384215f1091078225b543681531d2208e684180e98383650a054422db2a",
     "addons/playerbots/dashboard/js/drawer.js": "3991b2d5facaa03bf8bbb89b4fb85e7a5d226d6519b33e0a284c3b88e47cb737",
-    "addons/playerbots/dashboard/js/guide-content.js": "c9571cfb83fbca20d7ae85a849f9afb946c0404230d0989e05bc9aa438fb124d",
+    "addons/playerbots/dashboard/js/guide-content.js": "d23a4f01e1a6233c4917e2418c1215ea099234c77576f5cc264af29ddee0d5dd",
     "addons/playerbots/dashboard/js/roster.js": "70f62be1c70780a60664cc5a847a6b678105c44297d49070b1dea3255920fff0",
     "addons/playerbots/dashboard/js/ui.js": "a4e73dd0ba772e9d67c044486c93dabf8dfd8b2c6692ef5a3d21eb336bdf5d66",
     "addons/playerbots/dashboard/js/view-activity.js": "5afc0b9ad773077abc675b2d781fbad7add9a4c5a92cf5d84ca068b4debaa72c",
-    "addons/playerbots/dashboard/js/view-corporations.js": "e2531510e866a6b785053350d4e945c8c0d8b4f1ba76562542858d6f8f6dac4e",
+    "addons/playerbots/dashboard/js/view-corporations.js": "4bfdd0a9702b70ffbd72dccda32c19f2d3a6f4063989f452998c90a4af65dcf1",
     "addons/playerbots/dashboard/js/view-guide.js": "12d506158aa8621c615abe5fea307545696269ff4fec60c5028126814e041123",
     "addons/playerbots/dashboard/js/view-history.js": "9174546c91d3353f1925e948d9e17f57e978f966fb73b01281983b4f3e9fee92",
     "addons/playerbots/dashboard/js/view-performance.js": "8607388b654b9d91b03f577233569b714321d6219fca07a674fc091dabd6221e",

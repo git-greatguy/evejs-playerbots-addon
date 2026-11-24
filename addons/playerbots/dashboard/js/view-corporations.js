@@ -152,7 +152,7 @@ function logoHtml(c) {
     : "";
   const note = corporationLogos.inGame
     ? "Players see a new logo in game the next time they log in."
-    : "Players only see it in game once the corporation-logo add-on is installed on the server. The dashboard shows it either way.";
+    : "Players only see it in game once the corporation-logo add-on (evejs-corporation-logos) is installed on the server. The dashboard shows it either way.";
   return `<div class="panel-head"><div><h2>Logo</h2><p>A picture for this corporation, shown here and in game in place of its emblem</p></div></div>
   <div class="panel-body">
     <div class="logo-row">${current}${draft}</div>

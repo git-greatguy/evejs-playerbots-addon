@@ -379,8 +379,10 @@ with or without anything else installed.
 
 The game client is different: it always draws a player corporation from its
 emblem layers and never asks the image server for a picture. The separate
-corporation-logo add-on adds a small client patch to EveJS's login script so
-corporations with a PNG are drawn from it. With that add-on installed, the
+[corporation-logo add-on](https://github.com/ubermidas/evejs-corporation-logos) (`evejs-corporation-logos`) adds a small
+client patch to EveJS's login script so corporations with a PNG are drawn
+from it, and makes sure the image server serves the stored PNGs. Install it
+once per server with its `install.py`, then rebuild. With that add-on installed, the
 Logo panel says so, and players see a new or changed logo from their next
 login. A client that cached an earlier picture of the same corporation may
 keep showing it until its `Pictures\Corporations` cache folder is cleared.

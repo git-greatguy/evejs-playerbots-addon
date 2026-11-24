@@ -306,7 +306,7 @@ export const TOPICS = [
         "Click <strong>Save logo</strong>. <strong>Remove logo</strong> puts the emblem back.",
       ]),
       p("The logo then shows next to the corporation's name everywhere on this dashboard: the corporation list, its page, pilot rows, the pilot panel, History and the killboard."),
-      note("The game client normally draws a player corporation from its emblem and never fetches a picture. Players see the logo in game only when the separate <em>corporation-logo add-on</em> is installed on the server, and then from their next login. Without it, the logo shows on the dashboard only."),
+      note("The game client normally draws a player corporation from its emblem and never fetches a picture. Players see the logo in game only when the separate <a href='https://github.com/ubermidas/evejs-corporation-logos' target='_blank' rel='noopener noreferrer'>corporation-logo add-on</a> (<code>evejs-corporation-logos</code>) is installed on the server, and then from their next login. Without it, the logo shows on the dashboard only."),
       h("Headquarters names"),
       p("When a bot corporation anchors its headquarters structure, it gets a sci-fi place name followed by the corporation's name, for example <em>Coruscant Starbase Tyrell Corporation</em>. Names are never reused."),
       note("Existing corporations keep their names and emblems; only new ones are affected."),

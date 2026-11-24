@@ -167,3 +167,11 @@ test("pages show a logo only for corporations that have one", async () => {
   assert.match(ui.pilotCell({ characterID: 1, characterName: "A", corporationID: 98000002, corporationName: "Tyrell Corporation" }), /corp-logo inline/);
   assert.doesNotMatch(ui.pilotCell({ characterID: 1, characterName: "A", corporationID: 98000005, corporationName: "OCP" }), /corp-logo/);
 });
+
+test("the Guide explains picture logos and links the in-game add-on", async () => {
+  const guide = await import("../addons/playerbots/dashboard/js/guide-content.js");
+  const topic = guide.TOPICS.find((entry) => entry.id === "corp-identity");
+  const body = topic.body();
+  assert.match(body, /<h3>Picture logos<\/h3>/);
+  assert.match(body, /href='https:\/\/github\.com\/ubermidas\/evejs-corporation-logos'/);
+});

@@ -6,7 +6,8 @@
 //   <runtime images>/Corporation/<corporationID>_<size>.png
 // one file per size, like alliance logos. The dashboard uploads them already
 // resized and square; this module only checks and stores them. Showing a logo
-// in the game client needs the separate corporation-logo add-on; the
+// in the game client needs the separate corporation-logo add-on
+// (github.com/ubermidas/evejs-corporation-logos); the
 // dashboard works without it.
 
 const fs = require("node:fs");
@@ -156,7 +157,7 @@ function createCorporationLogoStore(options = {}) {
       inGame,
       message: inGame
         ? `Logo saved for ${name}. Players see it in game after they next log in.`
-        : `Logo saved for ${name}. It shows on the dashboard; showing it in game needs the corporation-logo add-on.`,
+        : `Logo saved for ${name}. It shows on the dashboard; showing it in game needs the corporation-logo add-on (evejs-corporation-logos).`,
     };
   }
 
