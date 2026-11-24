@@ -1,14 +1,17 @@
-# Playerbots 0.2.152.13 for native EveJS (EVEJS Launcher)
+# Playerbots 0.2.152.16 for native EveJS (EVEJS Launcher)
 
 This package runs Playerbots inside a native Windows EveJS server managed by
 EVEJS Launcher, with no Docker. It carries the Luna update by
 [@rizonx](https://github.com/rizonx) (corporation recruitment, corporation
-income, portrait repair, Windows multicore support and performance work)
-together with the overhauled operator dashboard from this repository.
+income, portrait repair, level 1 agent missions, Windows multicore support,
+fewer disk writes and other performance work) together with the overhauled
+operator dashboard from this repository.
 
 You need EveJS **261115.2**, EVEJS Launcher **1.0.91** or later and
-**Node.js 24** or later. This is the same build as @rizonx's
-*Playerbots 0.2.152.13 (Windows, Luna)*: every file it installs is identical.
+**Node.js 24** or later. This is @rizonx's *Playerbots 0.2.152.16 (Windows,
+Luna)* with one addition: `server/src/gameStore/sqliteStore.js` also saves
+customs inspection cases one row at a time, as the customs change merged
+upstream in PR #14 expects. Every other file it installs is identical.
 
 No launcher? Servers started with `StartServer.bat` can install this package
 with the repository's installer instead: run `python install.py` and choose
@@ -45,8 +48,13 @@ re-enter the settings in **Configure**, then **Start Stack**. Leave your
 multicore files in place.
 
 The installer recognises the files earlier packages installed, including
-both builds named 0.2.152.11 (Luna and the ubermidas fork), and replaces
-them; it stops on anything else.
+both builds named 0.2.152.11 (Luna and the ubermidas fork) and @rizonx's
+0.2.152.13 to 0.2.152.16, and replaces them; it stops on anything else.
+
+Bot tasks move to a new storage layout on the first task change after this
+upgrade. Take your usual GameStore backup with Game stopped first: an older
+Playerbots release cannot read the new layout, so going back needs that
+backup.
 
 ## What's included
 
@@ -62,8 +70,19 @@ them; it stops on anything else.
 - **Corporation names and emblems**: new bot corporations take famous sci-fi
   company names and random in-game emblems. Both can be turned off under
   **Configure → New corporations**.
+- **Agent missions**: fitted pilots take level 1 Security, Mining and
+  Distribution missions from high-security agents within 10 jumps. Turn off
+  or cap them under **Configure → Agent missions** (12 at once by default,
+  at most 32).
+- **Fewer disk writes**: bot tasks are saved one row each, bot and scheduler
+  saves are written once, map statistics are saved every 60 seconds
+  (**Configure → Disk writes**, 2–120), and EveJS's verbose trace files are
+  off unless you turn on **Write verbose diagnostic files**.
 - **Lighter server load**: buffered combat progress saves, cheaper task
-  claims and roster lookups, and no full-roster scans for corporation counts.
+  claims and roster lookups, reused drone and roster indexes in combat,
+  reused mining targets, and no full-roster scans for corporation counts.
+- **Roster seeding CPU threshold** from 25% to 900% (100% is one CPU core;
+  default 85%) under **Configure → Population**.
 
 ## Recruit bots into your corporation
 
@@ -99,8 +118,8 @@ In **Configure → Corporation income** (restart Game after saving):
 
 | Setting | Default | What it is |
 | --- | --- | --- |
-| Player corporation bot profit share | 60% | Share of a bot's total net profit paid to a human-led corporation. Starting capital and top-ups don't count. |
-| Bot-led corporation operation share | 20% | Share of each profitable job paid to a bot-led corporation. |
+| Player corporation bot profit share | 75% | Share of a bot's total net profit paid to a human-led corporation. Starting capital and top-ups don't count. |
+| Bot-led corporation operation share | 35% | Share of each profitable job paid to a bot-led corporation. |
 | Minimum corporation payout | 1 ISK | Smaller amounts are held until they reach it. |
 
 Payouts are wallet transfers, so they depend on real profit and available

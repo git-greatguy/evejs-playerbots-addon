@@ -19,7 +19,7 @@ const DEFAULT_ONLINE = 300;
 const ROSTER_SEED_SAFETY_LIMITS = Object.freeze({
   batchSize: 10,
   eventLoopP95Ms: 250,
-  processCpuPercent: 95,
+  processCpuPercent: 900,
   maximumSingleBotMs: 1_000,
 });
 const repo = createTableRepository("service:playerbots", { strict: true });

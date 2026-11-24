@@ -13,7 +13,7 @@ Compose**, or on Windows as a mod for **EVEJS Launcher** with no Docker.
 
 | | |
 | --- | --- |
-| **Version** | 0.2.152 (native package 0.2.152.13), experimental test build |
+| **Version** | 0.2.152 (native package 0.2.152.16), experimental test build |
 | **Works with** | EveJS `261115.2`, with Docker Compose, or natively with EVEJS Launcher 1.0.91+ or `StartServer.bat` |
 | **Dashboard** | `http://127.0.0.1:8080` on the server machine |
 | **License** | AGPL-3.0-only |
@@ -70,7 +70,7 @@ mode or Server Panel? Give the installer your extra Compose files once; see
 
 You need EveJS **261115.2** run natively with **Node.js 24+**, and Python
 3.10+ for the installer. The native package is
-`evejs-playerbots-windows-v0.2.152.13.zip`, built from the same source as the
+`evejs-playerbots-windows-v0.2.152.16.zip`, built from the same source as the
 Docker add-on and carrying the Luna update by @rizonx.
 
 - **Through EVEJS Launcher (1.0.91+), recommended if you use it.** The
@@ -119,9 +119,12 @@ responsive. Work is saved as it goes and resumes after a restart.
   community fits.
 - **Combat:** security patrols and combat sites, pirate roams, war patrols
   and null-sec conflict.
+- **Agent missions:** fitted security, trade and industry pilots take level 1
+  Security, Mining and Distribution missions from high-security agents within
+  10 jumps, at most 12 at a time across the server.
 - **Corporations and alliances:** corporations build a headquarters, declare
   wars and fund their fleets; CEOs found alliances. Bots pay part of their
-  profit to their corporation (60% of net profit to a human-led one, 20% of
+  profit to their corporation (75% of net profit to a human-led one, 35% of
   each profitable job to a bot-led one).
 - **Structures and sovereignty:** Upwell structures in null-sec, neutral hub
   captures and sovereignty campaigns.
@@ -144,8 +147,8 @@ pirate and war patrols can target other bots.
 
 **Built to keep the server healthy.** A steadier space tick, a log of any
 tick that holds the server for a second or more, slower upkeep in systems
-nobody is watching, batched saves, and a Performance page showing where time
-goes. On a clean test server, 500 bots held online at once in about 3 GiB of
+nobody is watching, batched saves, small per-task saves instead of rewriting
+the whole task queue, and a Performance page showing where time goes. On a clean test server, 500 bots held online at once in about 3 GiB of
 server memory.
 
 ---
@@ -259,14 +262,14 @@ restarts, and win over `.env`. On EVEJS Launcher, values saved under
 | Seed batch size | 5 | 1 – 10 |
 | Time between seed batches | 15 s | 5 s – 5 min |
 | Pause seeding above event-loop p95 | 100 ms | 25 – 250 ms |
-| Pause seeding above server CPU | 85% | 25 – 95% |
+| Pause seeding above server CPU | 85% | 25 – 900% (100% is one CPU core) |
 | Slowest allowed pilot creation | 1,000 ms | 25 – 1,000 ms |
 
 </details>
 
 **Limits no setting can raise:** 15,000 pilots, 5,000 online, 300 per system;
 seeding at most 10 pilots per batch, pausing above 250 ms event-loop p95 or
-95% CPU, and skipping any pilot that takes over a second to create.
+900% CPU, and skipping any pilot that takes over a second to create.
 
 ### In `.env` (Docker) or Configure (Windows)
 
@@ -284,9 +287,13 @@ and so on; see [Roster and population](GUIDE.md#roster-and-population)).
 | `RECRUITMENT_BATCH_SIZE` | 4 | Bots per recruitment batch (1–16) |
 | `PLAYER_CORPORATION_MEMBER_LIMIT` | 15000 | Seats in a human-led corporation; `0` uses EveJS's skill-based limit |
 | `PLAYER_CORPORATION_BOT_LIMIT` | 1000 | Most bots one human-led corporation can hold |
-| `PLAYER_CORP_PROFIT_SHARE_PERCENT` | 60 | Share of a bot's net profit paid to its human-led corporation |
-| `BOT_CORP_OPERATION_SHARE_PERCENT` | 20 | Share of each profitable job paid to a bot-led corporation |
+| `PLAYER_CORP_PROFIT_SHARE_PERCENT` | 75 | Share of a bot's net profit paid to its human-led corporation |
+| `BOT_CORP_OPERATION_SHARE_PERCENT` | 35 | Share of each profitable job paid to a bot-led corporation |
 | `CORP_MIN_PROFIT_SHARE_ISK` | 1 | Smallest corporation payout |
+| `AGENT_MISSIONS_ENABLED` | `1` | `0` stops giving pilots level 1 agent missions |
+| `MAX_AGENT_MISSIONS` | 12 | Most agent missions running at once (0–32; `0` lets running ones finish) |
+| `MAP_SAVE_SECONDS` | 60 | How often jump and visit statistics are saved (2–120 s); a clean stop saves them too |
+| `VERBOSE_TRACE_FILES` | `0` | `1` writes EveJS's detailed trace files (sync ledger, movement, warp, jump timing and similar); use briefly while diagnosing |
 | `REFRESH_EXISTING_PORTRAITS` | `1` | `0` keeps existing portraits instead of refreshing them once |
 | `SCIFI_CORPORATION_NAMES` | `1` | `0` names new corporations after their specialty |
 | `CORPORATION_EMBLEMS` | `1` | `0` keeps EveJS's default emblem for new corporations |

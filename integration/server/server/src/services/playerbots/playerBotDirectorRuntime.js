@@ -1507,7 +1507,7 @@ function countProductiveBots(corporationID) {
 function getProductiveBotCountsByCorporation(corporationIDs, entries = listActiveWorkEntries()) {
   const productive = new Map([...corporationIDs].map((id) => [Number(id), new Set()]));
   const productiveKinds = new Set([
-    "mine", "sell", "haul", "fulfill", "pi-collect", "combat", "sovereignty",
+    "mine", "sell", "haul", "fulfill", "pi-collect", "combat", "agent-mission", "sovereignty",
     "alliance-courier", "structure-procurement", "structure-deployment",
     "structure-core-install", "structure-service-provision",
   ]);
@@ -1533,7 +1533,7 @@ function isProductiveAssignment(assignment) {
 async function runDirectorInternal(bots = [], options = {}) {
   const summary = { enabled: isEnabled(), active: 0, assigned: 0, mine: 0, industry: 0, upgrade: 0,
     sell: 0, "order-courier": 0, "order-build": 0, "alliance-courier": 0, "structure-procurement": 0, "structure-deployment": 0, "structure-core-install": 0, "structure-service-provision": 0, colony: 0,
-    "alliance-founding": 0, combat: 0, sovereignty: 0, relocate: 0, activeRelocations: 0,
+    "alliance-founding": 0, combat: 0, "agent-mission": 0, sovereignty: 0, relocate: 0, activeRelocations: 0,
     recoveredColonyReviews: 0, recoveredLegacyPIExports: 0, capsuleRecoveries: 0, structureConflictWarsDeclared: 0,
     firstWarGrants: 0, warShipBudgetsFunded: 0, warPilotsRecruited: 0, failures: 0 };
   const skipGlobalMaintenance = options.skipGlobalMaintenance === true;
@@ -1654,7 +1654,10 @@ async function runDirectorInternal(bots = [], options = {}) {
   summary.queuedColonySetups = getQueuedColonySetupCount();
   if (!humanCorporations) humanCorporations = onlineHumanCorporationIDs();
   if (!humanControlledBotIDs) humanControlledBotIDs = BOT_CAPACITY.getHumanControlledBotIDs(allRosterBots);
-  const productiveByCorporation = getProductiveBotCountsByCorporation(humanCorporations, activeWorkEntries || listActiveWorkEntries());
+  activeWorkEntries ||= listActiveWorkEntries();
+  const productiveByCorporation = getProductiveBotCountsByCorporation(humanCorporations, activeWorkEntries);
+  const maxAgentMissions = Math.min(32, Math.max(0, Number(process.env.EVEJS_PLAYER_BOTS_MAX_AGENT_MISSIONS ?? 12) || 0));
+  let activeAgentMissions = activeWorkEntries.reduce((count, entry) => count + Number(entry.work?.kind === "agent-mission"), 0);
   if (!skipGlobalMaintenance) {
     try {
       const mobilization = await require("./playerBotWarMobilizationRuntime")
@@ -2032,6 +2035,12 @@ async function runDirectorInternal(bots = [], options = {}) {
       assignment = { kind: "colony" };
     }
     if (!assignment && headquartersWorkCanStart && structureRuntime.isMissingCorporationHeadquarters?.(bot)) continue;
+    if (!assignment && !humanControlled && !overSystemLimit && activeAgentMissions < maxAgentMissions &&
+        summary["agent-mission"] < 4 && ["security", "trade", "industry"].includes(bot.specialty) &&
+        require("./playerBotSpaceRuntime").isBotConnectedForWork(bot.characterID, allRosterBots)) {
+      const plan = require("./playerBotAgentMissionRuntime").getPlan(bot, readSharedCharacterRecord(bot.characterID), operationRuntime);
+      if (plan) assignment = { kind: "agent-mission", plan };
+    }
     if (!assignment) assignment = chooseAssignment(bot, {
       prioritizeProductiveWork: needsMinimumProductiveWork,
       prioritizeCorporationStructure: headquartersWorkCanStart && !structureRuntime.isMissingCorporationHeadquarters?.(bot),
@@ -2232,6 +2241,8 @@ async function runDirectorInternal(bots = [], options = {}) {
             maxSpend: assignment.maxSpend,
             warMobilizationSupportID: assignment.warMobilizationSupportID,
           } : {}) })
+      : assignment.kind === "agent-mission"
+      ? operationRuntime.startAgentMission(bot.characterName, assignment.plan)
       : assignment.kind === "combat"
       ? require("./playerBotOperationRuntime").startCombat(bot.characterName, assignment.mode, {
         autonomous: true,
@@ -2326,6 +2337,7 @@ async function runDirectorInternal(bots = [], options = {}) {
       if (assignment.kind === "relocate") activeRelocations += 1;
       else summary.active += 1;
       if (assignment.kind === "colony") activeColonySetups += 1;
+      if (assignment.kind === "agent-mission") activeAgentMissions += 1;
       if (assignment.kind === "colony" && reservedColonyDestinationSystemID) {
         colonyIncomingBySystem.set(
           reservedColonyDestinationSystemID,

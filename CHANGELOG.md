@@ -5,8 +5,41 @@ the Windows launcher package adds a fourth number for its own releases.
 
 ## Unreleased: housekeeping
 
-On the `housekeeping` branch of the ubermidas fork, not yet offered upstream.
-Docker add-on 0.2.152, native package 0.2.152.13.
+On the `housekeeping` branch of the ubermidas fork, offered upstream.
+Docker add-on 0.2.152, native package 0.2.152.16.
+
+### Luna 0.2.152.14 to 0.2.152.16 by @rizonx
+
+Merged from rizonx's native package. The native package built here installs
+the same files as his 0.2.152.16, except that `sqliteStore.js` also keeps the
+customs inspection row layout that PR #14 relies on, and it upgrades his
+0.2.152.13 to 0.2.152.16 installs in place.
+
+- **Agent missions.** Fitted security, industry and trade pilots run level 1
+  Security, Mining and Distribution missions for high-security agents within
+  10 jumps. Rewards come through the game's own agent and wallet; a restart
+  during turn-in pays the corporation share once. On by default, at most 12
+  at a time (`AGENT_MISSIONS_ENABLED`, `MAX_AGENT_MISSIONS`).
+- **Higher corporation income by default:** 75% of a bot's net profit to a
+  human-led corporation (was 60%), 35% of each profitable job to a bot-led
+  one (was 20%).
+- **Far fewer disk writes.** Each bot task is its own saved row instead of
+  one large record rewritten on every change (in rizonx's test, 64 task
+  updates fell from 71.8 MiB to 0.25 MiB of SQLite log writes). Bot,
+  scheduler and map saves are written once instead of twice. Map statistics
+  are saved every 60 seconds (`MAP_SAVE_SECONDS`, 2–120). EveJS's verbose
+  trace files are off unless `VERBOSE_TRACE_FILES=1`.
+- **Roster seeding CPU threshold** can be set from 25% to 900% (100% is one
+  CPU core); the default stays 85%, and the dashboard shows the server's
+  allowed range.
+- **Lighter combat and mining:** combat reuses the scene's drone index and
+  the roster's profile index, mining keeps its current asteroid instead of
+  re-sorting every candidate, ship fit ladders are cached, and mission
+  mining keeps fractional cycle time.
+
+Going back to an older Playerbots release after the first task change needs
+the GameStore backup taken before upgrading: older releases cannot read the
+per-task rows.
 
 ### Install natively or with Docker
 

@@ -27,8 +27,8 @@ function option(name, fallback, minimum, maximum) {
   const value = Number(process.env[`EVEJS_PLAYER_BOTS_${name}`] ?? fallback);
   return Number.isInteger(value) && value >= minimum && value <= maximum ? value : fallback;
 }
-const HUMAN_CEO_PROFIT_SHARE = option("PLAYER_CORP_PROFIT_SHARE_PERCENT", 60, 0, 100) / 100;
-const BOT_CEO_OPERATION_SHARE = option("BOT_CORP_OPERATION_SHARE_PERCENT", 20, 0, 100) / 100;
+const HUMAN_CEO_PROFIT_SHARE = option("PLAYER_CORP_PROFIT_SHARE_PERCENT", 75, 0, 100) / 100;
+const BOT_CEO_OPERATION_SHARE = option("BOT_CORP_OPERATION_SHARE_PERCENT", 35, 0, 100) / 100;
 const MINIMUM_PROFIT_SHARE = option("CORP_MIN_PROFIT_SHARE_ISK", 1, 1, 1_000_000);
 const MAX_LEDGER = 40;
 const repo = createTableRepository("service:playerbots", { strict: true });

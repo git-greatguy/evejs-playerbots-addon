@@ -72,19 +72,19 @@ function economyFixture({ balance = 1000, config = {}, failFirst = false } = {})
     shutdown: () => shutdown() };
 }
 
-test("player-led corporations get 60% net profit with two durability checkpoints and no duplicate payments", async () => {
+test("player-led corporations get 75% net profit with two durability checkpoints and no duplicate payments", async () => {
   const f = economyFixture({ balance: 2500 });
   f.journal.push({ transactionID: 1, entryTypeID: 1, ownerID2: 10, amount: 500, description: "Top-up" });
   const pilot = { characterID: 10, corporationID: 1 };
-  assert.equal(await f.api.payCorpShare(pilot, 10, "test"), 600);
+  assert.equal(await f.api.payCorpShare(pilot, 10, "test"), 750);
   assert.equal(await f.api.payCorpShare(pilot, 10, "test"), 0);
-  assert.deepEqual(f.transfers.map(t => t.amount), [600]);
+  assert.deepEqual(f.transfers.map(t => t.amount), [750]);
   assert.equal(f.writes.filter(path => path === "sync").length, 2);
-  assert.match(f.api.formatCorpEconomy(), /60% of cumulative net profit/);
+  assert.match(f.api.formatCorpEconomy(), /75% of cumulative net profit/);
 });
 
 test("below-threshold history writes once after one minute and drains on orderly shutdown", async () => {
-  const f = economyFixture({ balance: 1100, config: { EVEJS_PLAYER_BOTS_CORP_MIN_PROFIT_SHARE_ISK: "100" } });
+  const f = economyFixture({ balance: 1100, config: { EVEJS_PLAYER_BOTS_CORP_MIN_PROFIT_SHARE_ISK: "100", EVEJS_PLAYER_BOTS_PLAYER_CORP_PROFIT_SHARE_PERCENT: "60" } });
   const pilot = { characterID: 10 };
   await f.api.payCorpShare(pilot, 100, "test");
   await f.api.payCorpShare(pilot, 100, "test");
@@ -103,11 +103,11 @@ test("failed transfer reuses its recorded intent and bot-led operations use the 
   const f = economyFixture({ balance: 2000, failFirst: true, config: { EVEJS_PLAYER_BOTS_BOT_CORP_OPERATION_SHARE_PERCENT: "35" } });
   await assert.rejects(f.api.payCorpShare({ characterID: 10 }, 1000, "test"), /RETRY/);
   const intent = f.db._corpEconomy.corporations[1].profitTracking[10].pendingPayments[0];
-  assert.equal(await f.api.payCorpShare({ characterID: 10 }, 1000, "test"), 600);
+  assert.equal(await f.api.payCorpShare({ characterID: 10 }, 1000, "test"), 750);
   assert.equal(f.transfers[0].key, intent.idempotencyKey);
   assert.equal(await f.api.payCorpShare({ characterID: 20 }, 1000, "mine", "operation1"), 350);
   assert.equal(await f.api.payCorpShare({ characterID: 20 }, 2000, "replay", "operation1"), 350);
-  assert.deepEqual(f.transfers.map(t => t.amount), [600,350]);
+  assert.deepEqual(f.transfers.map(t => t.amount), [750,350]);
 });
 
 test("player corporation capacity applies to player CEOs only and 0 preserves skill limits", () => {
@@ -128,3 +128,5 @@ test("player corporation capacity applies to player CEOs only and 0 preserves sk
   env.EVEJS_PLAYER_BOTS_PLAYER_CORPORATION_MEMBER_LIMIT = "0";
   assert.equal(effectiveCorporationMemberLimit(human), 20);
 });
+
+

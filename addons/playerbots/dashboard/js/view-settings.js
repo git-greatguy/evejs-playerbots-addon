@@ -54,7 +54,13 @@ function isLocked(key) {
 }
 
 function fieldHtml(field) {
-  const [name, label, , min, max, step, hint] = field;
+  const [name, label, , min, fallbackMax, step, fallbackHint] = field;
+  const cpuLimit = name === "rosterSeedMaxProcessCpuPercent"
+    ? saved.maximums?.[name]
+    : undefined;
+  const hasServerLimit = Number.isInteger(cpuLimit) && cpuLimit >= min;
+  const max = hasServerLimit ? cpuLimit : fallbackMax;
+  const hint = hasServerLimit ? `Hard cap ${max}%.` : fallbackHint;
   const def = defaults ? toForm(defaults, field) : null;
   const locked = isLocked(settingKey(field));
   const note = locked

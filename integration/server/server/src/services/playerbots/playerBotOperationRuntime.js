@@ -1667,8 +1667,11 @@ function resolveLadderTypeID(value) {
   return resolved && resolved.success === true ? Number(resolved.match.typeID) || 0 : 0;
 }
 
+const resolvedLadderRungs = new WeakMap();
+
 function resolveShipLadderRung(rung) {
   if (!rung) return null;
+  if (resolvedLadderRungs.has(rung)) return resolvedLadderRungs.get(rung);
   const hullTypeID = resolveLadderTypeID(rung.hullTypeID);
   const moduleTypeIDs = (rung.moduleTypeIDs || []).map(resolveLadderTypeID);
   const droneTypeIDs = (rung.droneTypeIDs || []).map(resolveLadderTypeID);
@@ -1679,7 +1682,9 @@ function resolveShipLadderRung(rung) {
     const typeID = resolveLadderTypeID(name);
     if (typeID) droneDamageTypeByID[typeID] = damageType;
   }
-  return { ...rung, hullTypeID, moduleTypeIDs, droneTypeIDs, cargoTypeIDs, droneDamageTypeByID };
+  const resolved = { ...rung, hullTypeID, moduleTypeIDs, droneTypeIDs, cargoTypeIDs, droneDamageTypeByID };
+  resolvedLadderRungs.set(rung, resolved);
+  return resolved;
 }
 
 // The skills the static data requires to fly a hull or fit a module.
@@ -2020,8 +2025,7 @@ function hasRoleShipFit(bot, role, options = {}) {
       if (space.getSpaceState(bot).inSpace) {
         const attached = space.getActorSpace(bot);
         entity = attached.entity;
-        deployedDrones = [...attached.scene.dynamicEntities.values()].filter((drone) =>
-          drone.kind === "drone" && Number(drone.controllerID) === shipID);
+        deployedDrones = require("./playerBotCombatRuntime").getControlledDrones(attached.scene, shipID);
       }
     } catch (_) {
       // A docked ship is checked from its persisted bay and Dogma attributes.
@@ -2092,6 +2096,7 @@ function getRoleShipFitProfile(bot, role) {
   });
   return {
     ...rung,
+    droneControlRange: fitSnapshot.success ? fitSnapshot.fit.droneControlRange : null,
     shieldResistances: fitSnapshot.success ? fitSnapshot.fit.shieldResistances : {},
     requiredDroneTypes: (rung.droneTypeIDs || []).reduce((counts, typeID) => {
       counts.set(Number(typeID), (counts.get(Number(typeID)) || 0) + 1);
@@ -4296,6 +4301,23 @@ const HANDLERS = {
   sell: advanceSell,
   haul: advanceHaul,
   mine: advanceMining,
+  "agent-mission": (operation, bot) => {
+    const missions = require("./playerBotAgentMissionRuntime");
+    return missions.advance(operation, bot, {
+      native: require("../agent/agentMissionRuntime"),
+      agents: require("../agent/agentAuthority"),
+      missionState: require("../agent/missionRuntimeState"),
+      settlements: require("../agent/missionRewardSettlementState"),
+      wallet: require("../account/walletState"),
+      drone: require("../drone/droneRuntime"),
+      combat: require("./playerBotCombatRuntime"),
+      space: getSpace(), inventory: getInventory(), world: worldData,
+      ownsSession: (id, session) => require("../chat/sessionRegistry").findSessionByCharacterID(id) === session,
+      warpMission: missions.warpMission,
+      payCorpShare: require("./playerBotCorpEconomyRuntime").payCorpShare,
+      travelToStation, travelToSystem, getMiningModules, record, save: saveOperation, block, finish,
+    });
+  },
   upgrade: advanceUpgrade,
   fit: advanceUpgrade,
   combat: (operation, bot) => require("./playerBotCombatRuntime").advanceCombat(operation, bot, {
@@ -4837,6 +4859,27 @@ function startAllianceFounding(botQuery, options = {}) {
   });
 }
 
+function startAgentMission(botQuery, plan) {
+  const bot = getPlayerBots().resolveBot(botQuery);
+  const refusal = assertCanStart(bot);
+  if (refusal) return { success: false, message: refusal };
+  if (!plan?.agentID || !plan.stationID || !["security", "mining", "transport"].includes(plan.kind)) {
+    return { success: false, message: "No supported agent mission is available for this pilot." };
+  }
+  const fit = plan.kind === "security" ? getRoleShipFitProfile(bot, "security") : null;
+  const operation = baseOperation("agent-mission", bot, {
+    stage: "agent",
+    agentID: plan.agentID,
+    missionKind: plan.kind,
+    homeStationID: plan.stationID,
+    controlRange: Number(fit?.droneControlRange),
+    autonomous: true,
+  });
+  record(operation, `Preparing for a level 1 ${plan.kind} mission from agent ${plan.agentID}.`);
+  saveOperation(operation);
+  return { success: true, operation, message: operation.lastAction };
+}
+
 function startMining(botQuery, maxTrips = 1, options = {}) {
   const bot = getPlayerBots().resolveBot(botQuery);
   const refusal = assertCanStart(bot, {
@@ -5250,6 +5293,11 @@ function requestSafeOperationStop(operation, bot, reason, forCapacity = false) {
     } else {
       operation.completeBeforeStop = true;
     }
+  } else if (operation.kind === "agent-mission") {
+    if (!["share", "turn-in"].includes(operation.stage)) {
+      operation.stage = "withdraw";
+      operation.withdrawReason = String(reason).slice(0, 240);
+    }
   }
   operation.status = "active";
   operation.loadSheddingPaused = false;
@@ -5467,6 +5515,10 @@ function stopOperation(botQuery) {
       operation,
       message: `Alliance founding for corporation ${operation.corporationID} is being reconciled by the durable corporation authority; do not stop it or issue a second founding request until it resolves.`,
     };
+  }
+  if (operation.kind === "agent-mission" && operation.sequence) {
+    const result = requestSafeOperationStop(operation, bot, "Agent work stopped by an operator.", false);
+    return { success: result.success, operation, message: "The pilot will return safely or finish a turn-in already underway." };
   }
   if (["combat", "sovereignty", "alliance-courier"].includes(operation.kind)) {
     const result = requestSafeOperationStop(
@@ -5966,6 +6018,16 @@ async function advanceOperation(characterID) {
 
 function describeOperationStage(operation, stage = operation.stage) {
   const descriptions = {
+    "agent-mission": {
+      agent: "travelling to the mission agent",
+      site: "travelling to the mission site",
+      objective: "working on the agent objective",
+      pickup: "collecting the courier package",
+      "turn-in": "returning for the mission hand-in",
+      share: "transferring the corporation's share",
+      withdraw: "returning to a station",
+      done: "agent mission completed",
+    },
     "pi-collect": {
       collect: "travelling to or collecting from the PI launch container",
     "to-source": "travelling to the PI collection system",
@@ -6314,6 +6376,7 @@ module.exports = {
   startAllianceCourier,
   startAllianceFounding,
   startMining,
+  startAgentMission,
   startCombat,
   startSovereignty,
   startStructureDeployment,

@@ -57,7 +57,7 @@ function createPlayerBotAddonApiRuntime(options = {}) {
   const seedSafetyLimits = configuration.ROSTER_SEED_SAFETY_LIMITS || {
     batchSize: 10,
     eventLoopP95Ms: 250,
-    processCpuPercent: 95,
+    processCpuPercent: 900,
     maximumSingleBotMs: 1_000,
   };
   function effectiveSeedLimits(settings = configuration.getSettings()) {

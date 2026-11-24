@@ -53,6 +53,16 @@
     "advanced": true,
     "env": "ROSTER_SEED_BATCH_SIZE"
   },
+  "rosterSeedMaxProcessCpuPercent": {
+    "label": "Pause roster seeding above EveJS CPU (%)",
+    "group": "Population",
+    "type": "integer",
+    "default": 85,
+    "minimum": 25,
+    "maximum": 900,
+    "advanced": true,
+    "env": "ROSTER_SEED_MAX_PROCESS_CPU_PERCENT"
+  },
   "autoworkEnabled": {
     "label": "Autonomous bot work",
     "group": "Behaviour",
@@ -193,7 +203,7 @@
     "description": "Share of each bot\u2019s cumulative net profit paid to its player-led corporation. Set 0 to disable new contributions.",
     "group": "Corporation income",
     "type": "integer",
-    "default": 60,
+    "default": 75,
     "minimum": 0,
     "maximum": 100,
     "env": "PLAYER_CORP_PROFIT_SHARE_PERCENT"
@@ -203,7 +213,7 @@
     "description": "Share of successful operation profit paid to corporations with a bot CEO.",
     "group": "Corporation income",
     "type": "integer",
-    "default": 20,
+    "default": 35,
     "minimum": 0,
     "maximum": 100,
     "env": "BOT_CORP_OPERATION_SHARE_PERCENT"
@@ -241,5 +251,35 @@
     "type": "boolean",
     "default": true,
     "env": "CORPORATION_EMBLEMS"
+  },
+  "agentMissionsEnabled": {
+    "label": "Assign agent missions automatically",
+    "description": "When autonomous work is enabled, fitted pilots can take level 1 Security, Mining, and Distribution jobs from nearby high-security agents.",
+    "group": "Agent missions",
+    "type": "boolean",
+    "default": true,
+    "env": "AGENT_MISSIONS_ENABLED"
+  },
+  "maxConcurrentAgentMissions": {
+    "label": "Maximum concurrent agent missions",
+    "description": "Cap new mission assignments across the server. Use 0 to stop new assignments while active missions can finish.",
+    "group": "Agent missions",
+    "type": "integer",
+    "default": 12,
+    "minimum": 0,
+    "maximum": 32,
+    "env": "MAX_AGENT_MISSIONS"
+  },
+  "mapSaveSeconds": {
+    "type": "integer",
+    "default": 60,
+    "minimum": 2,
+    "maximum": 120,
+    "env": "MAP_SAVE_SECONDS"
+  },
+  "verboseTraceFiles": {
+    "type": "boolean",
+    "default": false,
+    "env": "VERBOSE_TRACE_FILES"
   }
 }

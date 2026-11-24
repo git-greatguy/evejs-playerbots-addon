@@ -8,7 +8,8 @@ const schema = require("./settings.json");
 const root = path.resolve(__dirname, "../..");
 const dashboardFields = [
   "rosterTarget", "rosterCeiling", "maxOnline", "maxPerSystem", "rosterSeedEnabled",
-  "rosterSeedBatchSize", "autoworkEnabled", "addonConcurrency", "addonCycleIntervalMs", "addonBotDelayMs",
+  "rosterSeedBatchSize", "rosterSeedMaxProcessCpuPercent", "autoworkEnabled",
+  "addonConcurrency", "addonCycleIntervalMs", "addonBotDelayMs",
 ];
 
 let options;
@@ -57,6 +58,8 @@ function configure() {
   }
   options = readOptions(root);
   for (const [key, rule] of Object.entries(schema)) {
+    // Keep the existing environment default when the launcher has no saved threshold.
+    if (key === "rosterSeedMaxProcessCpuPercent" && !Object.hasOwn(options.overrides, key)) continue;
     const value = options.effective[key];
     process.env[`EVEJS_PLAYER_BOTS_${rule.env}`] = typeof value === "boolean" ? (value ? "1" : "0") : String(value);
   }

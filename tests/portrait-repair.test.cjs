@@ -20,7 +20,7 @@ async function exerciseRepair(t, migrate) {
   fs.writeFileSync(path.join(legacy, "104_64.jpg"), Buffer.from("human"));
   const module = { exports: {} };
   let highLoad = true;
-  const profileIDs = new Set([101, 103]);
+  const profileIDs = new Set([101, 103, 105]);
   function find(id) {
     for (const folder of [current, legacy]) {
       for (const size of [32, 64, 128, 256, 512, 1024]) {
@@ -55,7 +55,11 @@ async function exerciseRepair(t, migrate) {
   const runtime = module.exports;
   t.after(async () => { await runtime.stopPortraitRepair(); fs.rmSync(dir, { recursive: true, force: true }); });
   const next = () => { const [timer] = timers; timers.delete(timer); timer.run(); return timer.delay; };
-  runtime.startPortraitRepair([{ characterID: 101 }, { characterID: 102 }, { characterID: 103 }]);
+  assert.equal(await runtime.ensurePortrait(105), true);
+  const existing = find(105);
+  const marker = new Date("2025-01-01T00:00:00Z");
+  fs.utimesSync(existing, marker, marker);
+  runtime.startPortraitRepair([101, 102, 103, 105].map(characterID => ({ characterID })));
   assert.equal(next(), 125);
   assert.equal(find(101), null);
   highLoad = false;
@@ -67,7 +71,8 @@ async function exerciseRepair(t, migrate) {
   }
   assert.ok(find(101));
   await runtime.stopPortraitRepair();
-  assert.deepEqual(fs.readdirSync(current), migrate ? ["101_256.jpg", "103_256.jpg"] : ["101_256.jpg"]);
+  assert.deepEqual(fs.readdirSync(current), migrate ? ["101_256.jpg", "103_256.jpg", "105_256.jpg"] : ["101_256.jpg", "105_256.jpg"]);
+  assert.equal(fs.statSync(existing).mtimeMs, marker.getTime());
   const bytes = fs.readFileSync(find(101));
   assert.equal(bytes.subarray(0,3).toString("hex"), "ffd8ff");
   assert.equal(bytes.subarray(-2).toString("hex"), "ffd9");
@@ -76,6 +81,7 @@ async function exerciseRepair(t, migrate) {
     assert.equal(fs.existsSync(path.join(legacy,"103_128.png")),false);
     const backup = path.dirname(journal);
     const archived = fs.readdirSync(backup).sort();
+    assert.equal(archived.length, 3);
     for (const [name, expected] of [["103_64.jpg", "custom"], ["103_128.png", "corrupt"]]) {
       assert.equal(fs.readFileSync(path.join(backup, archived.find(item => item.endsWith(name))), "utf8"), expected);
     }

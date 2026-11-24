@@ -2,8 +2,8 @@
   "schemaVersion": 3,
   "id": "evejs-playerbots-native",
   "displayName": "Playerbots (Windows, Luna Update)",
-  "version": "0.2.152.13",
-  "description": "Native EveJS 261115.2 Playerbots with Luna recruitment, corporation income, portrait repair, Windows multicore support, and the upstream dashboard and performance updates.",
+  "version": "0.2.152.16",
+  "description": "Windows Native Luna Playerbots with level 1 Security, Mining, and Distribution agent work, corporation income, and stock or multicore support.",
   "kind": "source-integrated",
   "supportedBackends": [
     "native"
@@ -118,6 +118,22 @@
         "file": "options",
         "key": [
           "rosterSeedBatchSize"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Pause roster seeding above EveJS CPU (%)",
+        "group": "Population",
+        "type": "integer",
+        "default": 85,
+        "minimum": 25,
+        "maximum": 900,
+        "advanced": true,
+        "description": "Pause new bot creation above this CPU usage for the EveJS process. 100% is one logical CPU's worth of work. A lower threshold gives gameplay more headroom.",
+        "id": "rosterSeedMaxProcessCpuPercent",
+        "file": "options",
+        "key": [
+          "rosterSeedMaxProcessCpuPercent"
         ],
         "restart": "game_server"
       },
@@ -333,10 +349,10 @@
       },
       {
         "label": "Player corporation bot profit share (%)",
-        "description": "Share of each bot\u2019s cumulative net profit paid to its player-led corporation. Set 0 to disable new contributions.",
+        "description": "Share of each bot’s cumulative net profit paid to its player-led corporation. Set 0 to disable new contributions.",
         "group": "Corporation income",
         "type": "integer",
-        "default": 60,
+        "default": 75,
         "minimum": 0,
         "maximum": 100,
         "id": "playerCorpProfitSharePercent",
@@ -351,7 +367,7 @@
         "description": "Share of successful operation profit paid to corporations with a bot CEO.",
         "group": "Corporation income",
         "type": "integer",
-        "default": 20,
+        "default": 35,
         "minimum": 0,
         "maximum": 100,
         "id": "botCorpOperationSharePercent",
@@ -412,6 +428,62 @@
         "file": "options",
         "key": [
           "corporationEmblems"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Assign agent missions automatically",
+        "description": "When autonomous work is enabled, fitted pilots can take level 1 Security, Mining, and Distribution jobs from nearby high-security agents.",
+        "group": "Agent missions",
+        "type": "boolean",
+        "default": true,
+        "id": "agentMissionsEnabled",
+        "file": "options",
+        "key": [
+          "agentMissionsEnabled"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Maximum concurrent agent missions",
+        "description": "Cap new mission assignments across the server. Use 0 to stop new assignments while active missions can finish.",
+        "group": "Agent missions",
+        "type": "integer",
+        "default": 12,
+        "minimum": 0,
+        "maximum": 32,
+        "id": "maxConcurrentAgentMissions",
+        "file": "options",
+        "key": [
+          "maxConcurrentAgentMissions"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Map telemetry save interval (seconds)",
+        "group": "Disk writes",
+        "description": "Batches jump history and map visit statistics in RAM. Clean shutdown saves pending statistics.",
+        "type": "integer",
+        "default": 60,
+        "minimum": 2,
+        "maximum": 120,
+        "id": "mapSaveSeconds",
+        "file": "options",
+        "key": [
+          "mapSaveSeconds"
+        ],
+        "restart": "game_server"
+      },
+      {
+        "label": "Write verbose diagnostic files",
+        "group": "Disk writes",
+        "description": "Enable only while tracing. Server health, the main server log and lifecycle logging remain available.",
+        "type": "boolean",
+        "default": false,
+        "id": "verboseTraceFiles",
+        "file": "options",
+        "key": [
+          "verboseTraceFiles"
         ],
         "restart": "game_server"
       }

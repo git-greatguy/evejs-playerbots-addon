@@ -215,8 +215,9 @@ Recreate the services after editing `.env` (`playerbots.py restart`). The
 
 The add-on creates pilots in small batches (5 every 15 seconds by default,
 at most 10 per batch) after the server has taken two load samples. It yields
-between pilots and pauses by itself above 250 ms event-loop p95, 95% server
-CPU, or when one pilot takes over a second to create. Settings and `.env` can
+between pilots and pauses by itself above 250 ms event-loop p95, 900% server
+CPU (100% is one CPU core; the default threshold is 85%), or when one pilot
+takes over a second to create. Settings and `.env` can
 make seeding more cautious but cannot raise those caps. The seeder never
 removes bots; a roster above the target is reported and left alone.
 `/playerbots seed <30-15000>` (staff) sets the target and switches seeding on;
@@ -236,9 +237,9 @@ shards are filled first. A human who takes the CEO seat of a bot corporation
 counts as one extra member. Bot CEOs train the member-limit skills, and the
 persisted member limit follows them.
 
-Bots in a player-led corporation pay it 60% of their cumulative net profit
+Bots in a player-led corporation pay it 75% of their cumulative net profit
 (wallet earnings minus business costs, with the 1 billion ISK starting grant
-counted as capital, not loss). Bots in a bot-led corporation pay it 20% of
+counted as capital, not loss). Bots in a bot-led corporation pay it 35% of
 each profitable job.
 
 ### Work limits and director timing
@@ -335,7 +336,7 @@ seeding, choose the bounded batch size and interval, and show batch history,
 EveJS event-loop delay, and CPU load. Seeding runs from the separate add-on
 process and uses an authenticated internal API. It waits for two load samples,
 yields between pilots, and automatically backs off above hard caps of 250 ms
-event-loop p95, 95% process CPU, or 1,000 ms for a single pilot creation.
+event-loop p95, 900% process CPU, or 1,000 ms for a single pilot creation.
 Dashboard and environment values can lower these limits but cannot raise them.
 The staff `/playerbots seed <target>` command enables this worker rather than
 doing synchronous bulk work. Startup roster seeding is off by default; an
@@ -946,7 +947,7 @@ This seed-capital fallback does not count the initial grant as profit and does
 not use the corporation wallet. The market package includes the structure
 hull and its type-required Quantum Core, must be available at one station, and
 is capped at 1B ISK. The director prefers safe non-Jita supply and uses Jita
-only when no such supply exists. The 60% cumulative net-profit share for bots in
+only when no such supply exists. The 75% cumulative net-profit share for bots in
 corporations with a human CEO is unchanged.
 
 An 8,000 m³ package uses a Tayra fitted with four Expanded Cargohold II modules.
@@ -1117,6 +1118,25 @@ sovereignty specialists may pursue eligible neutral Hub captures or active
 campaign command nodes through the normal Entosis, fuel, timer, and safety
 authorities. Other corporations join only through the standard application and
 approval flow.
+
+### Agent missions
+
+Since Luna 0.2.152.14 (by @rizonx), idle pilots can run level 1 missions for
+EveJS's own agents: **Security** (combat sites) for security pilots, **Mining**
+for industry pilots and **Distribution** (courier) for trade pilots. A pilot
+takes a mission only from a high-security agent (0.45 or better) within 10
+jumps, and only missions the bot can finish and check through the game:
+placeholder, important and epic-arc missions are skipped, and a courier offer
+whose cargo does not fit the hold is declined. Mission rewards come from the
+agent through the normal wallet journal, and the bot's corporation share is
+paid once per mission even if the server restarts mid-turn-in. Human-controlled
+pilots are never assigned missions.
+
+`EVEJS_PLAYER_BOTS_AGENT_MISSIONS_ENABLED=0` (Windows: **Configure → Agent
+missions**) stops new assignments. `EVEJS_PLAYER_BOTS_MAX_AGENT_MISSIONS`
+(default 12, at most 32) caps how many run at once across the server, with at
+most four new ones per director pass; `0` lets running missions finish without
+starting new ones.
 
 ### Local defense (optional)
 
@@ -1351,6 +1371,38 @@ pass stops yielding after two seconds of accumulated waiting and finishes in
 one go; the Performance page counts those passes. Set the budget to `0` to run
 each pass in one slice, as earlier releases did; the pass is still measured.
 
+### Disk writes
+
+Luna 0.2.152.15 (by @rizonx) cut the server's routine disk writes:
+
+- **Bot tasks are saved one row each.** Earlier releases rewrote the whole
+  task queue, history included, on every task change; a busy server wrote
+  hundreds of kilobytes per change. The first task change after upgrading
+  moves the queue into per-task rows in one transaction. A downgrade to an
+  older Playerbots needs the GameStore backup taken before the upgrade,
+  because older releases cannot read the new rows.
+- **Bot, scheduler and map saves are written once.** On the synchronous save
+  path these tables commit straight to SQLite in one owner-checked
+  transaction, instead of also copying the same data into the recovery
+  journal. Wallet, inventory, dungeon and mining saves keep their existing
+  safeguards.
+- **Map statistics are checkpointed.** Jump and visit statistics stay in
+  memory and are saved every `EVEJS_PLAYER_BOTS_MAP_SAVE_SECONDS` (default
+  60, 2–120) even while the map is busy, and on a clean stop. A crash can
+  lose up to that many seconds of statistics; `2` restores the old
+  save-after-two-quiet-seconds behaviour.
+- **Verbose trace files are off.** `EVEJS_PLAYER_BOTS_VERBOSE_TRACE_FILES=0`
+  (the default) stops EveJS's detailed sync-ledger, movement, warp,
+  jump-timing, NPC combat, undock, inventory, session-change and ball debug
+  files, which reached hundreds of megabytes. The main server log, server
+  health and lifecycle logs still write. Set it to `1` for a short
+  diagnostic session.
+
+To see what is still writing on Windows, open `resmon.exe` → **Disk** during
+five representative minutes and sort **Write (B/sec)**; count
+`gamestore.sqlite-wal` and `gamestore.sqlite` together, and `_local\logs`
+separately.
+
 ## Troubleshooting
 
 ### The dashboard does not open on port 8080
@@ -1445,6 +1497,13 @@ by hand. It makes no changes in this case. Preserve your
 local edits, compare the reported file with `integration/server/<path>`, and
 port the changes deliberately. Do not delete the conflict file to make the
 installer proceed.
+
+Upgrading to the release with Luna 0.2.152.16 adds
+`server/src/gameStore/sqliteStore.js` to the managed files. If you hand-added
+`customsInspectionCases: ["byCaseID"]` to it (the companion to the customs
+change merged as PR #14), that line is already in the new file: check that
+it is your only change, then run the install again with
+`--replace-conflicts`. Your copy goes into the install backup.
 
 ### `docker compose config` fails
 

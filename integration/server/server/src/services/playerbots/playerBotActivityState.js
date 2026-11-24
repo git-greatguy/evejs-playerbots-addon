@@ -21,6 +21,7 @@ const STATE_LABELS = Object.freeze(Object.fromEntries(STATES.map((state) => [sta
 
 const KIND_LABELS = Object.freeze({
   "accept": "Accepting a contract",
+  "agent-mission": "Running an agent mission",
   "alliance-courier": "Running an alliance courier",
   "alliance-founding": "Founding an alliance",
   "blueprint": "Buying a blueprint",
@@ -57,6 +58,12 @@ const KIND_LABELS = Object.freeze({
 });
 
 const STAGE_LABELS = Object.freeze({
+  "agent": "travelling to the agent",
+  "objective": "working on the mission objective",
+  "pickup": "collecting the courier package",
+  "site": "travelling to the mission site",
+  "turn-in": "returning for the mission hand-in",
+  "share": "paying the corporation's share",
   "acquire-blueprint": "getting the blueprint",
   "acquire-materials": "getting materials",
   "buy": "buying",

@@ -183,6 +183,10 @@ if (
   throw error;
 }
 const FLUSH_DELAY_MS = 2000; // debounce: flush 2s after last write
+const configuredMapSeconds = Number(process.env.EVEJS_PLAYER_BOTS_MAP_SAVE_SECONDS ?? 60);
+const MAP_FLUSH_MS = (Number.isInteger(configuredMapSeconds) && configuredMapSeconds >= 2 &&
+  configuredMapSeconds <= 120 ? configuredMapSeconds : 60) * 1000;
+const DIRECT_COMMIT_TABLES = new Set(["playerBots", "scheduledJobs", "mapTelemetry"]);
 // A failed flush is retried after twice the previous wait (4 s, 8 s, ...), up
 // to this cap, until a flush of that table succeeds.
 const FLUSH_RETRY_MAX_DELAY_MS = 60_000;
@@ -1734,6 +1738,15 @@ function flushSqliteTable(table, options = {}) {
     return 0;
   }
 
+  const useWorker = persistenceWorker.isEnabled() && options.sync !== true;
+  if (!useWorker && DIRECT_COMMIT_TABLES.has(table)) {
+    sqliteStore.commitSynchronousChanges(table, upserts, deletes, requirePersistenceOwnerFence());
+    advanceFlushBaseline(table, upserts, deletes);
+    fullDirty.delete(table);
+    delete dirtyRowKeys[table];
+    return upserts.length + deletes.length;
+  }
+
   // The journal INSERT is synchronous by design: the exact batch and its
   // AUTOINCREMENT identity must be durable before dirty tracking is released or
   // any asynchronous worker can observe the operation.
@@ -1743,7 +1756,6 @@ function flushSqliteTable(table, options = {}) {
     deletes,
     requirePersistenceOwnerFence(),
   );
-  const useWorker = persistenceWorker.isEnabled() && options.sync !== true;
   inFlightFlushes.set(table, { ...operation, submittedToWorker: useWorker });
   fullDirty.delete(table);
   delete dirtyRowKeys[table];
@@ -1905,6 +1917,10 @@ function holdTableFlush(table) {
 function scheduleFlush(table) {
   dirty.add(table);
 
+  // Keep the first deadline under continuous jumps. Statistics already live in
+  // the GameStore cache and remain visible before their next checkpoint.
+  const mapBatch = table === "mapTelemetry" && MAP_FLUSH_MS > FLUSH_DELAY_MS;
+  if (mapBatch && flushTimers[table]) return;
   if (flushTimers[table]) {
     clearTimeout(flushTimers[table]);
   }
@@ -1915,7 +1931,8 @@ function scheduleFlush(table) {
 
   flushTimers[table] = setTimeout(() => {
     flushTable(table);
-  }, FLUSH_DELAY_MS);
+  }, mapBatch ? MAP_FLUSH_MS : FLUSH_DELAY_MS);
+  if (mapBatch) flushTimers[table].unref?.();
 }
 
 function flushTable(table) {
