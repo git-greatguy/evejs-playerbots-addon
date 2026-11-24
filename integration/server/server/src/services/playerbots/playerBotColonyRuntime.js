@@ -36,8 +36,8 @@ const EXTRACTOR_TYPE_ID = 2848;
 const P2_COMMAND_CENTER_LEVEL = 4;
 const MAX_PLANETARY_TIER = 4;
 const PI_PLAN_VERSION = 3;
-// A command center takes 1,000 m³: carried in a Badger bought in Jita.
-const HAULER_TYPE_ID = 648;
+// A command center can be carried by a trained, compatible industrial hull.
+const { HAULER_TYPE_IDS } = require("./playerBotTransportHulls");
 const MAX_KIT_SPEND = 35_000_000;
 let kitPurchaseQueue = Promise.resolve();
 
@@ -581,9 +581,9 @@ function planForOperation(operation) {
   };
 }
 
-function saveColonyTarget(operation, bot, solarSystemID, kit) {
+function saveColonyTarget(operation, bot, solarSystemID, kit, selectedPlanet = null) {
   const commandCenterUpgradeLevel = getCommandCenterUpgradeLevel(bot.characterID);
-  const planet = candidatePlanets(solarSystemID, bot.characterID, {
+  const planet = selectedPlanet || candidatePlanets(solarSystemID, bot.characterID, {
     commandCenterUpgradeLevel,
   })[0];
   if (!planet) return null;
@@ -599,6 +599,55 @@ function saveColonyTarget(operation, bot, solarSystemID, kit) {
   });
   kit.save(operation);
   return planet;
+}
+
+async function selectStockedColonyTarget(operation, bot, kit, inventory, trade, jita) {
+  const preferred = worldData.getCelestialByID(Number(operation.planetID));
+  const jitaSystemID = Number(worldData.getStationByID(jita)?.solarSystemID);
+  const commandCenterUpgradeLevel = getCommandCenterUpgradeLevel(bot.characterID);
+  const systems = new Set([Number(operation.solarSystemID) || jitaSystemID, jitaSystemID]);
+  const candidates = preferred ? [preferred] : [];
+  for (const systemID of systems) {
+    candidates.push(...candidatePlanets(systemID, bot.characterID, { commandCenterUpgradeLevel }));
+  }
+  // Keep only the first ranked planet per center type to avoid repeated quotes.
+  const byCenter = new Map();
+  for (const planet of candidates) {
+    const typeID = getCommandCenterTypeID(planet.typeID);
+    if (typeID && !byCenter.has(typeID)) byCenter.set(typeID, planet);
+  }
+  const owns = (typeID) => inventory.countCargo(bot, typeID) || inventory.countHangar(bot, jita, typeID);
+  let target = [...byCenter].find(([typeID]) => owns(typeID))?.[1];
+  let quoteError = "";
+  const budget = MAX_KIT_SPEND - (Number(operation.spent) || 0);
+  if (!target) {
+    for (const [typeID, planet] of byCenter) {
+      const quote = await trade.readRegionalMarketQuote(bot.characterName, typeID);
+      if (!quote.success) {
+        quoteError = quote.message || "Could not verify Command Center stock.";
+        continue;
+      }
+      if (quote.sellOrders.some((offer) => offer.quantity >= 1 && offer.price > 0 && offer.price <= budget)) {
+        target = planet;
+        break;
+      }
+    }
+  }
+  if (!target) return { error: quoteError || "No compatible planet has an affordable Command Center in stock." };
+  if (Number(target.itemID) !== Number(operation.planetID)) {
+    const systemID = Number(target.solarSystemID);
+    const currentStation = worldData.getStationByID(Number(operation.colonyStationID));
+    const stationID = Number(currentStation?.solarSystemID) === systemID
+      ? Number(currentStation.stationID)
+      : Number(worldData.getStationsForSystem(systemID)?.[0]?.stationID) || (systemID === jitaSystemID ? jita : 0);
+    if (!stationID) return { error: "No station is available for the alternative colony system." };
+    if (!saveColonyTarget(operation, bot, systemID, kit, target)) return { error: "Could not plan the alternative colony." };
+    operation.colonyStationID = stationID;
+    kit.record(operation, "Selected an alternative colony planet with an available " +
+      getTypeName(getCommandCenterTypeID(target.typeID), "Command Center") + ".");
+    kit.save(operation);
+  }
+  return {};
 }
 
 function getTypeName(typeID, fallback = String(typeID)) {
@@ -769,6 +818,8 @@ async function advanceColony(operation, bot, kit) {
           operation.purchaseSourceStationID = nextJitaStationID;
           operation.stage = "to-purchase-source";
           kit.record(operation, `Jita station ${sourceStationID} is out of type ${typeID}; trying stocked Jita station ${nextJitaStationID}.`);
+        } else if (HAULER_TYPE_IDS.includes(typeID) || typeID === Number(operation.commandCenterTypeID)) {
+          operation.stage = "return-to-jita";
         } else if (isJitaSource) {
           return kit.block(operation, "holding", `No Jita seed station has a live sell order for type ${typeID}.`);
         } else {
@@ -792,14 +843,14 @@ async function advanceColony(operation, bot, kit) {
     if (!bought.success) return kit.block(operation, bought.outcomeUnknown ? "review" : "holding", bought.message);
     operation.spent = Math.round(((Number(operation.spent) || 0) + Number(bought.spent || 0)) * 100) / 100;
     operation.pending = null;
-    const typeIsHauler = typeID === HAULER_TYPE_ID;
+    const typeIsHauler = HAULER_TYPE_IDS.includes(typeID);
     if (typeIsHauler) {
-      const hull = inventory.listHangar(bot, sourceStationID, HAULER_TYPE_ID)[0];
+      const hull = inventory.listHangar(bot, sourceStationID, typeID)[0];
       if (!operation.previousShipID) {
         operation.previousShipID = Number(require("./playerBotSpaceRuntime").getActorSession(bot).shipID) || null;
       }
-      const boarded = hull ? require("./playerBotOperationRuntime").boardShip(bot, hull) : { error: "the purchased Badger is missing from the hangar" };
-      if (boarded.error) return kit.block(operation, "holding", `Could not board the Badger: ${boarded.error}.`);
+      const boarded = hull ? require("./playerBotOperationRuntime").boardShip(bot, hull) : { error: "the purchased hauler is missing from the hangar" };
+      if (boarded.error) return kit.block(operation, "holding", `Could not board the hauler: ${boarded.error}.`);
     } else {
       const stack = inventory.listHangar(bot, sourceStationID, typeID)[0];
       if (!stack) return kit.block(operation, "review", "The purchased Command Center is missing from the source hangar.");
@@ -829,6 +880,8 @@ async function advanceColony(operation, bot, kit) {
         return kit.block(operation, "blocked", "No supported PI planet with a matching Command Center and production recipe is available in Jita.");
       }
     }
+    const target = await selectStockedColonyTarget(operation, bot, kit, inventory, trade, jita);
+    if (target.error) return kit.block(operation, "holding", target.error);
     const plan = planForOperation(operation);
     const commandCenterTypeID = plan.commandCenterTypeID;
     const commandCenterName = getTypeName(commandCenterTypeID, "Command Center");
@@ -836,57 +889,72 @@ async function advanceColony(operation, bot, kit) {
     if (!inventory.countCargo(bot, commandCenterTypeID) && inventory.getCargoBayFree(bot) < ccVolume) {
       // Too small a hold: buy (once) and board a hauler, keeping the old ship.
       const operations = require("./playerBotOperationRuntime");
-      if (!inventory.countHangar(bot, jita, HAULER_TYPE_ID)) {
-        const regionalSupply = await trade.readBestAskOutsideJita(bot.characterName, HAULER_TYPE_ID);
-        if (!regionalSupply.success) return kit.block(operation, "holding", `Could not verify Badger supply outside Jita; purchase paused safely. ${regionalSupply.message}`);
-        if (regionalSupply.bestAsk) {
-          operation.purchaseTypeID = HAULER_TYPE_ID;
-          operation.purchaseSourceStationID = Number(regionalSupply.bestAsk.stationID);
+      const skillState = require("../skills/skillState");
+      const getSkillMap = skillState.getCachedCharacterSkillMap || skillState.getCharacterSkillMap;
+      const skills = getSkillMap(bot.characterID);
+      const registry = require("../inventory/itemTypeRegistry");
+      const compatibleTypes = HAULER_TYPE_IDS.filter((typeID) =>
+        Number(registry.resolveItemByTypeID(typeID)?.capacity) >= ccVolume &&
+        operations.requiredSkillsForType(typeID).every(([skillID, level]) => {
+          const record = skills && (skills.get ? skills.get(skillID) : skills[skillID]);
+          return (Number(record?.trainedSkillLevel ?? record?.skillLevel) || 0) >= level;
+        }),
+      );
+      let hull = compatibleTypes.map((typeID) => inventory.listHangar(bot, jita, typeID)[0]).find(Boolean);
+      const budget = MAX_KIT_SPEND - (Number(operation.spent) || 0);
+      let quoteError = "";
+      for (const typeID of compatibleTypes) {
+        if (hull) break;
+        const result = await trade.readBestAskOutsideJita(bot.characterName, typeID);
+        if (!result.success) {
+          quoteError = result.message || "Could not verify regional supply.";
+          continue;
+        }
+        const quote = await trade.readQuote(bot.characterName, typeID);
+        if (!quote.success) {
+          quoteError = quote.message || "Could not query the Jita seed market.";
+          continue;
+        }
+        const regional = result.bestAsk;
+        const local = quote.bestAsk;
+        const regionalStation = regional && Number(regional.price) <= budget ? Number(regional.stationID) : 0;
+        const seedStation = local ? 0 : economy.findBestJitaSeedStation?.([{ typeID, quantity: 1 }], [jita]) || 0;
+        const sourceStationID = regionalStation || seedStation;
+        if (sourceStationID) {
+          operation.purchaseTypeID = typeID;
+          operation.purchaseSourceStationID = sourceStationID;
           operation.stage = "to-purchase-source";
           kit.save(operation);
           return { delayMs: 3000 };
         }
-        const quote = await trade.readQuote(bot.characterName, HAULER_TYPE_ID);
-        if (!quote.success) return kit.block(operation, "holding", quote.message || "Could not query the Jita seed market for Badgers.");
-        if (!quote.bestAsk) {
-          const seedStationID = economy.findBestJitaSeedStation?.([{ typeID: HAULER_TYPE_ID, quantity: 1 }], [jita]) || 0;
-          if (seedStationID) {
-            operation.purchaseTypeID = HAULER_TYPE_ID;
-            operation.purchaseSourceStationID = Number(seedStationID);
-            operation.stage = "to-purchase-source";
-            kit.record(operation, `Jita IV - Moon 4 has no Badgers; sourcing one from stocked Jita station ${seedStationID}.`);
-            kit.save(operation);
-            return { delayMs: 3000 };
-          }
-          return kit.block(operation, "holding", "No Badgers are available at any seeded Jita station.");
-        }
-        if (Number(quote.bestAsk.price) > MAX_KIT_SPEND - (Number(operation.spent) || 0)) return kit.block(operation, "holding", "The Badger price exceeds the PI budget.");
-        operation.pending = capturePurchaseMarker(bot, inventory, HAULER_TYPE_ID, jita);
+        if (!local || Number(local.price) > budget) continue;
+        operation.pending = capturePurchaseMarker(bot, inventory, typeID, jita);
         kit.save(operation);
-        const bought = await buyOneWithQuoteRefresh(
-          trade, bot.characterName, HAULER_TYPE_ID, quote.bestAsk.price,
-          MAX_KIT_SPEND - (Number(operation.spent) || 0),
-        );
-        if (!bought.success && !bought.outcomeUnknown) { operation.pending = null; kit.save(operation); }
+        const bought = await buyOneWithQuoteRefresh(trade, bot.characterName, typeID, local.price, budget);
+        if (!bought.success && bought.outcomeUnknown) return kit.block(operation, "review", bought.message);
+        operation.pending = null;
+        if (bought.success) {
+          operation.spent = Math.round(((Number(operation.spent) || 0) + Number(bought.spent || 0)) * 100) / 100;
+          hull = inventory.listHangar(bot, jita, typeID)[0];
+        }
+        kit.save(operation);
+        if (bought.success && !hull) return kit.block(operation, "review", "The purchased hauler is missing from the hangar.");
         if (!bought.success && bought.sourceAvailable && Number(bought.sourceStationID) > 0) {
-          operation.purchaseTypeID = HAULER_TYPE_ID;
+          operation.purchaseTypeID = typeID;
           operation.purchaseSourceStationID = Number(bought.sourceStationID);
           operation.stage = "to-purchase-source";
           kit.save(operation);
           return { delayMs: 3000 };
         }
-        if (!bought.success) return kit.block(operation, bought.outcomeUnknown ? "review" : "holding", bought.message);
-        operation.spent = Math.round(((Number(operation.spent) || 0) + Number(bought.spent || 0)) * 100) / 100;
-        operation.pending = null;
-        kit.save(operation);
+        if (!bought.success) quoteError = bought.message || "Could not buy the hauler.";
       }
-      const hull = inventory.listHangar(bot, jita, HAULER_TYPE_ID)[0];
+      if (!hull) return kit.block(operation, "holding", quoteError || "No affordable hauler with enough general cargo that this pilot can fly is available.");
       if (!operation.previousShipID) {
         operation.previousShipID = Number(require("./playerBotSpaceRuntime").getActorSession(bot).shipID) || null;
         kit.save(operation);
       }
-      const boarded = hull ? operations.boardShip(bot, hull) : { error: "Badger not found in the hangar" };
-      if (boarded.error) return kit.block(operation, "holding", `Could not board the Badger: ${boarded.error}.`);
+      const boarded = hull ? operations.boardShip(bot, hull) : { error: "Hauler not found in the hangar" };
+      if (boarded.error) return kit.block(operation, "holding", `Could not board the hauler: ${boarded.error}.`);
       kit.save(operation);
       return { delayMs: 3000 };
     }
@@ -894,7 +962,7 @@ async function advanceColony(operation, bot, kit) {
       if (!inventory.countHangar(bot, jita, commandCenterTypeID)) {
         const regionalSupply = await trade.readBestAskOutsideJita(bot.characterName, commandCenterTypeID);
         if (!regionalSupply.success) return kit.block(operation, "holding", `Could not verify ${commandCenterName} supply outside Jita; purchase paused safely. ${regionalSupply.message}`);
-        if (regionalSupply.bestAsk) {
+        if (regionalSupply.bestAsk && Number(regionalSupply.bestAsk.price) <= MAX_KIT_SPEND - (Number(operation.spent) || 0)) {
           operation.purchaseTypeID = commandCenterTypeID;
           operation.purchaseSourceStationID = Number(regionalSupply.bestAsk.stationID);
           operation.stage = "to-purchase-source";
