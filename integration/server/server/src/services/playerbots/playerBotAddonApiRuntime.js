@@ -155,11 +155,11 @@ function createPlayerBotAddonApiRuntime(options = {}) {
 
   function recommendedCycleConcurrency(settings = configuration.getSettings()) {
     const configured = Math.max(1, Math.min(100, Math.trunc(Number(settings.addonConcurrency) || 100)));
-    const loopP95Ms = currentEventLoopP95Ms();
-    if (loopP95Ms > 250 || processCpuPercent > 95) return 1;
-    if (loopP95Ms > 100 || processCpuPercent > 85) return Math.min(2, configured);
-    if (loopP95Ms > 50 || processCpuPercent > 70) return Math.min(4, configured);
-    return configured;
+    const limits = effectiveSeedLimits(settings);
+    const cpuLoad = processCpuPercent / limits.processCpuPercent;
+    const eventLoopLoad = currentEventLoopP95Ms() / limits.eventLoopP95Ms;
+    const load = Math.min(1, Math.max(0, cpuLoad, eventLoopLoad));
+    return Math.round(1 + (configured - 1) * (1 - load));
   }
 
   async function reserveCycleCapacity(cycleID, characterID, timeoutMs = 120_000) {
