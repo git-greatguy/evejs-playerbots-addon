@@ -6,6 +6,7 @@
 // procurement, deployment, core-install and service-provision operations.
 
 const worldData = require("../../space/worldData");
+const { HAULER_TYPE_IDS } = require("./playerBotTransportHulls");
 
 const MAX_DEPLOYMENT_ROUTE_HOPS = 24;
 const POSITION_SEARCH_RADII = Object.freeze([12_000, 25_000, 50_000, 100_000, 250_000, 500_000, 750_000]);
@@ -586,7 +587,7 @@ function structureTransportHullTypes(bot, requiredVolume) {
   const getSkillMap = skillState.getCachedCharacterSkillMap || skillState.getCharacterSkillMap;
   const skills = getSkillMap(bot.characterID);
   const registry = require("../inventory/itemTypeRegistry");
-  return [648, 649]
+  return HAULER_TYPE_IDS
     .map((typeID) => {
       const type = registry.resolveItemByTypeID(typeID) || {};
       const capacity = Number(type.capacity) || 0;
@@ -657,9 +658,10 @@ async function ensureCoreTransport(operation, bot, kit, core) {
       kit.save(operation);
     } else {
       const transportTypes = structureTransportHullTypes(bot, volume);
-      const selected = transportTypes[0];
+      const selected = transportTypes.find((type) => type.typeID === Number(operation.transportHullTypeID)) ||
+        transportTypes[0];
       if (!selected) {
-        return kit.block(operation, "holding", `No trained Badger or Tayra with enough cargo capacity is available for the ${volume} m³ Quantum Core.`);
+        return kit.block(operation, "holding", `No trained pilot-compatible hauler with enough cargo capacity is available for the ${volume} m³ Quantum Core.`);
       }
       const operations = require("./playerBotOperationRuntime");
       operation.transportHullTypeID = selected.typeID;
@@ -692,6 +694,18 @@ async function ensureCoreTransport(operation, bot, kit, core) {
           kit.record(operation, `No ${selected.typeID} hauler is for sale at the first safe source; verified market stock is at ${operation.transportStationID}.`);
           kit.save(operation);
           return { delayMs: 5000 };
+        }
+        if (bought.unavailable && transportTypes.length > 1) {
+          const nextIndex = transportTypes.indexOf(selected) + 1;
+          operation.transportHullTypeID = transportTypes[nextIndex % transportTypes.length].typeID;
+          operation.transportStationID = null;
+          operation.transportMarketStationID = null;
+          operation.routeTaskID = null;
+          if (nextIndex < transportTypes.length) {
+            kit.record(operation, `No hauler of type ${selected.typeID} is available; trying compatible type ${operation.transportHullTypeID}.`);
+            kit.save(operation);
+            return { delayMs: 5000 };
+          }
         }
         if (bought.unavailable || bought.error || Number(bought.bought) < 1) {
           return kit.block(operation, "holding", bought.error || `No ${selected.typeID} hauler is available within the protected ${STRUCTURE_TRANSPORT_BUDGET_ISK.toFixed(0)} ISK logistics budget.`);
