@@ -71,7 +71,7 @@ mode or Server Panel? Give the installer your extra Compose files once; see
 You need EveJS **261115.2** run natively with **Node.js 24+**, and Python
 3.10+ for the installer. The native package is
 `evejs-playerbots-windows-v0.2.152.16.zip`, built from the same source as the
-Docker add-on and carrying the Luna update by @rizonx.
+Docker add-on and carrying the Luna update by @xrizonx.
 
 - **Through EVEJS Launcher (1.0.91+), recommended if you use it.** The
   installer shows you the package; in the launcher stop Game and Market,
@@ -398,7 +398,7 @@ Playerbots. Thanks to them for the collaboration.
 **Contributors:** [@gzy40347](https://github.com/gzy40347),
 [@ChaosRemnant](https://github.com/ChaosRemnant),
 [@ubermidas](https://github.com/ubermidas) (dashboard overhaul, corporation
-headquarters, housekeeping), [@rizonx](https://github.com/rizonx) (Luna
+headquarters, housekeeping), [@xrizonx](https://github.com/xrizonx) (Luna
 update: corporation recruitment, corporation income, portrait repair,
 performance work and the Windows launcher package)
 

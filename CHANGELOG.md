@@ -25,7 +25,7 @@ On the `corp-logos` branch of the ubermidas fork.
 On the `housekeeping` branch of the ubermidas fork, offered upstream.
 Docker add-on 0.2.152, native package 0.2.152.16.
 
-### Luna 0.2.152.14 to 0.2.152.16 by @rizonx
+### Luna 0.2.152.14 to 0.2.152.16 by @xrizonx
 
 Merged from rizonx's native package. The native package built here installs
 the same files as his 0.2.152.16, except that `sqliteStore.js` also keeps the
@@ -68,7 +68,7 @@ per-task rows.
   a direct install in place, and `--remove` restores the original files.
 - The release ZIP carries the native package, so one download covers both.
 
-### Luna 0.2.152.13 by @rizonx
+### Luna 0.2.152.13 by @xrizonx
 
 Merged from rizonx's native package; the native package built here installs
 byte-identical files.
@@ -166,7 +166,7 @@ Known limits:
   launches and 1 in 20 sets up colonies.
 - Customs inspection cases are saved one row at a time.
 
-## Luna update by @rizonx (Windows 0.2.152.10)
+## Luna update by @xrizonx (Windows 0.2.152.10)
 
 Merged into the fork, so it ships with both the Docker add-on and the
 Windows package.

@@ -2,13 +2,13 @@
 
 This package runs Playerbots inside a native Windows EveJS server managed by
 EVEJS Launcher, with no Docker. It carries the Luna update by
-[@rizonx](https://github.com/rizonx) (corporation recruitment, corporation
+[@xrizonx](https://github.com/xrizonx) (corporation recruitment, corporation
 income, portrait repair, level 1 agent missions, Windows multicore support,
 fewer disk writes and other performance work) together with the overhauled
 operator dashboard from this repository.
 
 You need EveJS **261115.2**, EVEJS Launcher **1.0.91** or later and
-**Node.js 24** or later. This is @rizonx's *Playerbots 0.2.152.16 (Windows,
+**Node.js 24** or later. This is @xrizonx's *Playerbots 0.2.152.16 (Windows,
 Luna)* with one addition: `server/src/gameStore/sqliteStore.js` also saves
 customs inspection cases one row at a time, as the customs change merged
 upstream in PR #14 expects. Every other file it installs is identical.
@@ -48,7 +48,7 @@ re-enter the settings in **Configure**, then **Start Stack**. Leave your
 multicore files in place.
 
 The installer recognises the files earlier packages installed, including
-both builds named 0.2.152.11 (Luna and the ubermidas fork) and @rizonx's
+both builds named 0.2.152.11 (Luna and the ubermidas fork) and @xrizonx's
 0.2.152.13 to 0.2.152.16, and replaces them; it stops on anything else.
 
 Bot tasks move to a new storage layout on the first task change after this
