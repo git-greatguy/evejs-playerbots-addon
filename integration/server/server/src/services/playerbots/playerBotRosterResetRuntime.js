@@ -193,7 +193,7 @@ async function removePilot(characterID) {
   const character = deps.characters().getCharacterRecord(characterID);
   if (character && !character.isDeleted) {
     // Cancel orders while the pilot still has a session to act with.
-    const orders = deps.economy().listOpenOrdersForOwner(characterID);
+    const orders = (await deps.economy().listOpenOrdersForOwner(characterID));
     if (orders.length) {
       const session = space.getActorSession(bot);
       const market = deps.market();

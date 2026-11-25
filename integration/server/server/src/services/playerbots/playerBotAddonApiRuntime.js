@@ -158,11 +158,11 @@ function createPlayerBotAddonApiRuntime(options = {}) {
 
   function recommendedCycleConcurrency(settings = configuration.getSettings()) {
     const configured = Math.max(1, Math.min(100, Math.trunc(Number(settings.addonConcurrency) || 100)));
-    const loopP95Ms = currentEventLoopP95Ms();
-    if (loopP95Ms > 250 || processCpuPercent > 95) return 1;
-    if (loopP95Ms > 100 || processCpuPercent > 85) return Math.min(2, configured);
-    if (loopP95Ms > 50 || processCpuPercent > 70) return Math.min(4, configured);
-    return configured;
+    const limits = effectiveSeedLimits(settings);
+    const cpuLoad = processCpuPercent / limits.processCpuPercent;
+    const eventLoopLoad = currentEventLoopP95Ms() / limits.eventLoopP95Ms;
+    const load = Math.min(1, Math.max(0, cpuLoad, eventLoopLoad));
+    return Math.round(1 + (configured - 1) * (1 - load));
   }
 
   async function reserveCycleCapacity(cycleID, characterID, timeoutMs = 120_000) {
@@ -326,7 +326,7 @@ function createPlayerBotAddonApiRuntime(options = {}) {
     }
     if (request.method === "POST" && url.pathname === "/v1/dashboard/bot-command") {
       const body = await readBody(request);
-      const result = botCommands.runBotCommand(body.characterIDs, body.action, body.args || {});
+      const result = (await botCommands.runBotCommand(body.characterIDs, body.action, body.args || {}));
       if (typeof dashboard.invalidate === "function") dashboard.invalidate();
       logger.info(`[PlayerBotsAddon] Dashboard pilot order ${String(body.action).slice(0, 20)} pilots=${Array.isArray(body.characterIDs) ? body.characterIDs.length : 1}: ${String(result.message || "").slice(0, 160)}`);
       sendJson(response, result.success ? 200 : 400, result);

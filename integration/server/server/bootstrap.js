@@ -637,7 +637,7 @@ async function bootWorld(options = {}) {
     }
     if (stages.startTCP) {
       world.tcpServer = await startTCPServer(serviceManager);
-      const actorRecovery = playerBotSpaceRuntime.start();
+      const actorRecovery = await playerBotSpaceRuntime.start();
       log.info(
         `[PlayerBots] Space actor recovery complete attached=${actorRecovery.attachedCount} ` +
           `active=${actorRecovery.activeActors} failed=${actorRecovery.failedCount}.`,

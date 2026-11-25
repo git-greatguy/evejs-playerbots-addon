@@ -68,7 +68,7 @@ test("unknown kinds and stages fall back to words", () => {
   assert.equal(activity.describeWork("upgrade", "done"), "Upgrading ship");
 });
 
-test("pilot commands call the runtime and log per corporation", () => {
+test("pilot commands call the runtime and log per corporation", async () => {
   const calls = [];
   const logged = [];
   const bots = [bot(), bot({ characterID: 2, characterName: "Pilot Two" })];
@@ -83,14 +83,14 @@ test("pilot commands call the runtime and log per corporation", () => {
     corpCommands: { appendCommandLog: (corporationID, entry) => logged.push([corporationID, entry]) },
     logger: { warn() {} },
   });
-  const mined = commands.runBotCommand([1, 2, 3], "mine", { trips: 3, station: 60003760 });
+  const mined = await commands.runBotCommand([1, 2, 3], "mine", { trips: 3, station: 60003760 });
   assert.equal(mined.success, true);
   assert.deepEqual(mined.results.map((row) => row.success), [true, false, false]);
   assert.deepEqual(calls[0], ["mine", "Pilot One", 3, 60003760]);
   assert.equal(logged.length, 1);
   assert.match(logged[0][1].message, /1 accepted, 1 refused/);
-  assert.equal(commands.runBotCommand(Array.from({ length: 51 }, (_, i) => i + 1), "pause").success, false);
-  assert.equal(commands.runBotCommand([1], "explode").success, false);
+  assert.equal((await commands.runBotCommand(Array.from({ length: 51 }, (_, i) => i + 1), "pause")).success, false);
+  assert.equal((await commands.runBotCommand([1], "explode")).success, false);
 });
 
 function memoryStore(initial = {}) {

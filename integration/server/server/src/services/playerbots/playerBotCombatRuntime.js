@@ -2134,7 +2134,7 @@ async function advanceCombat(operation, bot, kit) {
         operation.marketStationID = normalizeID(operation.homeStationID) || operation.marketStationID;
         operation.optimizeMarketDestination = true;
         operation.siteIncomplete = true;
-        const replenishment = kit.startCombatReplenishment(operation, bot);
+        const replenishment = (await kit.startCombatReplenishment(operation, bot));
         if (!replenishment) {
           return kit.block(operation, "holding", `The combat fit for ${operation.siteLabel} is incomplete, and no safe same-hull replacement package is available yet. The active site remains reserved; the pilot will retry after market supply or wallet state changes.`);
         }

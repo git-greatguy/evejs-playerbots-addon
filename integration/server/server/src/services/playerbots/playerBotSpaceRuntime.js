@@ -690,9 +690,9 @@ function ensureCorporationBotsConnected(corporationID) {
   };
 }
 
-function reconcileConnectedCorporations() {
+async function reconcileConnectedCorporations() {
   if (!started) return [];
-  require("./playerBotDirectorRuntime").enforceConcurrentWorkLimit({ skipUpgradeMarketPlanning: true });
+  (await require("./playerBotDirectorRuntime").enforceConcurrentWorkLimit({ skipUpgradeMarketPlanning: true }));
   const corporationIDs = getHumanConnectedCorporationIDs();
   const presence = reconcileActorConnections({ humanCorporations: corporationIDs });
   if (require("./playerBotLoadController").getPlayerBotLoadController().shouldPauseLowPriorityWork()) {
@@ -1571,12 +1571,12 @@ function getStatusSummary() {
   };
 }
 
-function start() {
+async function start() {
   if (started) return getStatusSummary();
   started = true;
   require("./playerBotPortraitRuntime").startPortraitRepair(playerBots.listBotProfiles());
   const bots = playerBots.listBots();
-  const capacity = require("./playerBotDirectorRuntime").enforceConcurrentWorkLimit();
+  const capacity = (await require("./playerBotDirectorRuntime").enforceConcurrentWorkLimit({ skipUpgradeMarketPlanning: true }));
   const connection = reconcileActorConnections({ bots });
   const attachedCount = connection.attached;
   const failedCount = Math.max(0, connection.selected - connection.connected);

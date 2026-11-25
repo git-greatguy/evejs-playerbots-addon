@@ -720,6 +720,17 @@ async function travelToStation(operation, bot, stationID, store = OPERATION_STOR
   if (dockedStationID === Number(stationID)) return null;
   const destinationSystemID = stationSystemID(stationID);
   const currentSystemID = normalizePositiveInteger(character.solarSystemID);
+  const economy = require("./playerBotEconomyRuntime");
+  if (destinationSystemID === economy.JITA_SYSTEM_ID && currentSystemID && currentSystemID !== destinationSystemID) {
+    const origin = require("../../space/worldData").getSolarSystemByID(currentSystemID);
+    if (!operation.marketOriginRegionID && Number(origin?.regionID) > 0) {
+      operation.marketOriginRegionID = Number(origin.regionID);
+      store.save(operation);
+    }
+  } else if (destinationSystemID !== economy.JITA_SYSTEM_ID && operation.marketOriginRegionID) {
+    delete operation.marketOriginRegionID;
+    store.save(operation);
+  }
   if (currentSystemID !== destinationSystemID) {
     const route = ensureRouteTask(operation, bot, destinationSystemID);
     if (route.error) return store.block(operation, "blocked", route.error);
@@ -1534,9 +1545,9 @@ async function sellMiningOutput(operation, bot, stationID = operation.homeStatio
       ? economy.getListingReferencePrice({
       stationID,
       regionID,
-      asks: typeof economy.listSellOffers === "function" ? economy.listSellOffers(stack.typeID) : [],
+      asks: typeof economy.listSellOffers === "function" ? (await economy.listSellOffers(stack.typeID, regionID)) : [],
       bids: typeof economy.listPlayerBuyOrders === "function"
-        ? economy.listPlayerBuyOrders(100, stack.typeID, regionID) : [],
+        ? (await economy.listPlayerBuyOrders(100, stack.typeID, regionID)) : [],
       botOwnerIDs: typeof economy.getBotOwnerIDs === "function" ? economy.getBotOwnerIDs() : new Set(),
       stationIsJita: economy.isJitaStation,
       fallbackBid: bid && bid.price,
@@ -1814,7 +1825,7 @@ function nextShipUpgrade(bot, role = "mining", options = {}) {
   return next && hasSkills(bot, next.requiredSkills) && canUseRung(bot, next) ? next : null;
 }
 
-function startCombatReplenishment(combatOperation, bot) {
+async function startCombatReplenishment(combatOperation, bot) {
   const role = combatOperation.mode === "piracy" ? "piracy" : "security";
   const rung = nextShipUpgrade(bot, role);
   if (!rung || rung.replenishOnly !== true) return null;
@@ -1824,7 +1835,7 @@ function startCombatReplenishment(combatOperation, bot) {
   if (!balance) return null;
 
   const upgrade = buildCombatReplenishmentOperation(combatOperation, bot, rung,
-    findUpgradeMarketStation(bot, rung), balance);
+    (await findUpgradeMarketStation(bot, rung)), balance);
   record(upgrade, `Replacing missing combat-fit parts for ${upgrade.resumeCombat.siteLabel || "the active anomaly"}; the original site will resume after fitting.`);
   saveOperation(upgrade);
   return upgrade;
@@ -1901,11 +1912,11 @@ function getUpgradePackageNeeds(rung) {
   return [...counts].map(([typeID, quantity]) => ({ typeID, quantity }));
 }
 
-function findUpgradeMarketStation(bot, rungOrOperation) {
+async function findUpgradeMarketStation(bot, rungOrOperation) {
   const needs = getUpgradePackageNeeds(rungOrOperation);
   if (!needs.length) return hubStationFor(bot);
   const economy = require("./playerBotEconomyRuntime");
-  const candidates = economy.findSellStationsForPackage(needs);
+  const candidates = (await economy.findSellStationsForPackage(needs, economy.getBotMarketRegion(bot)));
   if (!candidates.length) return hubStationFor(bot);
   const outsideJita = candidates.filter((candidate) => !candidate.isJita);
   const preferred = outsideJita.length ? outsideJita : candidates.filter((candidate) => candidate.isJita);
@@ -2109,7 +2120,7 @@ async function buyUnits(operation, bot, typeID, needed, stationID = operation.ma
   const trade = require("./playerBotTradeRuntime");
   const economy = require("./playerBotEconomyRuntime");
   if (typeof economy.isJitaStation === "function" && economy.isJitaStation(stationID)) {
-    const regional = await trade.readBestAskOutsideJita(bot.characterName, typeID, 1, Number(stationID));
+    const regional = await trade.readBestAskOutsideJita(bot.characterName, typeID, 1, Number(stationID), operation.marketOriginRegionID);
     if (!regional.success) {
       return { error: regional.message || `Could not verify non-Jita supply for ${typeID} before buying at Jita.` };
     }
@@ -2125,11 +2136,11 @@ async function buyUnits(operation, bot, typeID, needed, stationID = operation.ma
   const quote = await trade.readQuote(bot.characterName, typeID);
   if (!quote.success) return { error: quote.message || `Could not query the market for ${typeID} at ${stationID}.` };
   if (!quote.bestAsk) {
-    const regional = await trade.readBestAskOutsideJita(bot.characterName, typeID, 1, Number(stationID));
+    const regional = await trade.readBestAskOutsideJita(bot.characterName, typeID, 1, Number(stationID), operation.marketOriginRegionID);
     if (!regional.success) return { error: regional.message || `Could not verify regional supply for ${typeID}.` };
     const isJitaSource = typeof economy.isJitaStation === "function" && economy.isJitaStation(stationID);
     const jitaSeedStationID = typeof economy.findBestJitaSeedStation === "function"
-      ? Number(economy.findBestJitaSeedStation([{ typeID, quantity: needed }], isJitaSource ? [stationID] : [])) || 0
+      ? Number(await economy.findBestJitaSeedStation([{ typeID, quantity: needed }], isJitaSource ? [stationID] : [])) || 0
       : 0;
     const jita = Number(economy.JITA_BUY_STATION_ID) || 0;
     return {
@@ -2155,7 +2166,7 @@ async function buyUnits(operation, bot, typeID, needed, stationID = operation.ma
     startedAt: new Date().toISOString(),
   };
   saveOperation(operation);
-  const result = await trade.buy(bot.characterName, typeID, quantity, price);
+  const result = await trade.buy(bot.characterName, typeID, quantity, price, operation.marketOriginRegionID);
   if (!result.success && result.outcomeUnknown) return { review: result.message };
   const spent = Number(result.spent ?? result.observedSpent) || 0;
   operation.spent = Math.round((operation.spent + spent) * 100) / 100;
@@ -2176,7 +2187,7 @@ async function buyUnits(operation, bot, typeID, needed, stationID = operation.ma
   if (!result.success) return { error: result.message };
   if (bought > 0) return { bought, spent };
 
-  const regional = await trade.readBestAskOutsideJita(bot.characterName, typeID, 1, Number(stationID));
+  const regional = await trade.readBestAskOutsideJita(bot.characterName, typeID, 1, Number(stationID), operation.marketOriginRegionID);
   if (!regional.success) {
     return {
       unavailable: true,
@@ -2896,7 +2907,7 @@ async function advanceUpgrade(operation, bot) {
   return block(operation, "blocked", `Unknown upgrade stage ${operation.stage}.`);
 }
 
-function startShipUpgrade(botQuery, role = "mining", options = {}) {
+async function startShipUpgrade(botQuery, role = "mining", options = {}) {
   const bot = getPlayerBots().resolveBot(botQuery);
   const refusal = assertCanStart(bot, {
     allowIndependentIndustryReview: options.autonomous === true && options.industryReviewFallback === true,
@@ -2918,7 +2929,7 @@ function startShipUpgrade(botQuery, role = "mining", options = {}) {
     droneTypeIDs: [...(rung.droneTypeIDs || [])],
     cargoTypeIDs: [...(rung.cargoTypeIDs || [])],
     replenishOnly: rung.replenishOnly === true,
-    marketStationID: normalizePositiveInteger(options.marketStationID) || findUpgradeMarketStation(bot, rung),
+    marketStationID: normalizePositiveInteger(options.marketStationID) || (await findUpgradeMarketStation(bot, rung)),
     maxSpend: Math.round(maxSpend * 100) / 100,
     spent: 0,
     pending: null,
@@ -2937,7 +2948,7 @@ function startShipUpgrade(botQuery, role = "mining", options = {}) {
   return { success: true, operation, message: `${bot.characterName} will buy and fit a ${rung.name} at ${operation.marketStationID} (maximum spend ${operation.maxSpend.toFixed(2)} ISK).` };
 }
 
-function startSavedFitting(botQuery, fittingID, requesterSession, requestedMaxSpend = null) {
+async function startSavedFitting(botQuery, fittingID, requesterSession, requestedMaxSpend = null) {
   const bot = getPlayerBots().resolveBot(botQuery);
   const refusal = assertCanStart(bot);
   if (refusal) return { success: false, message: refusal };
@@ -2997,7 +3008,7 @@ function startSavedFitting(botQuery, fittingID, requesterSession, requestedMaxSp
     fighterTypeIDs: [...plan.fighterTypeIDs],
     fitCargoPlan: plan.cargoPlan.map((entry) => ({ ...entry })),
     cargoTypeIDs: [],
-    marketStationID: findUpgradeMarketStation(bot, rung),
+    marketStationID: (await findUpgradeMarketStation(bot, rung)),
     maxSpend: Math.round(maxSpend * 100) / 100,
     spent: 0,
     pending: null,
@@ -3154,7 +3165,7 @@ async function findBestRegionalSaleStation(bot, stationID, options = {}) {
       const previous = askByStation.get(key);
       if (!previous || Number(ask.price) < Number(previous.price)) askByStation.set(key, ask);
     }
-    const orders = economy.listPlayerBuyOrders(1000, Number(stack.typeID));
+    const orders = (await economy.listPlayerBuyOrders(1000, Number(stack.typeID), economy.getBotMarketRegion(bot)));
     const ordersByStation = new Map();
     for (const order of orders) {
       if (Number(order.price) < minimumUnitPrice || Number(order.min_volume) > units) continue;
@@ -3304,16 +3315,16 @@ async function advanceFulfill(operation, bot) {
   const economy = require("./playerBotEconomyRuntime");
   const trade = require("./playerBotTradeRuntime");
   const inventory = getInventory();
-  const order = economy.getOpenOrder(operation.orderID);
+  const order = (await economy.getOpenOrder(operation.orderID));
   if ((!order || order.state !== "open" || Number(order.vol_remaining) <= 0) && operation.stage !== "sell") {
     return finish(operation, `Order ${operation.orderID} is no longer open; delivery canceled.`);
   }
   if (operation.stage === "choose-source") {
     const previousSourceStationID = Number(operation.sourceStationID) || 0;
-    const regional = await trade.readBestAskOutsideJita(bot.characterName, operation.typeID, 1, previousSourceStationID);
+    const regional = await trade.readBestAskOutsideJita(bot.characterName, operation.typeID, 1, previousSourceStationID, operation.marketOriginRegionID);
     if (!regional.success) return block(operation, "holding", `Could not verify regional supply for type ${operation.typeID}; purchase paused safely.`);
     const jitaSourceStationID = !regional.bestAsk && typeof economy.findBestJitaSeedStation === "function"
-      ? Number(economy.findBestJitaSeedStation([{ typeID: operation.typeID, quantity: 1 }],
+      ? Number(await economy.findBestJitaSeedStation([{ typeID: operation.typeID, quantity: 1 }],
         operation.checkedJitaStationIDs || [])) || 0
       : 0;
     operation.sourceStationID = Number(regional.bestAsk && regional.bestAsk.stationID) ||
@@ -3349,7 +3360,7 @@ async function advanceFulfill(operation, bot) {
           wanted = 0;
           record(operation, `Station ${sourceStationID} has no more type ${operation.typeID}; delivering the ${have} units already acquired.`);
         } else if (typeof economy.isJitaStation === "function" && economy.isJitaStation(sourceStationID)) {
-          const regional = await trade.readBestAskOutsideJita(bot.characterName, operation.typeID, 1, sourceStationID);
+          const regional = await trade.readBestAskOutsideJita(bot.characterName, operation.typeID, 1, sourceStationID, operation.marketOriginRegionID);
           if (!regional.success) return block(operation, "holding", `Could not verify non-Jita supply for type ${operation.typeID}; no Jita purchase was attempted.`);
           if (regional.bestAsk) {
             operation.sourceStationID = Number(regional.bestAsk.stationID);
@@ -3360,7 +3371,7 @@ async function advanceFulfill(operation, bot) {
           }
           const checked = [...new Set([...(operation.checkedJitaStationIDs || []).map(Number), sourceStationID])];
           const nextSeedStationID = typeof economy.findBestJitaSeedStation === "function"
-            ? Number(economy.findBestJitaSeedStation([{ typeID: operation.typeID, quantity: 1 }], checked)) || 0
+            ? Number(await economy.findBestJitaSeedStation([{ typeID: operation.typeID, quantity: 1 }], checked)) || 0
             : 0;
           operation.checkedJitaStationIDs = checked;
           if (nextSeedStationID) {
@@ -3387,7 +3398,7 @@ async function advanceFulfill(operation, bot) {
         }
       }
       if (wanted > 0) {
-        const result = await trade.buy(bot.characterName, operation.typeID, Math.min(wanted, quote.bestAsk.quantity), quote.bestAsk.price);
+        const result = await trade.buy(bot.characterName, operation.typeID, Math.min(wanted, quote.bestAsk.quantity), quote.bestAsk.price, operation.marketOriginRegionID);
         if (!result.success && result.sourceAvailable && Number(result.sourceStationID) > 0) {
           operation.sourceStationID = Number(result.sourceStationID);
           operation.stage = "to-source";
@@ -4344,7 +4355,7 @@ const HANDLERS = {
     save: saveOperation,
     block,
     finish,
-    startCombatReplenishment: (current, actor) => startCombatReplenishment(current, actor),
+    startCombatReplenishment: async (current, actor) => (await startCombatReplenishment(current, actor)),
   }),
   sovereignty: (operation, bot) => require("./playerBotSovereigntyRuntime").advanceSovereignty(operation, bot, {
     space: getSpace(),
@@ -5236,14 +5247,14 @@ function startSovereignty(botQuery, objective = null, options = {}) {
     : `${bot.characterName} will join active sovereignty campaign ${selected.campaignTargetID} at command node ${selected.nodeID}.` };
 }
 
-function startStructureDeployment(botQuery, itemID, systemID = null, options = {}) {
+async function startStructureDeployment(botQuery, itemID, systemID = null, options = {}) {
   const bot = getPlayerBots().resolveBot(botQuery);
   const refusal = assertCanStart(bot);
   if (refusal) return { success: false, message: refusal };
-  return require("./playerBotStructureRuntime").start(bot, itemID, systemID, {
+  return (await require("./playerBotStructureRuntime").start(bot, itemID, systemID, {
     ...options,
     operationTools: { assertCanStart, baseOperation, record, saveOperation },
-  });
+  }));
 }
 
 function startStructureProcurement(botQuery, plan, options = {}) {
@@ -5586,7 +5597,7 @@ function stopOperation(botQuery) {
   return { success: true, message: `Operation ${operation.operationID} for ${bot.characterName} stopped at ${operation.stage}.` };
 }
 
-function startCapsuleRecovery(botQuery, options = {}) {
+async function startCapsuleRecovery(botQuery, options = {}) {
   const bot = getPlayerBots().resolveBot(botQuery);
   if (!bot) return { success: false, deferred: true, message: `No unique playerbot found with that name: ${botQuery}.` };
   const character = getCharacterRecord(bot.characterID) || {};
@@ -5654,16 +5665,16 @@ function startCapsuleRecovery(botQuery, options = {}) {
     }
   }
 
-  const marketStationID = findUpgradeMarketStation(bot, rung);
+  const marketStationID = (await findUpgradeMarketStation(bot, rung));
   if (!normalizePositiveInteger(marketStationID)) {
     return { success: false, deferred: true,
       message: `${bot.characterName} has no reachable non-Jita market for the ${rung.name} recovery hull.` };
   }
-  const recovery = startShipUpgrade(bot.characterName, role, {
+  const recovery = (await startShipUpgrade(bot.characterName, role, {
     autonomous: options.autonomous === true,
     marketStationID,
     maxSpend: Number(rung.minBalance),
-  });
+  }));
   if (recovery.success) {
     recovery.operation.capsuleRecovery = true;
     recovery.operation.capsuleRecoveryReplacedOperationID = current && current.operationID || null;

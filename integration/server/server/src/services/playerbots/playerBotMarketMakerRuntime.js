@@ -31,13 +31,13 @@ function roundIsk(value) {
 }
 
 // How many units to bid for, given the wallet and what is already in escrow.
-function planBid(referencePrice, balance, escrowed) {
+function planBid(referencePrice, balance, escrowed, estimatedEscrow = false) {
   const price = roundIsk(referencePrice * BID_RATIO);
   if (!(price > 0)) return null;
   const spendable = Math.min(
     MAX_ORDER_ISK,
     Math.max(0, balance - WALLET_RESERVE_ISK),
-    Math.max(0, (balance + escrowed) * MAX_ESCROW_SHARE - escrowed),
+    Math.max(0, (estimatedEscrow ? balance * 0.30 : (balance + escrowed) * MAX_ESCROW_SHARE) - escrowed),
   );
   if (spendable < MIN_ORDER_ISK) return null;
   const units = Math.floor(spendable / price);
@@ -89,19 +89,34 @@ async function runMarketMakerPass(bots, deps = defaultDeps()) {
 }
 
 async function keepBids(bot, stationID, deps, summary) {
-  const economy = deps.economy();
-  const own = economy.listOpenBuyOrders(bot.characterID);
-  if (!own.success) return;
-  if (own.orders.length >= MAX_ORDERS_PER_TRADER) return;
-  const escrowed = own.orders.reduce((total, order) => total + (Number(order.escrow) || 0), 0);
-  const covered = new Set(own.orders.filter((order) => Number(order.station_id) === stationID)
+  const { getEscrowRecord } = require("../market/marketEscrowState");
+  const { success, orders } = await deps.economy().listOpenBuyOrders(bot.characterID);
+  if (!success) return;
+  if (orders.length >= MAX_ORDERS_PER_TRADER) return;
+  let estimatedEscrow = false;
+  let escrowed = 0;
+  for (const order of orders) {
+    const record = getEscrowRecord(order.order_id);
+    const remainingValue = roundIsk(order.price * order.vol_remaining);
+    if (record?.escrowType === "buy" && Number(record.ownerId) === Number(bot.characterID) &&
+        Number(record.remainingQuantity) === Number(order.vol_remaining) &&
+        Number(record.escrowAmount) === remainingValue) {
+      escrowed += remainingValue;
+    } else {
+      estimatedEscrow = true;
+      escrowed += remainingValue;
+    }
+  }
+  const covered = new Set(orders.filter((order) => Number(order.station_id) === stationID)
     .map((order) => Number(order.type_id)));
   for (const typeID of MINERAL_TYPE_IDS) {
     if (covered.has(typeID)) continue;
-    const reference = economy.getJitaReferencePrice(typeID);
+    const quote = await deps.trade().readRegionalMarketQuote(bot.characterName, typeID);
+    if (!quote.success) continue;
+    const reference = quote.bestAsk?.price || (quote.regionID === 10000002 ? 0 : await deps.economy().getJitaReferencePrice(typeID));
     if (!reference) continue;
     const balance = Number(deps.wallet().getCharacterWallet(bot.characterID)?.balance) || 0;
-    const plan = planBid(reference, balance, escrowed);
+    const plan = planBid(reference, balance, escrowed, estimatedEscrow);
     if (!plan) return;
     const result = await deps.trade().placeBuyOrder(bot.characterName, typeID, plan.units, plan.price, ORDER_DAYS);
     if (result.success) {
@@ -116,12 +131,13 @@ async function keepBids(bot, stationID, deps, summary) {
 }
 
 async function listBoughtStock(bot, stationID, deps, summary) {
-  const economy = deps.economy();
   const inventory = deps.inventory();
   for (const stack of inventory.listHangar(bot, stationID) || []) {
     const typeID = Number(stack.typeID);
     if (!MINERAL_TYPE_IDS.includes(typeID)) continue;
-    const reference = economy.getJitaReferencePrice(typeID);
+    const quote = await deps.trade().readRegionalMarketQuote(bot.characterName, typeID);
+    if (!quote.success) continue;
+    const reference = quote.bestAsk?.price || (quote.regionID === 10000002 ? 0 : await deps.economy().getJitaReferencePrice(typeID));
     if (!reference) continue;
     const result = await deps.trade().listSellOrder(bot.characterName, stack.itemID, null, roundIsk(reference * ASK_RATIO), ORDER_DAYS);
     if (result.success) summary.unitsListed += Number(result.listed || 0) + Number(result.sold || 0);

@@ -203,7 +203,7 @@ test("alliance plans keep existing pending identity after the configured library
   assert.equal(api.getAllianceFoundingPlan({ ...bot, specialty: "industry" }), null);
 });
 
-test("the unchanged director makes the same six specialty decisions when only the corporation name changes", () => {
+test("the unchanged director makes the same six specialty decisions when only the corporation name changes", async () => {
   let corporationName = "EVEJS Industrial Union";
   const { api } = load(path.join(root, "playerBotDirectorRuntime.js"), {
     "../../gameStore/tableRepository": { createTableRepository: () => ({ ensureTable() {}, read() { return { success: true, data: {} }; } }) },
@@ -229,9 +229,9 @@ test("the unchanged director makes the same six specialty decisions when only th
     ["security", "combat"], ["piracy", "combat"], ["sovereignty", "sovereignty"]]) {
     const bot = { characterID: 1000, corporationID: 2000, specialtyCorporationID: 2000, specialty };
     corporationName = `EVEJS ${specialty}`;
-    const before = JSON.stringify(api._testing.chooseAssignment(bot));
+    const before = JSON.stringify(await api._testing.chooseAssignment(bot));
     corporationName = "Wrecker's Banner Cooperative";
-    const after = JSON.stringify(api._testing.chooseAssignment(bot));
+    const after = JSON.stringify(await api._testing.chooseAssignment(bot));
     assert.equal(after, before, specialty);
     assert.equal(JSON.parse(after).kind, expected);
   }

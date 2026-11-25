@@ -222,7 +222,7 @@ function isStructureManagerCached(bot) {
   return manager;
 }
 
-function findAutonomousPurchasePlan(bot) {
+async function findAutonomousPurchasePlan(bot) {
   if (!bot) return null;
   // Cheap, cached checks first: most pilots belong to a corporation that
   // already has a structure, and most pilots are not structure managers.
@@ -231,7 +231,7 @@ function findAutonomousPurchasePlan(bot) {
   const characterID = positiveID(bot.characterID);
   const missUntil = purchasePlanMissCache.get(characterID);
   if (missUntil && missUntil > Date.now()) return null;
-  const plan = buildAutonomousPurchasePlan(bot);
+  const plan = (await buildAutonomousPurchasePlan(bot));
   if (plan) purchasePlanMissCache.delete(characterID);
   else {
     if (purchasePlanMissCache.size >= 10_000) purchasePlanMissCache.clear();
@@ -240,7 +240,7 @@ function findAutonomousPurchasePlan(bot) {
   return plan;
 }
 
-function buildAutonomousPurchasePlan(bot) {
+async function buildAutonomousPurchasePlan(bot) {
   if (!isStructureManager(bot)) return null;
   const corporationID = positiveID((require("../character/characterState").getCharacterRecord(bot.characterID) || {}).corporationID || bot.corporationID);
   if (!corporationID) return null;
@@ -286,14 +286,14 @@ function buildAutonomousPurchasePlan(bot) {
   if (!objective || Number(objective.priority) > 2) return null;
 
   const economy = require("./playerBotEconomyRuntime");
-  const marketStationID = positiveID(operations.findUpgradeMarketStation(bot, {
+  const marketStationID = positiveID((await operations.findUpgradeMarketStation(bot, {
     hullTypeID: typeID,
     moduleTypeIDs: positiveID(type.defaultQuantumCoreTypeID)
       ? [positiveID(type.defaultQuantumCoreTypeID)]
       : [],
-  }));
+  })));
   if (!marketStationID) return null;
-  const offer = economy.findSellStationsForPackage(packageNeeds)
+  const offer = (await economy.findSellStationsForPackage(packageNeeds, economy.getBotMarketRegion(bot)))
     .find((candidate) => Number(candidate.stationID) === marketStationID);
   const estimatedCost = Number(offer && offer.estimatedCost);
   if (!offer || offer.complete !== true || !Number.isFinite(estimatedCost) || estimatedCost <= 0 ||
@@ -666,7 +666,7 @@ async function ensureCoreTransport(operation, bot, kit, core) {
       const operations = require("./playerBotOperationRuntime");
       operation.transportHullTypeID = selected.typeID;
       operation.transportStationID = Number(operation.transportMarketStationID) ||
-        operations.findUpgradeMarketStation(bot, { hullTypeID: selected.typeID, moduleTypeIDs: [] });
+        (await operations.findUpgradeMarketStation(bot, { hullTypeID: selected.typeID, moduleTypeIDs: [] }));
       operation.transportMarketStationID = operation.transportStationID;
       operation.maxSpend = Number(operation.maxSpend) > 0
         ? Math.min(Number(operation.maxSpend), STRUCTURE_TRANSPORT_BUDGET_ISK)
@@ -1297,14 +1297,14 @@ function reconcileStructureServicePurchase(operation, bot) {
   };
 }
 
-function findJitaServiceOffer(fallback, economy, initialExcludedStationIDs = []) {
+async function findJitaServiceOffer(fallback, economy, initialExcludedStationIDs = []) {
   const matches = [];
   const excluded = new Set((Array.isArray(initialExcludedStationIDs) ? initialExcludedStationIDs : [])
     .map(Number).filter(Boolean));
   for (const typeID of fallback.typeIDs || []) {
-    const candidates = economy.findSellStationsForPackage([{
+    const candidates = (await economy.findJitaSellStationsForPackage([{
       typeID: Number(typeID), quantity: Number(fallback.quantity),
-    }]).filter((candidate) => candidate.isJita === true && candidate.complete === true &&
+    }])).filter((candidate) => candidate.isJita === true && candidate.complete === true &&
       !excluded.has(Number(candidate.stationID)));
     const selected = candidates[0];
     if (!selected) continue;
@@ -1320,17 +1320,17 @@ function findJitaServiceOffer(fallback, economy, initialExcludedStationIDs = [])
   return matches[0] || null;
 }
 
-function findNextJitaServiceOfferForPurchase(purchase, economy) {
+async function findNextJitaServiceOfferForPurchase(purchase, economy) {
   if (!purchase || !economy || typeof economy.isJitaStation !== "function") return null;
   const currentStationID = positiveID(purchase.sourceStationID);
   if (!currentStationID || !economy.isJitaStation(currentStationID)) return null;
   const previouslyChecked = (Array.isArray(purchase.checkedJitaStationIDs)
     ? purchase.checkedJitaStationIDs
     : []).map(positiveID).filter(Boolean);
-  return findJitaServiceOffer({
+  return (await findJitaServiceOffer({
     typeIDs: [positiveID(purchase.typeID)],
     quantity: Math.max(1, Math.trunc(Number(purchase.quantity) || 1)),
-  }, economy, [...new Set([...previouslyChecked, currentStationID])]);
+  }, economy, [...new Set([...previouslyChecked, currentStationID])]));
 }
 
 function shouldRefreshJitaServiceOffer(purchase, quote, economy) {
@@ -1491,7 +1491,7 @@ async function advanceStructureServiceProvision(operation, bot, kit) {
   if (operation.stage === "to-jita") {
     const economy = require("./playerBotEconomyRuntime");
     for (const fallback of operation.jitaFallbackItems || []) {
-      const selected = findJitaServiceOffer(fallback, economy);
+      const selected = (await findJitaServiceOffer(fallback, economy));
       if (!selected) return kit.block(operation, "holding", `No seeded Jita station has sufficient stock for ${fallback.purpose}; no purchase was made.`);
       if (fallback.purpose === "fuel") operation.fuelTypeID = selected.typeID;
       operation.purchaseItems.push({ purpose: fallback.purpose, typeID: selected.typeID,
@@ -1552,7 +1552,7 @@ async function advanceStructureServiceProvision(operation, bot, kit) {
           ...(Array.isArray(purchase.checkedJitaStationIDs) ? purchase.checkedJitaStationIDs.map(Number) : []),
           Number(purchase.sourceStationID),
         ].filter(Boolean))];
-        const next = findNextJitaServiceOfferForPurchase(purchase, economy);
+        const next = (await findNextJitaServiceOfferForPurchase(purchase, economy));
         if (next && next.stationID !== Number(purchase.sourceStationID)) {
           purchase.checkedJitaStationIDs = excluded;
           purchase.sourceStationID = next.stationID;
@@ -1587,7 +1587,7 @@ async function advanceStructureServiceProvision(operation, bot, kit) {
       startedAt: new Date().toISOString(),
     };
     kit.save(operation);
-    const result = await trade.buy(bot.characterName, purchase.typeID, purchase.quantity, Number(quote.bestAsk.price));
+    const result = await trade.buy(bot.characterName, purchase.typeID, purchase.quantity, Number(quote.bestAsk.price), operation.marketOriginRegionID);
     if (!result.success && result.sourceAvailable) {
       operation.pendingPurchase = null;
       purchase.sourceStationID = Number(result.sourceStationID);

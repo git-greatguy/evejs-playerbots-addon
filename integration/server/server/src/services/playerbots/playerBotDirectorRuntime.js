@@ -227,7 +227,7 @@ function industryCycleNeedsManualReview(cycle) {
   return Boolean(cycle && ["review", "blocked"].includes(String(cycle.status || "").toLowerCase()));
 }
 
-function processCapsuleRecoveryCandidates(candidates, options = {}) {
+async function processCapsuleRecoveryCandidates(candidates, options = {}) {
   const maximumStarts = Math.max(0, Math.trunc(Number(options.maximumStarts) || 0));
   const canStart = typeof options.canStart === "function" ? options.canStart : () => true;
   const startRecovery = typeof options.startRecovery === "function" ? options.startRecovery : () => null;
@@ -238,7 +238,7 @@ function processCapsuleRecoveryCandidates(candidates, options = {}) {
     if (starts >= maximumStarts) break;
     if (!canStart(candidate)) continue;
     attempts += 1;
-    const recovery = startRecovery(candidate);
+    const recovery = await startRecovery(candidate);
     if (!recovery || recovery.success !== true || recovery.existing === true) continue;
     starts += 1;
     onStarted(candidate, recovery);
@@ -271,20 +271,20 @@ function isCombatOpportunityUnavailable(result) {
       .test(String(result.message || "")));
 }
 
-function chooseCombatOpportunityFallback(bot, result, options = {}) {
+async function chooseCombatOpportunityFallback(bot, result, options = {}) {
   if (!isCombatOpportunityUnavailable(result)) return null;
-  return chooseMiningAssignment(bot, {
+  return (await chooseMiningAssignment(bot, {
     ...options,
     prioritizeProductiveWork: false,
-  });
+  }));
 }
 
-function chooseIndustryReviewFallback(bot, options = {}) {
-  return chooseMiningAssignment(bot, {
+async function chooseIndustryReviewFallback(bot, options = {}) {
+  return (await chooseMiningAssignment(bot, {
     ...options,
     prioritizeProductiveWork: true,
     allowTerritorialMining: true,
-  });
+  }));
 }
 
 function canStartWorkFromCurrentLocation(bot) {
@@ -701,7 +701,7 @@ function countMiningArrivals(entries, botSystemIDs, humanControlledBotIDs = new 
   return arrivals;
 }
 
-function enforceUpgradeMarketArrivalLimit(options = {}) {
+async function enforceUpgradeMarketArrivalLimit(options = {}) {
   const operationRuntime = require("./playerBotOperationRuntime");
   const playerBotRuntime = require("./playerBotRuntime");
   const playerBots = typeof playerBotRuntime.getPlanningRoster === "function"
@@ -726,7 +726,7 @@ function enforceUpgradeMarketArrivalLimit(options = {}) {
     if (options.skipRetarget !== true && shouldRetargetUpgradeMarket(operation) &&
         Number(operation.spent) <= 0 && !operation.pending && !Number(operation.newShipID) &&
         ["to-market", "buy"].includes(operation.stage)) {
-      const destinationStationID = operationRuntime.findUpgradeMarketStation(bot, operation);
+      const destinationStationID = (await operationRuntime.findUpgradeMarketStation(bot, operation));
       if (destinationStationID && Number(destinationStationID) !== Number(operation.marketStationID)) {
         const change = operationRuntime.retargetUnpurchasedUpgrade(characterID, destinationStationID);
         if (change.success && !change.unchanged) {
@@ -778,11 +778,11 @@ function getCapacityTarget(entries, humanCorporations, humanControlledBotIDs = n
   };
 }
 
-function enforceConcurrentWorkLimit(options = {}) {
+async function enforceConcurrentWorkLimit(options = {}) {
   let allEntries = listActiveWorkEntries();
   const upgradeMarket = options.skipUpgradeMarketPlanning === true
     ? { queued: 0, retargeted: 0, incoming: new Map() }
-    : enforceUpgradeMarketArrivalLimit();
+    : (await enforceUpgradeMarketArrivalLimit());
   // Keep the work closest to completion active; pause unfinished setup trips
   // first so a large fresh roster cannot send everyone to Jita.
   const excessColonies = selectExcessColonySetups(allEntries);
@@ -1026,14 +1026,14 @@ const ORDER_MAX_RUNS = 10;
 const ORDER_SKIP_MS = 60 * 60 * 1000;
 
 // Unclaimed player buy orders, kept claimed while the bot working on one is busy.
-function nextPlayerOrder(state, bot) {
+async function nextPlayerOrder(state, bot) {
   const economy = require("./playerBotEconomyRuntime");
   state.claims = state.claims || {};
   for (const [orderID, claim] of Object.entries(state.claims)) {
     if (!isBusy(claim.characterID)) delete state.claims[orderID];
   }
   state.skippedOrders = state.skippedOrders || {};
-  return economy.listPlayerBuyOrders().find((order) =>
+  return (await economy.listPlayerBuyOrders(20, [...MINERAL_TYPE_IDS][Math.floor(Date.now() / 300_000) % MINERAL_TYPE_IDS.size], economy.getBotMarketRegion(bot))).find((order) =>
     !state.claims[String(order.order_id)] &&
     Date.now() - Number(state.skippedOrders[String(order.order_id)] || 0) > ORDER_SKIP_MS) || null;
 }
@@ -1041,9 +1041,7 @@ function nextPlayerOrder(state, bot) {
 // A courier only pays when Jita sells for less than the order offers.
 async function courierPays(bot, order) {
   const economy = require("./playerBotEconomyRuntime");
-  return economy.listSellOffers(Number(order.type_id))
-    .filter((offer) => economy.isJitaStation(Number(offer.stationID)) &&
-      Number(offer.quantity) > 0 && Number(offer.price) > 0)
+  return (await economy.listSellOffers(Number(order.type_id), economy.getBotMarketRegion(bot), { jitaFallback: true }))
     .sort((left, right) => Number(left.price) - Number(right.price) ||
       Number(left.stationID) - Number(right.stationID))
     .some((offer) => Number(offer.price) <= Number(order.price));
@@ -1075,16 +1073,22 @@ function chooseOrderAssignment(bot, order) {
   return { kind: "order-courier" };
 }
 
+let jitaCleanupCursor = 0;
+
 async function cancelBotOrdersInJita() {
   const economy = require("./playerBotEconomyRuntime");
   const trade = require("./playerBotTradeRuntime");
   const bots = require("./playerBotRuntime").listBots();
   let cancelled = 0;
-  for (const order of economy.listBotSellOrdersInJita()) {
-    const bot = bots.find((entry) => Number(entry.characterID) === Number(order.owner_id));
-    if (!bot) continue;
-    const result = await trade.cancelOrder(bot.characterName, order.order_id);
-    if (result.success) cancelled += 1;
+  // Rotate through owners without loading every bot's orders in one pass.
+  for (let checked = 0; checked < Math.min(4, bots.length); checked++) {
+    const bot = bots[jitaCleanupCursor++ % bots.length];
+    const orders = await economy.listOpenOrdersForOwner(bot.characterID);
+    for (const order of orders) {
+      if (order.bid || Number(order.solar_system_id) !== economy.JITA_SYSTEM_ID) continue;
+      const result = await trade.cancelOrder(bot.characterName, order.order_id);
+      if (result.success) cancelled += 1;
+    }
   }
   return cancelled;
 }
@@ -1141,7 +1145,7 @@ function combatCoolingDown(operation, now = Date.now()) {
   return Number.isFinite(completedAt) && completedAt <= now && now - completedAt < NO_OPPORTUNITY_COOLDOWN_MS;
 }
 
-function chooseMiningEscortAssignment(bot) {
+async function chooseMiningEscortAssignment(bot) {
   if (!bot || bot.specialty !== "security") return null;
   const escortRuntime = require("./playerBotMiningEscortRuntime");
   const request = escortRuntime.findPendingMiningEscortRequest(bot);
@@ -1169,7 +1173,7 @@ function chooseMiningEscortAssignment(bot) {
   return {
     kind: "upgrade",
     role: "security",
-    marketStationID: operations.findUpgradeMarketStation(bot, upgrade),
+    marketStationID: (await operations.findUpgradeMarketStation(bot, upgrade)),
   };
 }
 
@@ -1179,7 +1183,7 @@ function findCoreInstallPlan(structureRuntime, bot) {
     : null;
 }
 
-function chooseMiningAssignment(bot, options = {}) {
+async function chooseMiningAssignment(bot, options = {}) {
   const operations = require("./playerBotOperationRuntime");
   const hasMiningFit = typeof operations.hasRoleShipFit === "function" &&
     operations.hasRoleShipFit(bot, "mining");
@@ -1219,7 +1223,7 @@ function chooseMiningAssignment(bot, options = {}) {
         kind: "upgrade",
         role: "mining",
         marketStationID: typeof operations.findUpgradeMarketStation === "function"
-          ? operations.findUpgradeMarketStation(bot, upgrade)
+          ? (await operations.findUpgradeMarketStation(bot, upgrade))
           : hubStationFor(bot),
       };
     }
@@ -1232,7 +1236,7 @@ function chooseMiningAssignment(bot, options = {}) {
   return { kind: "mine" };
 }
 
-function chooseStructureMaintenanceAssignment(bot, plan, operations, options = {}) {
+async function chooseStructureMaintenanceAssignment(bot, plan, operations, options = {}) {
   if (!plan) return null;
   const structureRuntime = require("./playerBotStructureRuntime");
   if (structureRuntime.canCarryStructureServicePlan(bot, plan)) {
@@ -1251,15 +1255,15 @@ function chooseStructureMaintenanceAssignment(bot, plan, operations, options = {
   return {
     kind: "upgrade",
     role: "logistics",
-    marketStationID: operations.findUpgradeMarketStation(bot, upgrade),
+    marketStationID: (await operations.findUpgradeMarketStation(bot, upgrade)),
     structureMaintenanceUpgrade: true,
   };
 }
 
-function chooseAssignment(bot, options = {}) {
+async function chooseAssignment(bot, options = {}) {
   const balance = Number(getCharacterWallet(bot.characterID)?.balance) || 0;
   const operations = require("./playerBotOperationRuntime");
-  const escortAssignment = chooseMiningEscortAssignment(bot);
+  const escortAssignment = (await chooseMiningEscortAssignment(bot));
   if (escortAssignment) return escortAssignment;
   const structureRuntime = require("./playerBotStructureRuntime");
   const coreInstallPlan = findCoreInstallPlan(structureRuntime, bot);
@@ -1267,15 +1271,15 @@ function chooseAssignment(bot, options = {}) {
   const structureMaintenancePlan = typeof structureRuntime.findStructureMaintenancePlan === "function"
     ? structureRuntime.findStructureMaintenancePlan(bot)
     : null;
-  const structureMaintenanceAssignment = chooseStructureMaintenanceAssignment(
+  const structureMaintenanceAssignment = (await chooseStructureMaintenanceAssignment(
     bot, structureMaintenancePlan, operations, options,
-  );
+  ));
   if (structureMaintenanceAssignment) return structureMaintenanceAssignment;
   const headquartersStructure = options.headquartersStructure || null;
   const packageItem = structureRuntime.findStructurePackage(bot);
   const packageFits = packageItem && structureRuntime.canCarryStructurePackage(bot, packageItem);
   const structurePurchasePlan = typeof structureRuntime.findAutonomousPurchasePlan === "function"
-    ? structureRuntime.findAutonomousPurchasePlan(bot)
+    ? (await structureRuntime.findAutonomousPurchasePlan(bot))
     : null;
   if (options.prioritizeHeadquarters && structureRuntime.isMissingCorporationHeadquarters?.(bot)) {
     const logisticsUpgrade = packageItem && !packageFits && options.skipUpgrade !== true
@@ -1294,7 +1298,7 @@ function chooseAssignment(bot, options = {}) {
       canCarryPackage: Boolean(packageFits),
       purchasePlan: structurePurchasePlan,
       logisticsUpgrade: canFundLogistics ? logisticsUpgrade : null,
-      marketStationID: logisticsUpgrade && operations.findUpgradeMarketStation(bot, logisticsUpgrade),
+      marketStationID: logisticsUpgrade && (await operations.findUpgradeMarketStation(bot, logisticsUpgrade)),
     });
     if (headquartersAssignment) return headquartersAssignment;
   }
@@ -1330,7 +1334,7 @@ function chooseAssignment(bot, options = {}) {
         return {
           kind: "upgrade",
           role: "security",
-          marketStationID: operations.findUpgradeMarketStation(bot, upgrade),
+          marketStationID: (await operations.findUpgradeMarketStation(bot, upgrade)),
           maxSpend: Math.min(balance, Number(warSupport.availableBudget) || 0),
           warMobilizationSupportID: warSupport.supportID,
         };
@@ -1370,7 +1374,7 @@ function chooseAssignment(bot, options = {}) {
       return {
         kind: "upgrade",
         role: "logistics",
-        marketStationID: operations.findUpgradeMarketStation(bot, logisticsUpgrade),
+        marketStationID: (await operations.findUpgradeMarketStation(bot, logisticsUpgrade)),
       };
     }
   }
@@ -1386,7 +1390,7 @@ function chooseAssignment(bot, options = {}) {
           balance >= Number(logisticsUpgrade.minBalance) &&
           earnedProfit >= Number(logisticsUpgrade.minBalance) &&
           !upgradeCoolingDown(operations.getOperation(bot.characterID))) {
-        return { kind: "upgrade", role: "logistics", marketStationID: operations.findUpgradeMarketStation(bot, logisticsUpgrade) };
+        return { kind: "upgrade", role: "logistics", marketStationID: (await operations.findUpgradeMarketStation(bot, logisticsUpgrade)) };
       }
     } else {
       return { kind: "structure-service-provision", plan: serviceProvisionPlan };
@@ -1415,7 +1419,7 @@ function chooseAssignment(bot, options = {}) {
     return { kind: "sell", originStationID: returnedStockStationID };
   }
   const expiredCorporateOutput = typeof cycleRuntime.findExpiredCorporateOutput === "function"
-    ? cycleRuntime.findExpiredCorporateOutput(bot)
+    ? (await cycleRuntime.findExpiredCorporateOutput(bot))
     : null;
   if (expiredCorporateOutput && !marketCapacityRetryCoolingDown) {
     return { kind: "sell", corporateListing: true, originStationID: Number(expiredCorporateOutput.stationID) };
@@ -1434,7 +1438,7 @@ function chooseAssignment(bot, options = {}) {
   if (options.prioritizeProductiveWork === true ||
       (lastOperation?.kind === "upgrade" && lastOperation.role === "mining" &&
        lastOperation.status === "completed" && operations.hasRoleShipFit(bot, "mining"))) {
-    return chooseMiningAssignment(bot, options);
+    return (await chooseMiningAssignment(bot, options));
   }
   // Security, piracy and sovereignty pilots first acquire the hull required
   // for their own authority-backed activity. Other pilots follow the mining
@@ -1458,7 +1462,7 @@ function chooseAssignment(bot, options = {}) {
       kind: "upgrade",
       role,
       marketStationID: typeof operationRuntime.findUpgradeMarketStation === "function"
-        ? operationRuntime.findUpgradeMarketStation(bot, upgrade)
+        ? (await operationRuntime.findUpgradeMarketStation(bot, upgrade))
         : hubStationFor(bot),
       ...(warShipSupport ? {
         maxSpend: Math.min(balance, Number(warShipSupport.availableBudget) || 0),
@@ -1467,7 +1471,7 @@ function chooseAssignment(bot, options = {}) {
     };
   }
   if (["security", "piracy"].includes(bot.specialty)) {
-    if (!operationRuntime.hasRoleShipFit(bot, role)) return chooseMiningAssignment(bot, options);
+    if (!operationRuntime.hasRoleShipFit(bot, role)) return (await chooseMiningAssignment(bot, options));
     const atWar = bot.specialty === "security" &&
       require("../corporation/warRuntimeState").hasActiveWarForCharacter(bot.characterID);
     if (bot.specialty === "security" && !atWar) {
@@ -1478,7 +1482,7 @@ function chooseAssignment(bot, options = {}) {
         return { kind: "combat", mode: "nullsec-conflict" };
       }
     }
-    if (combatCoolingDown(operations.getOperation(bot.characterID))) return chooseMiningAssignment(bot, options);
+    if (combatCoolingDown(operations.getOperation(bot.characterID))) return (await chooseMiningAssignment(bot, options));
     return { kind: "combat", mode: atWar ? "war" : bot.specialty };
   }
   if (bot.specialty === "sovereignty") {
@@ -1489,7 +1493,7 @@ function chooseAssignment(bot, options = {}) {
   }
   // A negative cash flow, including unsold stock, delays reinvestment to
   // prevent repeatedly tying up capital before the market clears.
-  return chooseMiningAssignment(bot, options);
+  return (await chooseMiningAssignment(bot, options));
 }
 
 function onlineHumanCorporationIDs() {
@@ -1600,7 +1604,7 @@ async function runDirectorInternal(bots = [], options = {}) {
     // Keep the hard system cap in force during the lightweight idle-roster
     // assignment pass, but do not run market lookups/retargeting for every
     // existing upgrade package on each coalesced think batch.
-    const upgradeMarket = enforceUpgradeMarketArrivalLimit({ skipRetarget: true });
+    const upgradeMarket = (await enforceUpgradeMarketArrivalLimit({ skipRetarget: true }));
     if (upgradeMarket.queued > 0) activeWorkEntries = listActiveWorkEntries();
     const capacityEntries = getCapacityWorkEntries(activeWorkEntries);
     const capacityTarget = getCapacityTarget(capacityEntries, humanCorporations, humanControlledBotIDs);
@@ -1614,7 +1618,7 @@ async function runDirectorInternal(bots = [], options = {}) {
         upgradeTripsQueued: upgradeMarket.queued,
       };
   } else {
-    capacityState = enforceConcurrentWorkLimit();
+    capacityState = (await enforceConcurrentWorkLimit());
   }
   summary.active = capacityState.active;
   summary.capacityLimit = capacityState.limit;
@@ -1764,10 +1768,10 @@ async function runDirectorInternal(bots = [], options = {}) {
     };
   }).filter(Boolean).sort((left, right) => Number(left.hasActiveSlot) - Number(right.hasActiveSlot) ||
     left.lastAssignedAt - right.lastAssignedAt);
-  const capsuleRecoveryBatch = processCapsuleRecoveryCandidates(capsuleCandidates, {
+  const capsuleRecoveryBatch = await processCapsuleRecoveryCandidates(capsuleCandidates, {
     maximumStarts: MAX_CAPSULE_RECOVERIES_PER_PASS,
     canStart: (candidate) => candidate.hasActiveSlot || summary.active < capacityState.assignmentLimit,
-    startRecovery: (candidate) => operationRuntime.startCapsuleRecovery(candidate.bot.characterName, { autonomous: true }),
+    startRecovery: async (candidate) => (await operationRuntime.startCapsuleRecovery(candidate.bot.characterName, { autonomous: true })),
     onStarted: (candidate, recovery) => {
       const { bot, hasActiveSlot } = candidate;
       const entry = { ...getBotDirectorAssignment(bot.characterID) };
@@ -1824,9 +1828,9 @@ async function runDirectorInternal(bots = [], options = {}) {
     if (!canYieldDockedWorkForCoreInstall(operation, character)) continue;
     const corePlan = findCoreInstallPlan(structureRuntime, bot);
     const maintenancePlan = corePlan ? null : structureRuntime.findStructureMaintenancePlan(bot);
-    const maintenanceAssignment = chooseStructureMaintenanceAssignment(
+    const maintenanceAssignment = (await chooseStructureMaintenanceAssignment(
       bot, maintenancePlan, operationRuntime,
-    );
+    ));
     const headquartersNeeded = !corePlan && !maintenanceAssignment &&
       structureRuntime.isMissingCorporationHeadquarters?.(bot) === true &&
       structureRuntime.getHeadquartersPriority?.(bot) === 0 &&
@@ -1836,7 +1840,7 @@ async function runDirectorInternal(bots = [], options = {}) {
           ["combat", "sovereignty", "alliance-courier", "fleet-attack"].includes(operation.kind) ||
           operation.kind === "pi-collect" && (Number(operation.containerID) > 0 || operation.exportAttempt),
         hasStructurePackage: Boolean(require("./playerBotStructureRuntime").findStructurePackage(bot)),
-        hasPurchasePlan: Boolean(require("./playerBotStructureRuntime").findAutonomousPurchasePlan(bot)),
+        hasPurchasePlan: Boolean((await require("./playerBotStructureRuntime").findAutonomousPurchasePlan(bot))),
       });
     if (!corePlan && !maintenanceAssignment && !headquartersNeeded) continue;
     const stopped = operationRuntime.stopOperation(bot.characterName);
@@ -1939,13 +1943,13 @@ async function runDirectorInternal(bots = [], options = {}) {
     const humanControlled = humanControlledBotIDs.has(Number(bot.characterID));
     const residentCount = systemID ? rosterSystemCounts.get(systemID) || 0 : 0;
     const overSystemLimit = Boolean(systemID && residentCount > autonomousSystemLimit && !humanControlled);
-    const escortAssignment = humanControlled ? null : chooseMiningEscortAssignment(bot);
+    const escortAssignment = humanControlled ? null : (await chooseMiningEscortAssignment(bot));
     const coreInstallPlan = escortAssignment ? null : findCoreInstallPlan(structureRuntime, bot);
     const rawStructureMaintenancePlan = escortAssignment || coreInstallPlan ? null :
       structureRuntime.findStructureMaintenancePlan(bot);
-    const structureMaintenanceAssignment = chooseStructureMaintenanceAssignment(
+    const structureMaintenanceAssignment = (await chooseStructureMaintenanceAssignment(
       bot, rawStructureMaintenancePlan, operationRuntime,
-    );
+    ));
     const structureMaintenancePlan = structureMaintenanceAssignment?.kind === "structure-service-provision"
       ? structureMaintenanceAssignment.plan
       : rawStructureMaintenancePlan;
@@ -2002,7 +2006,7 @@ async function runDirectorInternal(bots = [], options = {}) {
     const industryCycleReview = bot.specialty === "industry" &&
       industryCycleNeedsManualReview(require("./playerBotIndustryCycleRuntime").getCycle(bot.characterID));
     let order = headquartersWorkCanStart || escortAssignment || coreInstallPlan || hasLaunch || courier
-      ? null : nextPlayerOrder(state, bot);
+      ? null : (await nextPlayerOrder(state, bot));
     let assignment = escortAssignment || (coreInstallPlan
       ? { kind: "structure-core-install", plan: coreInstallPlan }
       // Fuel and power upkeep comes before the caretaker's HQ mining loop so a
@@ -2012,7 +2016,7 @@ async function runDirectorInternal(bots = [], options = {}) {
       : localHQMiningAssignment
       ? localHQMiningAssignment
       : headquartersWorkCanStart
-      ? chooseAssignment(bot, { skipColony: true, skipUpgrade: false, prioritizeHeadquarters: true })
+      ? (await chooseAssignment(bot, { skipColony: true, skipUpgrade: false, prioritizeHeadquarters: true }))
       : hasLaunch
       ? { kind: "pi-collect" }
       : courier
@@ -2030,7 +2034,7 @@ async function runDirectorInternal(bots = [], options = {}) {
       // separate mining work or the mining-hull ladder. Industry cycles remain
       // guarded against replacement and ambiguous market actions are not retried.
       order = null;
-      assignment = chooseIndustryReviewFallback(bot, { skipColony: true });
+      assignment = (await chooseIndustryReviewFallback(bot, { skipColony: true }));
       industryReviewFallback = Boolean(assignment && ["mine", "upgrade"].includes(assignment.kind));
     }
     if (order && !assignment) {
@@ -2059,12 +2063,12 @@ async function runDirectorInternal(bots = [], options = {}) {
       const plan = require("./playerBotAgentMissionRuntime").getPlan(bot, readSharedCharacterRecord(bot.characterID), operationRuntime);
       if (plan) assignment = { kind: "agent-mission", plan };
     }
-    if (!assignment) assignment = chooseAssignment(bot, {
+    if (!assignment) assignment = (await chooseAssignment(bot, {
       prioritizeProductiveWork: needsMinimumProductiveWork,
       prioritizeCorporationStructure: headquartersWorkCanStart && !structureRuntime.isMissingCorporationHeadquarters?.(bot),
       skipColony: !canResumeColonySetup(activeColonySetups),
       allowTerritorialMining: true,
-    });
+    }));
     const colonySetupLimit = getMaxConcurrentColonySetups();
     let colonyMarketCapacityBlocked = null;
     let upgradeMarketCapacityBlocked = null;
@@ -2075,20 +2079,20 @@ async function runDirectorInternal(bots = [], options = {}) {
         "colony-setup-limit",
         now,
       );
-      assignment = chooseAssignment(bot, {
+      assignment = (await chooseAssignment(bot, {
         prioritizeProductiveWork: needsMinimumProductiveWork,
         prioritizeCorporationStructure: headquartersWorkCanStart && !structureRuntime.isMissingCorporationHeadquarters?.(bot),
         skipColony: true,
         allowTerritorialMining: true,
-      });
+      }));
     }
     if (assignment && assignment.kind === "mine" &&
         !operationRuntime.hasRoleShipFit(bot, "mining")) {
-      assignment = chooseMiningAssignment(bot, {
+      assignment = (await chooseMiningAssignment(bot, {
         prioritizeProductiveWork: needsMinimumProductiveWork,
         headquartersStructure,
         skipColony: !canResumeColonySetup(activeColonySetups),
-      });
+      }));
       if (!assignment) continue;
     }
     let reservedTerritorialMiningSystemID = 0;
@@ -2099,14 +2103,14 @@ async function runDirectorInternal(bots = [], options = {}) {
         const residents = Number(rosterSystemCounts.get(destinationSystemID)) || 0;
         const arrivals = Number(miningIncomingBySystem.get(destinationSystemID)) || 0;
         if (!canReserveSystemArrival(residents, arrivals, autonomousSystemLimit)) {
-          assignment = chooseAssignment(bot, {
+          assignment = (await chooseAssignment(bot, {
             prioritizeProductiveWork: needsMinimumProductiveWork,
             prioritizeCorporationStructure: headquartersWorkCanStart && !structureRuntime.isMissingCorporationHeadquarters?.(bot),
             headquartersStructure: corporationHeadquarters,
             skipColony: !canResumeColonySetup(activeColonySetups),
             allowTerritorialMining: true,
             skipTerritorialMining: true,
-          });
+          }));
         } else {
           reservedTerritorialMiningSystemID = destinationSystemID;
         }
@@ -2121,10 +2125,10 @@ async function runDirectorInternal(bots = [], options = {}) {
         (Number(miningIncomingBySystem.get(jitaSystemID)) || 0);
       const limit = marketArrivalLimit(jitaSystemID, autonomousSystemLimit);
       const allowJita = humanControlled || jitaSystemID === systemID || canReserveSystemArrival(residents, arrivals, limit);
-      colonyPlan = require("./playerBotColonyRuntime").planAutonomousColony(bot, {
+      colonyPlan = (await require("./playerBotColonyRuntime").planAutonomousColony(bot, {
         systemID, maxHops: colonySearchHops, allowJita,
         coverageBySystem: colonyCoverageBySystem, reservations: colonyReservations,
-      });
+      }));
       if (colonyPlan?.requiresJita && !allowJita) {
         colonyMarketCapacityBlocked = true;
         colonyQueueReason = `PI supplies require Jita; waiting for market capacity (${residents} residents, ${arrivals} inbound; limit ${limit}).`;
@@ -2134,11 +2138,11 @@ async function runDirectorInternal(bots = [], options = {}) {
       if (colonyQueueReason) {
         queueColonySetupAssignment(bot, colonyQueueReason,
           colonyMarketCapacityBlocked ? "jita-market-capacity" : "colony-supply", now);
-        assignment = chooseAssignment(bot, {
+        assignment = (await chooseAssignment(bot, {
           prioritizeProductiveWork: needsMinimumProductiveWork,
           skipColony: true,
           allowTerritorialMining: true,
-        });
+        }));
       }
     }
     let reservedUpgradeDestinationSystemID = 0;
@@ -2150,11 +2154,11 @@ async function runDirectorInternal(bots = [], options = {}) {
         if (!canReserveSystemArrival(residents, arrivals, marketArrivalLimit(destinationSystemID, autonomousSystemLimit))) {
           if (assignment.headquarters === true || assignment.headquartersStructureUpgrade === true) continue;
           upgradeMarketCapacityBlocked = { systemID: destinationSystemID, residents, arrivals };
-          assignment = chooseAssignment(bot, {
+          assignment = (await chooseAssignment(bot, {
             prioritizeProductiveWork: needsMinimumProductiveWork,
             skipColony: true,
             skipUpgrade: true,
-          });
+          }));
         } else {
           reservedUpgradeDestinationSystemID = destinationSystemID;
         }
@@ -2205,7 +2209,7 @@ async function runDirectorInternal(bots = [], options = {}) {
     let result = assignment.kind === "order-courier"
       ? require("./playerBotOperationRuntime").startFulfill(bot.characterName, assignment.order)
       : assignment.kind === "order-build"
-        ? require("./playerBotIndustryCycleRuntime").startCycle(
+        ? (await require("./playerBotIndustryCycleRuntime").startCycle(
           bot.characterName,
           assignment.blueprintTypeID,
           assignment.runs,
@@ -2219,15 +2223,15 @@ async function runDirectorInternal(bots = [], options = {}) {
               maxUnits: Number(assignment.order.vol_remaining) || assignment.runs,
             },
           },
-        )
+        ))
       : assignment.kind === "alliance-courier"
-      ? require("./playerBotAllianceLogisticsRuntime").start(
+      ? (await require("./playerBotAllianceLogisticsRuntime").start(
         bot.characterName, assignment.contractID, { autonomous: true },
-      )
+      ))
       : assignment.kind === "structure-deployment"
-      ? require("./playerBotOperationRuntime").startStructureDeployment(
+      ? (await require("./playerBotOperationRuntime").startStructureDeployment(
         bot.characterName, assignment.itemID, null, { autonomous: true, headquarters: assignment.headquarters === true },
-      )
+      ))
       : assignment.kind === "structure-procurement"
       ? require("./playerBotOperationRuntime").startStructureProcurement(
         bot.characterName, assignment.plan, { autonomous: true },
@@ -2241,26 +2245,26 @@ async function runDirectorInternal(bots = [], options = {}) {
         bot.characterName, assignment.plan, { autonomous: true },
       )
       : assignment.kind === "alliance-founding"
-      ? require("./playerBotOperationRuntime").startAllianceFounding(
+      ? (await require("./playerBotOperationRuntime").startAllianceFounding(
         bot.characterName, { autonomous: true },
-      )
+      ))
       : assignment.kind === "pi-collect"
       ? require("./playerBotOperationRuntime").startPlanetaryCollection(bot.characterName)
       : assignment.kind === "colony"
       ? require("./playerBotOperationRuntime").startColony(bot.characterName, colonyPlan)
       : assignment.kind === "sell"
       ? assignment.corporateListing
-        ? require("./playerBotIndustryCycleRuntime").startExpiredCorporateResale(bot.characterName)
+        ? (await require("./playerBotIndustryCycleRuntime").startExpiredCorporateResale(bot.characterName))
         : require("./playerBotOperationRuntime").startSell(bot.characterName, hubStationFor(bot), assignment.originStationID, { optimizeMarketDestination: true })
       : assignment.kind === "upgrade"
-      ? require("./playerBotOperationRuntime").startShipUpgrade(bot.characterName,
+      ? (await require("./playerBotOperationRuntime").startShipUpgrade(bot.characterName,
         assignment.role || (["security", "piracy", "sovereignty"].includes(bot.specialty) ? bot.specialty : "mining"),
         { autonomous: true, marketStationID: assignment.marketStationID,
           ...(industryReviewFallback ? { industryReviewFallback: true } : {}),
           ...(assignment.warMobilizationSupportID ? {
             maxSpend: assignment.maxSpend,
             warMobilizationSupportID: assignment.warMobilizationSupportID,
-          } : {}) })
+          } : {}) }))
       : assignment.kind === "agent-mission"
       ? operationRuntime.startAgentMission(bot.characterName, assignment.plan)
       : assignment.kind === "combat"
@@ -2284,13 +2288,13 @@ async function runDirectorInternal(bots = [], options = {}) {
         territorialOperation: true,
       })
       : assignment.kind === "industry"
-      ? require("./playerBotIndustryCycleRuntime").startCycle(
+      ? (await require("./playerBotIndustryCycleRuntime").startCycle(
         bot.characterName,
         AUTO_PRODUCT,
         assignment.runs,
         assignment.maxSpend,
         { stationID: assignment.facilityID || null },
-      )
+      ))
       : require("./playerBotOperationRuntime").startMining(bot.characterName, MINING_TRIPS_PER_ASSIGNMENT, {
         autonomous: true,
         ...(industryReviewFallback ? { industryReviewFallback: true } : {}),
@@ -2301,9 +2305,9 @@ async function runDirectorInternal(bots = [], options = {}) {
       // No nearby patrol target is a lack of opportunity, not a reason to
       // leave the pilot idle. Preserve the combat hull and assign the normal
       // mining ladder (or mining itself) using the pilot's own wallet.
-      const fallback = chooseCombatOpportunityFallback(bot, result, {
+      const fallback = (await chooseCombatOpportunityFallback(bot, result, {
         allowTerritorialMining: true,
-      });
+      }));
       if (fallback && fallback.kind === "mine") {
         result = fallback.territorialBase
           ? operationRuntime.startMining(bot.characterName, MINING_TRIPS_PER_ASSIGNMENT, {
@@ -2315,10 +2319,10 @@ async function runDirectorInternal(bots = [], options = {}) {
           })
           : operationRuntime.startMining(bot.characterName, MINING_TRIPS_PER_ASSIGNMENT, { autonomous: true });
       } else if (fallback && fallback.kind === "upgrade") {
-        result = operationRuntime.startShipUpgrade(bot.characterName, "mining", {
+        result = (await operationRuntime.startShipUpgrade(bot.characterName, "mining", {
           autonomous: true,
           marketStationID: fallback.marketStationID,
-        });
+        }));
       }
       if (fallback && result && result.success) {
         assignment = fallback;
@@ -2548,12 +2552,13 @@ function formatDirectorStatus() {
     `${summary.failures || 0} rejected.`;
 }
 
-function formatPlayerOrders() {
+async function formatPlayerOrders(typeID, regionID) {
   const economy = require("./playerBotEconomyRuntime");
+  if (!typeID || !regionID) return "Usage: /bots orders <typeID> while in a region.";
   const state = readState();
   const bots = require("./playerBotRuntime").listBots();
-  const orders = economy.listPlayerBuyOrders(20);
-  if (!orders.length) return "No player buy orders outside Jita. Place one at any station and a bot will check it on the next 5-minute cycle.";
+  const orders = (await economy.listPlayerBuyOrders(20, typeID, regionID));
+  if (!orders.length) return "No matching player buy orders in this region.";
   return ["Player buy orders handled by bots:", ...orders.map((order) => {
     const claim = (state.claims || {})[String(order.order_id)];
     const bot = claim && bots.find((entry) => Number(entry.characterID) === Number(claim.characterID));

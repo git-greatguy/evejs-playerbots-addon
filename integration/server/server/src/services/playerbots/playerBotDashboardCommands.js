@@ -40,7 +40,7 @@ function createDashboardCommands(deps = {}) {
     return runtime.listBots().find((bot) => Number(bot.characterID) === characterID) || null;
   }
 
-  function runOne(bot, action, args) {
+  async function runOne(bot, action, args) {
     const name = bot.characterName;
     switch (action) {
       case "pause": {
@@ -76,7 +76,7 @@ function createDashboardCommands(deps = {}) {
         const requested = String(args.role || "").toLowerCase();
         const specialty = String(bot.specialty || "").toLowerCase();
         const role = UPGRADE_ROLES.has(requested) ? requested : UPGRADE_ROLES.has(specialty) ? specialty : "mining";
-        return operations().startShipUpgrade(name, role, { force: args.force === true });
+        return (await operations().startShipUpgrade(name, role, { force: args.force === true }));
       }
       default:
         return { success: false, message: `Unknown pilot action: ${action}.` };
@@ -88,7 +88,7 @@ function createDashboardCommands(deps = {}) {
    * action (mine: trips, station; combat: mode; upgrade: role, force).
    * Returns { success, message, results: [{characterID, success, message}] }.
    */
-  function runBotCommand(characterIDs, action, args = {}) {
+  async function runBotCommand(characterIDs, action, args = {}) {
     const name = String(action || "").toLowerCase();
     if (!ACTIONS[name]) return { success: false, message: `Unknown pilot action: ${action}.` };
     const ids = [...new Set((Array.isArray(characterIDs) ? characterIDs : [characterIDs]).map(positive).filter(Boolean))];
@@ -106,7 +106,7 @@ function createDashboardCommands(deps = {}) {
       }
       let result;
       try {
-        result = runOne(bot, name, args || {}) || { success: false, message: "No result." };
+        result = (await runOne(bot, name, args || {})) || { success: false, message: "No result." };
       } catch (error) {
         result = { success: false, message: error.message || String(error) };
       }

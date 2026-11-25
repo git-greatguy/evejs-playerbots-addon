@@ -643,7 +643,7 @@ function compatibleColonyHaulers(bot, volume) {
   );
 }
 
-function planAutonomousColony(bot, options) {
+async function planAutonomousColony(bot, options) {
   const inventory = require("./playerBotInventoryRuntime");
   const economy = require("./playerBotEconomyRuntime");
   const registry = require("../inventory/itemTypeRegistry");
@@ -654,11 +654,11 @@ function planAutonomousColony(bot, options) {
   const commandCenterUpgradeLevel = getCommandCenterUpgradeLevel(bot.characterID);
   const freeCargo = inventory.getCargoBayFree(bot);
   const sourcesByType = new Map();
-  function sourcesFor(typeID) {
+  async function sourcesFor(typeID) {
     if (sourcesByType.has(typeID)) return sourcesByType.get(typeID);
     const owned = currentStationID && inventory.countHangar(bot, currentStationID, typeID)
       ? [{ typeID, stationID: currentStationID, price: 0, jita: false }] : [];
-    const offers = economy.listSellOffers(typeID).map((offer) => ({
+    const offers = (await economy.listSellOffers(typeID, economy.getBotMarketRegion(bot), { jitaFallback: true })).map((offer) => ({
       typeID,
       stationID: Number(offer.stationID),
       price: Number(offer.price),
@@ -706,7 +706,7 @@ function planAutonomousColony(bot, options) {
         const volume = Number(registry.resolveItemByTypeID(typeID)?.volume) || 1000;
         const haulers = ownsCargo || freeCargo >= volume ? [null]
           : compatibleColonyHaulers(bot, volume).flatMap(sourcesFor);
-        const centers = ownsCargo ? [null] : sourcesFor(typeID);
+        const centers = ownsCargo ? [null] : (await sourcesFor(typeID));
         const kits = [];
         for (const hull of haulers) {
           for (const center of centers) {
@@ -795,9 +795,9 @@ function getTypeName(typeID, fallback = String(typeID)) {
   return require("../inventory/itemTypeRegistry").resolveItemByTypeID(Number(typeID))?.name || fallback;
 }
 
-function buyOneWithQuoteRefresh(trade, characterName, typeID, quotedPrice, remainingBudget) {
+function buyOneWithQuoteRefresh(trade, characterName, typeID, quotedPrice, remainingBudget, originRegionID) {
   const purchase = async () => {
-    let result = await trade.buy(characterName, typeID, 1, quotedPrice);
+    let result = await trade.buy(characterName, typeID, 1, quotedPrice, originRegionID);
     if (!result.success || Number(result.bought) > 0) return result;
 
     // A quote can become stale between the read and the market fill. Confirm a
@@ -813,7 +813,7 @@ function buyOneWithQuoteRefresh(trade, characterName, typeID, quotedPrice, remai
     if (!(maxPrice >= Number(refreshed.bestAsk.price)) || maxPrice <= 0) {
       return { success: false, message: `The refreshed ${getTypeName(typeID)} ask exceeds the remaining PI budget.` };
     }
-    result = await trade.buy(characterName, typeID, 1, maxPrice);
+    result = await trade.buy(characterName, typeID, 1, maxPrice, originRegionID);
     if (result.success && Number(result.bought) < 1) {
       return { success: false, message: `The market did not fill the ${getTypeName(typeID)} purchase.` };
     }
@@ -957,7 +957,7 @@ async function advanceColony(operation, bot, kit) {
           `The planned PI supplier at station ${sourceStationID} ran out of type ${typeID}.`);
       }
       if (!quote.bestAsk) {
-        const nextSource = await trade.readBestAskOutsideJita(bot.characterName, typeID);
+        const nextSource = await trade.readBestAskOutsideJita(bot.characterName, typeID, 1, 0, operation.marketOriginRegionID);
         if (nextSource.success && nextSource.bestAsk && Number(nextSource.bestAsk.stationID) !== sourceStationID) {
           operation.purchaseSourceStationID = Number(nextSource.bestAsk.stationID);
           operation.stage = "to-purchase-source";
@@ -965,7 +965,7 @@ async function advanceColony(operation, bot, kit) {
           const economy = require("./playerBotEconomyRuntime");
           const isJitaSource = typeof economy.isJitaStation === "function" && economy.isJitaStation(sourceStationID);
           const nextJitaStationID = isJitaSource
-            ? Number(economy.findBestJitaSeedStation?.([{ typeID, quantity: 1 }], [sourceStationID])) || 0
+            ? Number(await economy.findBestJitaSeedStation?.([{ typeID, quantity: 1 }], [sourceStationID])) || 0
             : 0;
           if (nextJitaStationID) {
             operation.purchaseSourceStationID = nextJitaStationID;
@@ -990,7 +990,7 @@ async function advanceColony(operation, bot, kit) {
       kit.save(operation);
       const bought = await buyOneWithQuoteRefresh(
         trade, bot.characterName, typeID, quote.bestAsk.price,
-        MAX_KIT_SPEND - (Number(operation.spent) || 0),
+        MAX_KIT_SPEND - (Number(operation.spent) || 0), operation.marketOriginRegionID,
       );
       if (!bought.success && !bought.outcomeUnknown) { operation.pending = null; kit.save(operation); }
       if (!bought.success) return kit.block(operation, bought.outcomeUnknown ? "review" : "holding", bought.message);
@@ -1050,7 +1050,7 @@ async function advanceColony(operation, bot, kit) {
       let quoteError = "";
       for (const typeID of compatibleTypes) {
         if (hull) break;
-        const result = await trade.readBestAskOutsideJita(bot.characterName, typeID);
+        const result = await trade.readBestAskOutsideJita(bot.characterName, typeID, 1, 0, operation.marketOriginRegionID);
         if (!result.success) {
           quoteError = result.message || "Could not verify regional supply.";
           continue;
@@ -1063,7 +1063,7 @@ async function advanceColony(operation, bot, kit) {
         const regional = result.bestAsk;
         const local = quote.bestAsk;
         const regionalStation = regional && Number(regional.price) <= budget ? Number(regional.stationID) : 0;
-        const seedStation = local ? 0 : economy.findBestJitaSeedStation?.([{ typeID, quantity: 1 }], [jita]) || 0;
+        const seedStation = local ? 0 : await economy.findBestJitaSeedStation?.([{ typeID, quantity: 1 }], [jita]) || 0;
         const sourceStationID = regionalStation || seedStation;
         if (sourceStationID) {
           operation.purchaseTypeID = typeID;
@@ -1075,7 +1075,7 @@ async function advanceColony(operation, bot, kit) {
         if (!local || Number(local.price) > budget) continue;
         operation.pending = capturePurchaseMarker(bot, inventory, typeID, jita);
         kit.save(operation);
-        const bought = await buyOneWithQuoteRefresh(trade, bot.characterName, typeID, local.price, budget);
+        const bought = await buyOneWithQuoteRefresh(trade, bot.characterName, typeID, local.price, budget, operation.marketOriginRegionID);
         if (!bought.success && bought.outcomeUnknown) return kit.block(operation, "review", bought.message);
         operation.pending = null;
         if (bought.success) {
@@ -1105,7 +1105,7 @@ async function advanceColony(operation, bot, kit) {
     }
     if (!inventory.countCargo(bot, commandCenterTypeID)) {
       if (!inventory.countHangar(bot, jita, commandCenterTypeID)) {
-        const regionalSupply = await trade.readBestAskOutsideJita(bot.characterName, commandCenterTypeID);
+        const regionalSupply = await trade.readBestAskOutsideJita(bot.characterName, commandCenterTypeID, 1, 0, operation.marketOriginRegionID);
         if (!regionalSupply.success) return kit.block(operation, "holding", `Could not verify ${commandCenterName} supply outside Jita; purchase paused safely. ${regionalSupply.message}`);
         if (regionalSupply.bestAsk && Number(regionalSupply.bestAsk.price) <= MAX_KIT_SPEND - (Number(operation.spent) || 0)) {
           operation.purchaseTypeID = commandCenterTypeID;
@@ -1117,7 +1117,7 @@ async function advanceColony(operation, bot, kit) {
         const quote = await trade.readQuote(bot.characterName, commandCenterTypeID);
         if (!quote.success) return kit.block(operation, "holding", quote.message || `Could not query the Jita seed market for ${commandCenterName}s.`);
         if (!quote.bestAsk) {
-          const seedStationID = economy.findBestJitaSeedStation?.([{ typeID: commandCenterTypeID, quantity: 1 }], [jita]) || 0;
+          const seedStationID = await economy.findBestJitaSeedStation?.([{ typeID: commandCenterTypeID, quantity: 1 }], [jita]) || 0;
           if (seedStationID) {
             operation.purchaseTypeID = commandCenterTypeID;
             operation.purchaseSourceStationID = Number(seedStationID);
@@ -1133,7 +1133,7 @@ async function advanceColony(operation, bot, kit) {
         kit.save(operation);
         const bought = await buyOneWithQuoteRefresh(
           trade, bot.characterName, commandCenterTypeID, quote.bestAsk.price,
-          MAX_KIT_SPEND - (Number(operation.spent) || 0),
+          MAX_KIT_SPEND - (Number(operation.spent) || 0), operation.marketOriginRegionID,
         );
         if (!bought.success && !bought.outcomeUnknown) { operation.pending = null; kit.save(operation); }
         if (!bought.success && bought.sourceAvailable && Number(bought.sourceStationID) > 0) {

@@ -242,32 +242,15 @@ function getMarketTransactions(assetOwner, characterID) {
     : require("../account/walletState").getCharacterMarketTransactions(characterID);
 }
 
-function rowsFromMarketRowset(rowset) {
-  const entries = rowset && rowset.args && rowset.args.type === "dict"
-    ? rowset.args.entries
-    : [];
-  const linesEntry = (Array.isArray(entries) ? entries : []).find(([key]) => key === "lines");
-  if (!linesEntry) throw new Error("MARKET_QUOTE_ROWSET_INVALID");
-  const lines = linesEntry && linesEntry[1] && linesEntry[1].items;
-  return (Array.isArray(lines) ? lines : [])
-    .map((line) => ({
-      price: Number(line && line[0]) || 0,
-      quantity: Number(line && line[1]) || 0,
-      stationID: Number(line && line[10]) || 0,
-    }))
-    .filter((order) => order.price > 0 && order.quantity > 0 && order.stationID > 0);
-}
-
 async function readRegionalOrders(context, typeID) {
-  const response = await getMarketProxy().Handle_GetOrders([typeID], context.session);
-  const rowsets = response && response.args && response.args[1] && response.args[1].value;
-  if (!Array.isArray(rowsets) || rowsets.length < 2) {
-    throw new Error("MARKET_QUOTE_RESPONSE_SHAPE_INVALID");
-  }
-  return {
-    sells: rowsFromMarketRowset(rowsets[0]).sort((left, right) => left.price - right.price),
-    buys: rowsFromMarketRowset(rowsets[1]).sort((left, right) => right.price - left.price),
-  };
+  const book = await require("./playerBotEconomyRuntime").readMarketBook(context.regionID, typeID);
+  const normalize = (rows) => rows.map((row) => ({
+    orderID: String(row.order_id),
+    price: Number(row.price),
+    quantity: Number(row.vol_remaining),
+    stationID: Number(row.station_id),
+  })).filter((row) => row.price > 0 && row.quantity > 0 && row.stationID > 0);
+  return { sells: normalize(book.sells), buys: normalize(book.buys) };
 }
 
 async function readLocalQuote(context, typeID) {
@@ -296,13 +279,13 @@ function bidsOutsideJita(orders, stationIsJita = isJitaStation) {
     .sort((left, right) => Number(right.price) - Number(left.price) || Number(left.stationID) - Number(right.stationID));
 }
 
-async function readBestAskOutsideJita(botQuery, typeID, minimumQuantity = 1, excludedStationID = 0) {
+async function readBestAskOutsideJita(botQuery, typeID, minimumQuantity = 1, excludedStationID = 0, originRegionID = 0) {
   const context = getDockedTradeContext(botQuery);
   if (!context.success) return context;
   const type = validateTradeType(typeID);
   if (!type.success) return type;
   try {
-    const orders = await readRegionalOrders(context, type.typeID);
+    const orders = await readRegionalOrders({ ...context, regionID: Number(originRegionID) || context.regionID }, type.typeID);
     const bestAsk = selectBestAskOutsideJita(orders.sells, minimumQuantity, isJitaStation, excludedStationID);
     return { success: true, bestAsk, regionID: context.regionID };
   } catch (error) {
@@ -736,7 +719,7 @@ async function executeAutoSellTask(task, provider) {
     return previousProgress.result;
   }
 
-  const reconcileListing = (progress = previousProgress) => {
+  const reconcileListing = async (progress = previousProgress) => {
     const marker = progress;
     const stationID = Number(marker.stationID || payload.stationID) || 0;
     const typeID = Number(marker.typeID || payload.typeID) || 0;
@@ -747,7 +730,7 @@ async function executeAutoSellTask(task, provider) {
       return { state: "unknown", result: { success: false, sold: 0, listed: 0, netProceeds: 0, outcomeUnknown: true, requiresReview: true, message: "The recovered auto-sale is missing its market checkpoint and needs manual review." } };
     }
     const economy = require("./playerBotEconomyRuntime");
-    const orders = economy.listOpenSellOrders(characterID, stationID, typeID);
+    const orders = (await economy.listOpenSellOrders(characterID, stationID, typeID));
     if (!orders.success) {
       return { state: "unknown", result: { success: false, sold: 0, listed: 0, netProceeds: 0, outcomeUnknown: true, requiresReview: true, message: `Could not inspect the market after recovering an auto-sale: ${orders.error}.` } };
     }
@@ -800,7 +783,7 @@ async function executeAutoSellTask(task, provider) {
   };
 
   if (previousProgress.phase === "listing") {
-    const reconciled = reconcileListing();
+    const reconciled = await reconcileListing();
     if (reconciled.state === "settled" || reconciled.state === "unknown") {
       if (reconciled.state === "unknown") {
         try { disableAutoSellPolicy(provider.characterName); } catch (_) { /* keep the review result durable */ }
@@ -843,7 +826,7 @@ async function executeAutoSellTask(task, provider) {
   }
   const requestedQuantity = Math.min(remainingAuthorizedQuantity, currentQuantity);
   const economy = require("./playerBotEconomyRuntime");
-  const baselineOrders = economy.listOpenSellOrders(characterID, context.stationID, Number(payload.typeID));
+  const baselineOrders = (await economy.listOpenSellOrders(characterID, context.stationID, Number(payload.typeID)));
   if (!baselineOrders.success) throw new Error(`Could not read existing sell orders before auto-sale: ${baselineOrders.error}.`);
   const transactionsBefore = getMarketTransactions({ isCorp: false }, characterID);
   const baselineTransactionID = transactionsBefore.reduce((highest, entry) =>
@@ -870,7 +853,7 @@ async function executeAutoSellTask(task, provider) {
     MAX_PLAYERBOT_SELL_ORDER_DAYS,
   );
   if (!result.success) {
-    const reconciled = reconcileListing(marker);
+    const reconciled = await reconcileListing(marker);
     if (reconciled.state === "settled" || reconciled.state === "unknown") {
       const settledResult = reconciled.state === "settled"
         ? reconciled.result
@@ -1040,14 +1023,14 @@ async function executeAutoBuyTask(task, provider) {
   return result;
 }
 
-async function buy(botQuery, typeID, quantity, maxUnitPrice) {
+async function buy(botQuery, typeID, quantity, maxUnitPrice, originRegionID = 0) {
   const context = getDockedTradeContext(botQuery);
   if (!context.success) return context;
   const type = validateTradeType(typeID);
   if (!type.success) return type;
 
   if (isJitaTradeContext(context)) {
-    const regionalSupply = await readBestAskOutsideJita(context.bot.characterName, type.typeID);
+    const regionalSupply = await readBestAskOutsideJita(context.bot.characterName, type.typeID, 1, 0, originRegionID);
     if (!regionalSupply.success) {
       return { success: false, message: `Jita purchase blocked because non-Jita supply could not be verified: ${regionalSupply.message}` };
     }
@@ -1164,7 +1147,7 @@ async function sell(botQuery, itemID, quantity, minimumUnitPrice, options = {}) 
     : Math.trunc(Number(quantity));
   let targetOrderID = null;
   if (options.targetOrderID) {
-    const order = require("./playerBotEconomyRuntime").getPlayerBuyOrder(options.targetOrderID);
+    const order = (await require("./playerBotEconomyRuntime").getPlayerBuyOrder(options.targetOrderID));
     if (!order || Number(order.type_id) !== Number(type.typeID) || Number(order.station_id) !== Number(context.stationID)) {
       return { success: false, message: `Player buy order ${options.targetOrderID} is no longer open for this item at this station.` };
     }
@@ -1266,7 +1249,7 @@ async function listSellOrder(botQuery, itemID, quantity, unitPrice, _durationDay
   const transactionsBefore = getMarketTransactions(assetOwner, botID);
   const baselineTransactionID = transactionsBefore.reduce((highest, entry) =>
     Math.max(highest, Number(entry.transactionID) || 0), 0);
-  const beforeOrders = economy.listOpenSellOrders(assetOwner.ownerID, context.stationID, Number(item.typeID));
+  const beforeOrders = (await economy.listOpenSellOrders(assetOwner.ownerID, context.stationID, Number(item.typeID), assetOwner.isCorp));
   if (!beforeOrders.success) return { success: false, message: `Could not read existing orders before listing: ${beforeOrders.error}.` };
   const baselineOrderIDs = new Set(beforeOrders.orders.map((order) => Number(order.order_id)));
   activeTradeBots.add(botID);
@@ -1287,7 +1270,7 @@ async function listSellOrder(botQuery, itemID, quantity, unitPrice, _durationDay
     const sold = afterTransactions.reduce((total, entry) => total + Math.max(0, Number(entry.quantity) || 0), 0);
     const jitaFillTransactions = afterTransactions.filter((entry) => isJitaStation(Number(entry.stationID)));
     const jitaFillUnits = jitaFillTransactions.reduce((total, entry) => total + Math.max(0, Number(entry.quantity) || 0), 0);
-    const afterOrders = economy.listOpenSellOrders(assetOwner.ownerID, context.stationID, Number(item.typeID));
+    const afterOrders = (await economy.listOpenSellOrders(assetOwner.ownerID, context.stationID, Number(item.typeID), assetOwner.isCorp));
     if (!afterOrders.success) return { success: false, message: `Could not read the resulting order after listing: ${afterOrders.error}.` };
     const createdOrders = afterOrders.orders.filter((order) => !baselineOrderIDs.has(Number(order.order_id)));
     const orderUnits = createdOrders.reduce((total, order) => total + Math.max(0,
@@ -1344,7 +1327,7 @@ async function placeBuyOrder(botQuery, typeID, quantity, unitPrice, durationDays
   if (getCurrentBalance(botID) < price * units) return { success: false, message: "The wallet does not cover the order escrow." };
   if (activeTradeBots.has(botID)) return { success: false, message: `${context.bot.characterName} already has another market operation in progress.` };
   const economy = require("./playerBotEconomyRuntime");
-  const before = economy.listOpenBuyOrders(botID, context.stationID, typeCheck.typeID);
+  const before = await economy.listOpenBuyOrders(botID, context.stationID, typeCheck.typeID);
   if (!before.success) return { success: false, message: `Could not read existing orders: ${before.error}.` };
   const baseline = new Set(before.orders.map((order) => Number(order.order_id)));
   activeTradeBots.add(botID);
@@ -1353,7 +1336,7 @@ async function placeBuyOrder(botQuery, typeID, quantity, unitPrice, durationDays
       [context.stationID, typeCheck.typeID, price, units, -1, 1, Math.max(1, Math.min(90, Math.trunc(durationDays))), false],
       context.session,
     );
-    const after = economy.listOpenBuyOrders(botID, context.stationID, typeCheck.typeID);
+    const after = await economy.listOpenBuyOrders(botID, context.stationID, typeCheck.typeID);
     const created = (after.orders || []).filter((order) => !baseline.has(Number(order.order_id)));
     return created.length
       ? { success: true, orderID: Number(created[0].order_id), units: Number(created[0].vol_remaining), price,

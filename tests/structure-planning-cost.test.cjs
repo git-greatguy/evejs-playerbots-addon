@@ -70,10 +70,10 @@ test("a corporation with a structure ranks only its caretaker first, without act
   assert.equal(calls.listStructures, 0);
 });
 
-test("purchase planning stops at the cached check when the corporation already has a structure", () => {
+test("purchase planning stops at the cached check when the corporation already has a structure", async () => {
   const { api, calls } = load({ structures: [astrahus], managers: [1001] });
   for (let pass = 0; pass < 5; pass += 1) {
-    assert.equal(api.findAutonomousPurchasePlan({ characterID: 1001, corporationID: 42, specialty: "trade" }), null);
+    assert.equal(await api.findAutonomousPurchasePlan({ characterID: 1001, corporationID: 42, specialty: "trade" }), null);
   }
   assert.equal(calls.actorSession, 0);
   assert.equal(calls.listStructures, 0);
@@ -90,11 +90,11 @@ test("structure-manager authority is checked once per pilot while the corporatio
   assert.equal(calls.listStructures, 0);
 });
 
-test("a failed purchase plan is not rebuilt on every director pass", () => {
+test("a failed purchase plan is not rebuilt on every director pass", async () => {
   const { api, calls } = load({ managers: [1001] });
   const bot = { characterID: 1001, corporationID: 42, specialty: "trade" };
-  assert.equal(api.findAutonomousPurchasePlan(bot), null);
+  assert.equal(await api.findAutonomousPurchasePlan(bot), null);
   assert.equal(calls.operationScans, 1);
-  for (let pass = 0; pass < 5; pass += 1) assert.equal(api.findAutonomousPurchasePlan(bot), null);
+  for (let pass = 0; pass < 5; pass += 1) assert.equal(await api.findAutonomousPurchasePlan(bot), null);
   assert.equal(calls.operationScans, 1, "retried at most once a minute");
 });

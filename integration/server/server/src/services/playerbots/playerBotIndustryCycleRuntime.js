@@ -185,7 +185,7 @@ function saveCorporateListings(listings) {
   }
 }
 
-function rememberCorporateListing(cycle, order) {
+async function rememberCorporateListing(cycle, order) {
   if (!cycle || cycle.assetOwner !== "corporation" || !order) return;
   const orderID = normalizePositiveInteger(order.order_id);
   if (!orderID) return;
@@ -201,7 +201,7 @@ function rememberCorporateListing(cycle, order) {
     if (previous && Number(previous.corporationID) === corporationID &&
         Number(previous.stationID) === stationID && Number(previous.typeID) === typeID &&
         Number(previous.hangarDivision) === hangarDivision && !previous.relistedByOrderID) {
-      const previousOrder = require("./playerBotEconomyRuntime").getOpenOrder(previous.orderID);
+      const previousOrder = (await require("./playerBotEconomyRuntime").getOpenOrder(previous.orderID));
       if (String(previousOrder && previousOrder.state || "").toLowerCase() === "expired") {
         previous.relistedByOrderID = orderID;
       }
@@ -231,7 +231,7 @@ function getCycle(characterID) {
   return cycle ? JSON.parse(JSON.stringify(cycle)) : null;
 }
 
-function findExpiredCorporateOutput(bot) {
+async function findExpiredCorporateOutput(bot) {
   const characterID = normalizePositiveInteger(bot && bot.characterID);
   const corporationID = normalizePositiveInteger(
     getCharacterRecord(characterID)?.corporationID || bot && bot.corporationID,
@@ -243,7 +243,7 @@ function findExpiredCorporateOutput(bot) {
       !listing.relistedByOrderID && normalizePositiveInteger(listing.orderID))
     .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
   for (const listing of listings) {
-    const order = economy.getOpenOrder(listing.orderID);
+    const order = (await economy.getOpenOrder(listing.orderID));
     if (!order || String(order.state || "").toLowerCase() !== "expired") continue;
     const cycle = {
       characterID,
@@ -263,7 +263,7 @@ function findExpiredCorporateOutput(bot) {
   return null;
 }
 
-function startExpiredCorporateResale(botQuery) {
+async function startExpiredCorporateResale(botQuery) {
   const bot = getPlayerBots().resolveBot(botQuery);
   if (!bot) return { success: false, message: `No unique playerbot found with that name: ${botQuery}.` };
   const existing = getCycle(bot.characterID);
@@ -271,7 +271,7 @@ function startExpiredCorporateResale(botQuery) {
       existing.loadSheddingPaused === true)) {
     return { success: false, message: `${bot.characterName} already has industry cycle ${existing.cycleID} in progress (${existing.stage}).` };
   }
-  const listing = findExpiredCorporateOutput(bot);
+  const listing = (await findExpiredCorporateOutput(bot));
   if (!listing) return { success: false, message: `${bot.characterName} has no accessible corporate sell order with returned stock after expiry.` };
   const cycle = {
     ...listing.cycle,
@@ -427,12 +427,12 @@ function journalAfterListingCheckpoint(entry, pending) {
   return startedAtMs > 0 && journalMs > 0 && journalMs >= startedAtMs - 2_000;
 }
 
-function reconcilePendingListing(cycle) {
+async function reconcilePendingListing(cycle) {
   const pending = cycle && cycle.pending;
   if (!pending || pending.action !== "list") return false;
   const economy = require("./playerBotEconomyRuntime");
   const ownerID = getCycleAssetOwnerID(cycle);
-  const orders = economy.listOpenSellOrders(ownerID, cycle.stationID, cycle.productTypeID);
+  const orders = (await economy.listOpenSellOrders(ownerID, cycle.stationID, cycle.productTypeID, cycle.assetOwner === "corporation"));
   if (!orders.success || !Array.isArray(pending.baselineOrderIDs)) return false;
 
   const baselineIDs = new Set(pending.baselineOrderIDs.map(Number));
@@ -495,7 +495,7 @@ function reconcilePendingListing(cycle) {
       units: Math.max(0, Number(order.vol_remaining) || 0),
       price: Number(order.price) || 0,
     }))];
-    for (const order of createdOrders) rememberCorporateListing(cycle, order);
+    for (const order of createdOrders) (await rememberCorporateListing(cycle, order));
   }
   if (jitaUnits > 0) {
     cycle.ledger.jitaPolicyViolationUnits = (Number(cycle.ledger.jitaPolicyViolationUnits) || 0) + jitaUnits;
@@ -515,13 +515,14 @@ function normalizeListingOrderSnapshot(orders) {
     remaining: Math.max(0, Math.trunc(Number(order && (order.remaining ?? order.vol_remaining ?? order.volRemaining)) || 0)),
     price: roundIsk(order && order.price),
     updatedAt: String(order && (order.updated_at || order.updatedAt) || ""),
+    stateChangedAt: String(order && (order.last_state_change_at || order.stateChangedAt) || ""),
   })).sort((left, right) => left.orderID - right.orderID);
 }
 
 // A listing timeout can be retried only after authoritative reads prove no
 // side effect occurred. Older durable checkpoints have IDs but no full order
 // snapshot; for those, every existing order must also predate the attempt.
-function pendingListingNoEffectFingerprint(cycle) {
+async function pendingListingNoEffectFingerprint(cycle) {
   const pending = cycle && cycle.pending;
   if (!pending || pending.action !== "list" || !Array.isArray(pending.baselineOrderIDs)) return null;
   const startedAtMs = Date.parse(pending.startedAt || "");
@@ -530,7 +531,7 @@ function pendingListingNoEffectFingerprint(cycle) {
 
   const economy = require("./playerBotEconomyRuntime");
   const ownerID = getCycleAssetOwnerID(cycle);
-  const orderResult = economy.listOpenSellOrders(ownerID, cycle.stationID, cycle.productTypeID);
+  const orderResult = (await economy.listOpenSellOrders(ownerID, cycle.stationID, cycle.productTypeID, cycle.assetOwner === "corporation"));
   if (!orderResult.success || !Array.isArray(orderResult.orders)) return null;
   const baselineIDs = [...new Set(pending.baselineOrderIDs.map(Number))].sort((left, right) => left - right);
   const currentOrders = normalizeListingOrderSnapshot(orderResult.orders);
@@ -561,9 +562,9 @@ function pendingListingNoEffectFingerprint(cycle) {
   return JSON.stringify({ orders: currentOrders, remainingUnits, balance: roundIsk(getCycleBalance(cycle)) });
 }
 
-function confirmPendingListingNoEffect(cycle, now = Date.now()) {
+async function confirmPendingListingNoEffect(cycle, now = Date.now()) {
   const pending = cycle && cycle.pending;
-  const fingerprint = pendingListingNoEffectFingerprint(cycle);
+  const fingerprint = (await pendingListingNoEffectFingerprint(cycle));
   const startedAtMs = Date.parse(pending && pending.startedAt || "");
   if (!fingerprint || !(startedAtMs > 0)) {
     if (pending) pending.listingAutoRecoveryBlocked = true;
@@ -662,7 +663,7 @@ function block(cycle, status, reason) {
   return { done: status !== "holding", delayMs: WAIT_DELAY_MS };
 }
 
-function startCycle(botQuery, blueprintTypeID, runs, maxSpend, options = {}) {
+async function startCycle(botQuery, blueprintTypeID, runs, maxSpend, options = {}) {
   const bot = getPlayerBots().resolveBot(botQuery);
   if (!bot) return { success: false, message: `No unique playerbot found with that name: ${botQuery}.` };
   if (bot.specialty !== "industry") {
@@ -735,7 +736,7 @@ function startCycle(botQuery, blueprintTypeID, runs, maxSpend, options = {}) {
     if (corporateAssets) {
       return { success: false, message: "Corporation cycles sell or list output from the selected shared hangar; remote order delivery is not enabled for shared assets." };
     }
-    const order = require("./playerBotEconomyRuntime").getPlayerBuyOrder(options.deliverTo.orderID);
+    const order = (await require("./playerBotEconomyRuntime").getPlayerBuyOrder(options.deliverTo.orderID));
     const requestedStationID = normalizePositiveInteger(options.deliverTo.stationID);
     if (!order || Number(order.type_id) !== Number(definition.productTypeID) ||
         Number(order.station_id) !== requestedStationID || Number(order.vol_remaining) <= 0) {
@@ -1053,7 +1054,7 @@ async function buyFromBestAsk(cycle, bot, typeID, neededUnits, kind, atStationID
       if (Number(cycle.jitaUnavailableUntil || 0) > Date.now()) {
         return block(cycle, "holding", `No local sell orders for ${typeID}; Jita is also out of stock. Waiting for supply at ${cycle.stationID}.`);
       }
-      const supply = await getTrade().readBestAskOutsideJita(bot.characterName, typeID);
+      const supply = await getTrade().readBestAskOutsideJita(bot.characterName, typeID, 1, 0, cycle.marketOriginRegionID);
       if (!supply.success) return block(cycle, "holding", `Could not verify non-Jita supply for ${typeID}; the purchase is paused safely. ${supply.message}`);
       // Use any live regional source before travelling to the seed market.
       return startJitaRun(cycle, [{ typeID, units: neededUnits, kind }],
@@ -1089,7 +1090,7 @@ async function buyFromBestAsk(cycle, bot, typeID, neededUnits, kind, atStationID
   };
   cycle.status = "active";
   saveCycle(cycle);
-  const trade = await getTrade().buy(bot.characterName, typeID, quantity, ask.price);
+  const trade = await getTrade().buy(bot.characterName, typeID, quantity, ask.price, cycle.marketOriginRegionID);
   const purchaseAttempt = { ...cycle.pending };
   const observed = settlePendingPurchase(cycle);
   if (!trade.success && trade.outcomeUnknown) {
@@ -1211,36 +1212,22 @@ function isJitaSeedStation(economy, stationID) {
     : Number(stationID) === Number(economy.JITA_BUY_STATION_ID);
 }
 
-function selectJitaSeedStation(economy, items, excludedStationIDs = []) {
+async function selectJitaSeedStation(economy, items, excludedStationIDs = []) {
   if (typeof economy.findBestJitaSeedStation !== "function") return 0;
-  return Number(economy.findBestJitaSeedStation(items, excludedStationIDs)) || 0;
+  return Number(await economy.findBestJitaSeedStation(items, excludedStationIDs)) || 0;
 }
 
-async function readBestJitaSeedQuote(trade, economy, bot, typeID) {
-  const stationID = selectJitaSeedStation(economy, [{ typeID: Number(typeID), quantity: 1 }]) ||
-    Number(economy.JITA_BUY_STATION_ID) || 0;
-  let quote = { success: false };
-  if (stationID && typeof trade.readQuoteAt === "function") {
-    quote = await trade.readQuoteAt(bot.characterName, Number(typeID), stationID)
-      .catch(() => ({ success: false }));
-    if (quote.success && quote.bestAsk) return quote;
-  }
-  const offer = typeof economy.listSellOffers === "function"
-    ? economy.listSellOffers(Number(typeID))
-      .filter((entry) => typeof economy.isJitaStation === "function" &&
-        economy.isJitaStation(Number(entry.stationID)) &&
-        Number(entry.price) > 0 && Number(entry.quantity) > 0)
-      .sort((left, right) => Number(left.price) - Number(right.price) ||
-        Number(left.stationID) - Number(right.stationID))[0] || null
-    : null;
-  return { success: Boolean(offer), stationID: Number(offer && offer.stationID) || stationID, bestAsk: offer };
+async function readBestJitaSeedQuote(economy, typeID) {
+  const offers = await economy.listJitaSellOffers(Number(typeID));
+  const bestAsk = offers.find((offer) => offer.price > 0 && offer.quantity > 0) || null;
+  return { success: Boolean(bestAsk), stationID: bestAsk?.stationID || 0, bestAsk };
 }
 
-function startJitaRun(cycle, items, sourceStationID = null) {
+async function startJitaRun(cycle, items, sourceStationID = null) {
   const economy = require("./playerBotEconomyRuntime");
   const requestedSource = Number(sourceStationID) || economy.JITA_BUY_STATION_ID;
   const source = isJitaSeedStation(economy, requestedSource)
-    ? selectJitaSeedStation(economy, items) || requestedSource
+    ? await selectJitaSeedStation(economy, items) || requestedSource
     : requestedSource;
   cycle.jitaRun = {
     items: items.map((item) => ({ ...item })),
@@ -1319,7 +1306,7 @@ async function stepJitaRun(cycle, bot) {
             ...(run.checkedJitaStationIDs || []).map(Number),
             Number(sourceStationID),
           ].filter(Boolean))];
-          const nextSeedStationID = selectJitaSeedStation(economy, run.items, checked);
+          const nextSeedStationID = await selectJitaSeedStation(economy, run.items, checked);
           if (nextSeedStationID && nextSeedStationID !== Number(sourceStationID)) {
             run.checkedJitaStationIDs = checked;
             run.sourceStationID = nextSeedStationID;
@@ -1452,11 +1439,11 @@ function reservedOrderUnits(orderID, exceptCharacterID = 0) {
   }, 0);
 }
 
-function eligibleExternalOrders(typeID, units = 1) {
+async function eligibleExternalOrders(typeID, units, regionID) {
   const economy = require("./playerBotEconomyRuntime");
   const itemType = require("../inventory/itemTypeRegistry").resolveItemByTypeID(Number(typeID)) || {};
   const isShip = Number(itemType.categoryID) === 6;
-  return economy.listPlayerBuyOrders(2000, typeID)
+  return (await economy.listPlayerBuyOrders(2000, typeID, regionID))
     .filter((order) => {
       const stationID = Number(order.station_id) || 0;
       const station = worldData.getStationByID(stationID);
@@ -1482,7 +1469,7 @@ async function stepPlan(cycle, bot) {
         local = await trade.readQuote(bot.characterName, typeID);
         if (!local.success || !local.bestAsk) regional = await trade.readBestAskOutsideJita(bot.characterName, typeID);
         if ((!local.success || !local.bestAsk) && regional.success && !regional.bestAsk) {
-          jita = await readBestJitaSeedQuote(trade, economy, bot, typeID);
+          jita = await readBestJitaSeedQuote(economy, typeID);
         }
       } catch (error) {
         // Market unavailable; treated as no quote.
@@ -1525,7 +1512,7 @@ async function stepPlan(cycle, bot) {
     const maxRunsByTransport = cycle.structureFacility === true
       ? (outputVolume > 0 ? Math.floor(structureTransportCapacity / outputVolume) : 0)
       : Infinity;
-    const productOrders = eligibleExternalOrders(Number(definition.productTypeID), perRun)
+    const productOrders = (await eligibleExternalOrders(Number(definition.productTypeID), perRun, require("./playerBotEconomyRuntime").getBotMarketRegion(bot)))
       .map((order) => ({
         order,
         availableUnits: Math.max(0, Number(order.vol_remaining) - reservedOrderUnits(order.order_id, cycle.characterID)),
@@ -1868,7 +1855,7 @@ async function stepDeliverOrder(cycle, bot) {
   const inventory = require("./playerBotInventoryRuntime");
   const economy = require("./playerBotEconomyRuntime");
   const target = cycle.deliverTo;
-  let order = target && economy.getPlayerBuyOrder(target.orderID);
+  let order = target && (await economy.getPlayerBuyOrder(target.orderID));
   if (!order || Number(order.type_id) !== Number(cycle.productTypeID) ||
       Number(order.station_id) !== Number(target.stationID)) {
     cycle.deliverTo = null;
@@ -1895,7 +1882,7 @@ async function stepDeliverOrder(cycle, bot) {
   const step = await operations.travelToStation(cycle, bot, target.stationID, CYCLE_STORE);
   if (step) return step;
   if (!isShip) inventory.unloadCargo(bot);
-  order = economy.getPlayerBuyOrder(target.orderID);
+  order = (await economy.getPlayerBuyOrder(target.orderID));
   if (!order || Number(order.type_id) !== Number(cycle.productTypeID) ||
       Number(order.station_id) !== Number(target.stationID)) {
     cycle.deliverTo = null;
@@ -1989,8 +1976,8 @@ async function advanceRegionalSaleRoute(cycle, bot) {
 async function stepSell(cycle, bot) {
   if (cycle.deliverTo && Number(cycle.deliverTo.stationID)) return stepDeliverOrder(cycle, bot);
   const economy = require("./playerBotEconomyRuntime");
-  if (cycle.pending && cycle.pending.action === "list" && !reconcilePendingListing(cycle)) {
-    const recovery = confirmPendingListingNoEffect(cycle);
+  if (cycle.pending && cycle.pending.action === "list" && !(await reconcilePendingListing(cycle))) {
+    const recovery = (await confirmPendingListingNoEffect(cycle));
     if (recovery.ambiguous) {
       return block(cycle, "review", "Unreconciled sell listing changed or cannot prove an unchanged order, inventory, transaction, and wallet state. No retry was issued; operator review is required.");
     }
@@ -2117,7 +2104,7 @@ async function stepSell(cycle, bot) {
       const ownerID = getCycleAssetOwnerID(cycle);
       const baselineUnits = countUnits(cycle.characterID, cycle.stationID, cycle.productTypeID, cycle);
       const baselineBalance = getCycleBalance(cycle);
-      const beforeOrders = economy.listOpenSellOrders(ownerID, cycle.stationID, cycle.productTypeID);
+      const beforeOrders = (await economy.listOpenSellOrders(ownerID, cycle.stationID, cycle.productTypeID, cycle.assetOwner === "corporation"));
       if (!beforeOrders.success) return block(cycle, "holding", `Could not read orders to reconcile the sale: ${beforeOrders.error}.`);
       const baselineOrderIDs = beforeOrders.orders.map((order) => Number(order.order_id));
       const baselineTransactions = getCycleMarketTransactions(cycle);
@@ -2149,7 +2136,7 @@ async function stepSell(cycle, bot) {
       const listedNow = Math.max(0, Number(result.listed) || 0);
       if (removed !== soldNow + listedNow || (!removed && Math.abs(baselineBalance - balanceAfter) >= 0.01)) return block(cycle, "review", "The listing does not match the hangar, wallet, and market transactions; check the orders before continuing.");
       if (listedNow > 0) {
-        const afterOrders = economy.listOpenSellOrders(ownerID, cycle.stationID, cycle.productTypeID);
+        const afterOrders = (await economy.listOpenSellOrders(ownerID, cycle.stationID, cycle.productTypeID, cycle.assetOwner === "corporation"));
         const known = new Set(baselineOrderIDs);
         const created = afterOrders.success ? afterOrders.orders.filter((order) => !known.has(Number(order.order_id))) : [];
         if (created.length !== 1 || Number(created[0].vol_remaining) !== listedNow ||
@@ -2157,7 +2144,7 @@ async function stepSell(cycle, bot) {
           return block(cycle, "review", "The listed order does not match the stock removed; check orders and transactions.");
         }
         cycle.ledger.saleOrders = [...(cycle.ledger.saleOrders || []), { orderID: Number(created[0].order_id), units: listedNow, price: listPrice }];
-        rememberCorporateListing(cycle, created[0]);
+        (await rememberCorporateListing(cycle, created[0]));
       }
       listed += listedNow;
       soldDuringListing += soldNow;

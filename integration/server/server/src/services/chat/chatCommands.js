@@ -1363,7 +1363,7 @@ function executeClientChatCommand(session, rawMessage, chatHub, options = {}) {
   return executeChatCommand(session, rawMessage, chatHub, options);
 }
 
-function executeChatCommand(session, rawMessage, chatHub, options = {}) {
+async function executeChatCommand(session, rawMessage, chatHub, options = {}) {
   const trimmed = String(rawMessage || "").trim();
   if (!isChatCommandText(trimmed)) {
     return { handled: false };
@@ -1428,12 +1428,12 @@ function executeChatCommand(session, rawMessage, chatHub, options = {}) {
     if (!fitArgs.fittingID) {
       return handledResult(chatHub, session, options, "Usage: /fitbot <fittingID|fitting-link> [maxISK].");
     }
-    const result = require("../playerbots/playerBotOperationRuntime").startSavedFitting(
+    const result = (await require("../playerbots/playerBotOperationRuntime").startSavedFitting(
       bot.characterName,
       fitArgs.fittingID,
       session,
       fitArgs.maxSpend,
-    );
+    ));
     return handledResult(chatHub, session, options, result.message);
   }
 
@@ -1464,8 +1464,9 @@ function executeChatCommand(session, rawMessage, chatHub, options = {}) {
     if (!argumentText || /^(status|info)$/i.test(argumentText)) {
       return handledResult(chatHub, session, options, playerBots.getStatusMessage());
     }
-    if (/^orders$/i.test(argumentText)) {
-      return handledResult(chatHub, session, options, require("../playerbots/playerBotDirectorRuntime").formatPlayerOrders());
+    const orderMatch = argumentText.match(/^orders(?:\s+(\d+))?$/i);
+    if (orderMatch) {
+      return handledResult(chatHub, session, options, await require("../playerbots/playerBotDirectorRuntime").formatPlayerOrders(Number(orderMatch[1]), Number(session?.regionID)));
     }
     const fittingMatch = argumentText.match(/^fit\s+(.+?)\s+(\S+)(?:\s+(\d+(?:\.\d{1,2})?))?$/i);
     if (fittingMatch) {
@@ -1474,12 +1475,12 @@ function executeChatCommand(session, rawMessage, chatHub, options = {}) {
       if (!canControlPlayerBot(session, bot)) return handledResult(chatHub, session, options, "You can only control playerbots in your corporation or fleet; staff/admin can control any playerbot.");
       const fitArgs = parsePlayerbotFitCommandArgs(`${fittingMatch[2]}${fittingMatch[3] ? ` ${fittingMatch[3]}` : ""}`);
       if (!fitArgs.fittingID) return handledResult(chatHub, session, options, "Usage: /playerbots fit <bot> <fittingID|fitting-link> [maxISK].");
-      const result = require("../playerbots/playerBotOperationRuntime").startSavedFitting(
+      const result = (await require("../playerbots/playerBotOperationRuntime").startSavedFitting(
         bot.characterName,
         fitArgs.fittingID,
         session,
         fitArgs.maxSpend,
-      );
+      ));
       return handledResult(chatHub, session, options, result.message);
     }
     const allianceFoundMatch = argumentText.match(/^alliance\s+found\s+(.+)$/i);
@@ -1487,7 +1488,7 @@ function executeChatCommand(session, rawMessage, chatHub, options = {}) {
       const bot = playerBots.resolveBot(allianceFoundMatch[1]);
       if (!bot) return handledResult(chatHub, session, options, `No unique playerbot found with that name: ${allianceFoundMatch[1]}.`);
       if (!canControlPlayerBot(session, bot)) return handledResult(chatHub, session, options, "You can only control playerbots in your corporation or fleet; staff/admin can control any playerbot.");
-      const result = require("../playerbots/playerBotOperationRuntime").startAllianceFounding(bot.characterName);
+      const result = (await require("../playerbots/playerBotOperationRuntime").startAllianceFounding(bot.characterName));
       return handledResult(chatHub, session, options, result.message);
     }
     const defenseMatch = argumentText.match(/^defense(?:\s+([\s\S]*))?$/i);
@@ -1560,9 +1561,9 @@ function executeChatCommand(session, rawMessage, chatHub, options = {}) {
         : sovereigntyMatch
         ? operations.startSovereignty(bot.characterName)
         : structureDeployMatch
-        ? operations.startStructureDeployment(bot.characterName, Number(structureDeployMatch[2]), structureDeployMatch[3] ? Number(structureDeployMatch[3]) : null)
+        ? (await operations.startStructureDeployment(bot.characterName, Number(structureDeployMatch[2]), structureDeployMatch[3] ? Number(structureDeployMatch[3]) : null))
         : upgradeMatch
-        ? operations.startShipUpgrade(bot.characterName, String(upgradeMatch[2] || "mining").toLowerCase(), { force: Boolean(upgradeMatch[3]) })
+        ? (await operations.startShipUpgrade(bot.characterName, String(upgradeMatch[2] || "mining").toLowerCase(), { force: Boolean(upgradeMatch[3]) }))
         : haulMatch
         ? operations.startHaul(bot.characterName, Number(haulMatch[2]), Number(haulMatch[3]), Number(haulMatch[4]), haulMatch[5] ? Number(haulMatch[5]) : null)
         : mineMatch
@@ -1597,7 +1598,7 @@ function executeChatCommand(session, rawMessage, chatHub, options = {}) {
       const cycleRuntime = require("../playerbots/playerBotIndustryCycleRuntime");
       const action = industryCycleStartMatch ? "start" : industryCycleControlMatch[1].toLowerCase();
       const result = action === "start"
-        ? cycleRuntime.startCycle(
+        ? (await cycleRuntime.startCycle(
           bot.characterName,
           Number(industryCycleStartMatch[2]),
           Number(industryCycleStartMatch[3]),
@@ -1612,7 +1613,7 @@ function executeChatCommand(session, rawMessage, chatHub, options = {}) {
             } : {}),
             requestedByCharacterID: Number(session && (session.characterID || session.charID || session.charid)) || 0,
           },
-        )
+        ))
         : action === "stop"
           ? cycleRuntime.stopCycle(bot.characterName)
           : action === "resume"

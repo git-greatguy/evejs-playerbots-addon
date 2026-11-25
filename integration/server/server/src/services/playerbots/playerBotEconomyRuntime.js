@@ -7,7 +7,7 @@
 // build and list. Player buy orders anywhere are read from the market
 // database (read-only) so bots can fill them by courier or manufacture.
 
-const path = require("path");
+const { marketDaemonClient } = require("../market/marketDaemonClient");
 
 const JITA_SYSTEM_ID = 30000142;
 // Jita IV - Moon 4: canonical seed station and fallback if its offer is out.
@@ -47,12 +47,9 @@ function getHubStationIDForBot(botOrCharacterID) {
   return Object.values(REGIONAL_HUB_STATION_IDS).includes(hubStationID) ? hubStationID : BOT_HUB_STATION_ID;
 }
 
-let marketDatabase = null;
 const MARKET_SUPPLY_CACHE_MS = 30_000;
 const MARKET_SUPPLY_CACHE_MAX_ENTRIES = 256;
 const marketSupplyCache = new Map();
-const marketSupplyRegionQueryCache = new WeakMap();
-let marketSupplyRegionIDs = null;
 
 function readMarketSupplyCache(cache, typeID, now = Date.now()) {
   const entry = cache.get(typeID);
@@ -75,77 +72,61 @@ function writeMarketSupplyCache(cache, typeID, offers, readAt = Date.now()) {
   cache.set(typeID, { readAt, offers });
 }
 
-function openMarketDatabase() {
-  if (marketDatabase) return marketDatabase;
-  const { DatabaseSync } = require("node:sqlite");
-  const dataRoot = process.env.EVEJS_DATA_ROOT;
-  const databasePath = process.platform !== "win32" && dataRoot
-    ? path.join(dataRoot, "market", "market.sqlite")
-    : path.resolve(__dirname, "../../../../externalservices/market-server/data/generated/market.sqlite");
-  marketDatabase = new DatabaseSync(databasePath, { readOnly: true });
-  return marketDatabase;
+const JITA_REGION_ID = 10000002;
+const pendingBooks = new Map();
+const MAX_PENDING_BOOKS = 4;
+
+function getBotMarketRegion(bot) {
+  const session = require("./playerBotSpaceRuntime").getActorSession(bot);
+  if (Number(session?.regionID) > 0) return Number(session.regionID);
+  const character = require("../character/characterState").getCharacterRecord(bot?.characterID);
+  const world = require("../../space/worldData");
+  const station = world.getStationByID(Number(character?.stationID));
+  const system = world.getSolarSystemByID(Number(session?.solarSystemID || character?.solarSystemID || station?.solarSystemID));
+  return Number(system?.regionID || station?.regionID) || 0;
 }
 
-function getMarketSupplyRegionIDs() {
-  if (marketSupplyRegionIDs) return marketSupplyRegionIDs;
-  const systems = require("../../space/worldData").getSolarSystems();
-  marketSupplyRegionIDs = [...new Set([
-    0,
-    ...systems.map((system) => Math.trunc(Number(system.regionID) || 0)).filter((regionID) => regionID > 0),
-  ])].sort((left, right) => left - right);
-  return marketSupplyRegionIDs;
+async function readMarketBook(regionID, typeID) {
+  if (!(Number(regionID) > 0 && Number(typeID) > 0)) throw new Error("A market region and type are required");
+  const key = `${regionID}:${typeID}`;
+  const cached = readMarketSupplyCache(marketSupplyCache, key);
+  if (cached) return cached;
+  if (pendingBooks.has(key)) return pendingBooks.get(key);
+  if (pendingBooks.size >= MAX_PENDING_BOOKS) throw new Error("PlayerBot market reads busy");
+  const request = marketDaemonClient.call("GetOrders", {
+    region_id: Number(regionID),
+    type_id: Number(typeID),
+  }).then((book) => {
+    if (!Array.isArray(book?.sells) || !Array.isArray(book?.buys)) throw new Error("Invalid order book");
+    writeMarketSupplyCache(marketSupplyCache, key, book);
+    return book;
+  }).finally(() => pendingBooks.delete(key));
+  pendingBooks.set(key, request);
+  return request;
 }
 
-function buildSellOffersQuery(regionIDs) {
-  const regions = [...new Set((Array.isArray(regionIDs) ? regionIDs : [])
-    .map((regionID) => Math.trunc(Number(regionID)))
-    .filter((regionID) => Number.isSafeInteger(regionID) && regionID >= 0))];
-  if (!regions.length) {
-    return {
-      sql: "SELECT station_id AS stationID, solar_system_id AS solarSystemID, region_id AS regionID, " +
-        "type_id AS typeID, price, quantity, 0 AS ownerID FROM seed_stock WHERE type_id = ? AND quantity > 0 " +
-        "UNION ALL " +
-        "SELECT station_id AS stationID, solar_system_id AS solarSystemID, region_id AS regionID, " +
-        "type_id AS typeID, price, vol_remaining AS quantity, owner_id AS ownerID FROM market_orders " +
-        "WHERE type_id = ? AND bid = 0 AND state = 'open' AND vol_remaining > 0",
-      regions,
-    };
-  }
-  const placeholders = regions.map(() => "?").join(",");
-  return {
-    sql: "SELECT station_id AS stationID, solar_system_id AS solarSystemID, region_id AS regionID, " +
-      "type_id AS typeID, price, quantity, 0 AS ownerID FROM seed_stock " +
-      `WHERE region_id IN (${placeholders}) AND type_id = ? AND quantity > 0 ` +
-      "UNION ALL " +
-      "SELECT station_id AS stationID, solar_system_id AS solarSystemID, region_id AS regionID, " +
-      "type_id AS typeID, price, vol_remaining AS quantity, owner_id AS ownerID FROM market_orders " +
-      `WHERE region_id IN (${placeholders}) AND type_id = ? AND bid = 0 AND state = 'open' AND vol_remaining > 0`,
-    regions,
-  };
+function sellOffers(book) {
+  return book.sells.filter((row) => Number(row.vol_remaining) > 0 && Number(row.price) > 0)
+    .map((row) => ({
+      stationID: Number(row.station_id),
+      solarSystemID: Number(row.solar_system_id),
+      regionID: Number(row.region_id),
+      typeID: Number(row.type_id),
+      price: Number(row.price),
+      quantity: Number(row.vol_remaining),
+      source: row.source,
+    }));
 }
 
-function querySellOffers(database, typeID, regionIDs) {
-  const numericTypeID = Math.trunc(Number(typeID)) || 0;
-  if (!database || !numericTypeID) return [];
-  const { sql, regions } = buildSellOffersQuery(regionIDs);
-  const cacheKey = regions.join(",");
-  let cached = marketSupplyRegionQueryCache.get(database);
-  if (!cached || cached.key !== cacheKey) {
-    cached = { key: cacheKey, statement: database.prepare(sql) };
-    marketSupplyRegionQueryCache.set(database, cached);
-  }
-  const parameters = regions.length
-    ? [...regions, numericTypeID, ...regions, numericTypeID]
-    : [numericTypeID, numericTypeID];
-  return cached.statement.all(...parameters).map((row) => ({
-    stationID: Number(row.stationID) || 0,
-    solarSystemID: Number(row.solarSystemID) || 0,
-    regionID: Number(row.regionID) || 0,
-    typeID: Number(row.typeID) || 0,
-    price: Number(row.price) || 0,
-    quantity: Number(row.quantity) || 0,
-    ownerID: Number(row.ownerID) || 0,
-  })).filter((row) => row.stationID && row.price > 0 && row.quantity > 0);
+async function ownerOrders(ownerID, isCorp = false) {
+  const result = await marketDaemonClient.call("GetOwnerOrders", { owner_id: Number(ownerID), is_corp: isCorp });
+  if (!Array.isArray(result)) throw new Error("Invalid owner order response");
+  return result.map(flattenOrder);
+}
+
+function flattenOrder(order) {
+  return { ...order.row, owner_id: order.owner_id, is_corp: order.is_corp,
+    state: order.state, source: order.source, last_state_change_at: order.last_state_change_at };
 }
 
 function getBotOwnerIDs() {
@@ -174,46 +155,27 @@ function isJitaStation(stationID) {
   }
 }
 
-// Open buy orders placed by players (not bots) outside Jita.
-function listPlayerBuyOrders(limit = 50, typeID = null, regionID = null) {
+async function listPlayerBuyOrders(limit, typeID, regionID) {
+  if (!typeID || !regionID) return [];
   try {
-    const normalizedLimit = Math.max(1, Math.trunc(Number(limit) || 50));
-    const normalizedTypeID = Math.trunc(Number(typeID)) || 0;
-    const normalizedRegionID = Math.trunc(Number(regionID)) || 0;
-    const typeClause = normalizedTypeID > 0 ? " AND type_id = ?" : "";
-    const regionClause = normalizedRegionID > 0 ? " AND region_id = ?" : "";
-    const botOwners = [...getBotOwnerIDs()];
-    const ownerClause = botOwners.length ? ` AND owner_id NOT IN (${botOwners.map(() => "?").join(",")})` : "";
-    const parameters = normalizedTypeID > 0
-      ? [JITA_SYSTEM_ID, normalizedTypeID, ...(normalizedRegionID ? [normalizedRegionID] : []), ...botOwners, normalizedLimit]
-      : [JITA_SYSTEM_ID, ...(normalizedRegionID ? [normalizedRegionID] : []), ...botOwners, normalizedLimit];
-    const rows = openMarketDatabase().prepare(
-      "SELECT order_id, owner_id, is_corp, station_id, solar_system_id, region_id, type_id, price, vol_remaining, min_volume " +
-      "FROM market_orders WHERE bid = 1 AND state = 'open' AND vol_remaining > 0 AND solar_system_id != ? " +
-      typeClause + regionClause + ownerClause + " ORDER BY price DESC, issued_at LIMIT ?",
-    ).all(...parameters);
-    return rows;
-  } catch (error) {
+    const book = await readMarketBook(regionID, typeID);
+    return book.buys.filter((order) => order.source !== "seed" &&
+      Number(order.solar_system_id) !== JITA_SYSTEM_ID && Number(order.vol_remaining) > 0)
+      .slice(0, limit);
+  } catch (_) {
     return [];
   }
 }
 
-// Read-only supply used to plan a bot's shopping destination. The trade
-// authority still validates the live order when a purchase is submitted; this
-// query prevents a pilot from routing to a hub that does not stock its kit.
-function listSellOffers(typeID) {
-  const numericTypeID = Math.trunc(Number(typeID)) || 0;
-  if (!numericTypeID) return [];
-  const cached = readMarketSupplyCache(marketSupplyCache, numericTypeID);
-  if (cached) return cached;
+async function listSellOffers(typeID, regionID, options = {}) {
+  if (!typeID || !regionID) return [];
   try {
-    // Market indexes lead with region_id. A type-only scan walks the complete
-    // universe-wide seed_stock table for every cold cache entry; querying the
-    // same regions present in static space data gives SQLite one bounded index
-    // lookup per region while preserving global offer visibility.
-    const offers = querySellOffers(openMarketDatabase(), numericTypeID, getMarketSupplyRegionIDs());
-    writeMarketSupplyCache(marketSupplyCache, numericTypeID, offers);
-    return offers;
+    const offers = sellOffers(await readMarketBook(regionID, typeID));
+    const regional = offers.filter((offer) => offer.solarSystemID !== JITA_SYSTEM_ID);
+    if (regional.length || !options.jitaFallback) return regional;
+    return Number(regionID) === JITA_REGION_ID
+      ? offers.filter((offer) => offer.solarSystemID === JITA_SYSTEM_ID)
+      : await listJitaSellOffers(typeID);
   } catch (_) {
     return [];
   }
@@ -314,10 +276,12 @@ function scoreSellStationsForPackage(needs, offersByType, stationIsJita = isJita
     left.stationID - right.stationID);
 }
 
-function findSellStationsForPackage(needs) {
-  const typeIDs = [...new Set((Array.isArray(needs) ? needs : [])
-    .map((need) => Math.trunc(Number(need && need.typeID)) || 0).filter(Boolean))];
-  const offersByType = new Map(typeIDs.map((typeID) => [typeID, listSellOffers(typeID)]));
+async function findSellStationsForPackage(needs, regionID) {
+  const typeIDs = [...new Set((needs || []).map((need) => Number(need.typeID)).filter(Boolean))];
+  const offersByType = new Map();
+  for (const typeID of typeIDs) {
+    offersByType.set(typeID, await listSellOffers(typeID, regionID, { jitaFallback: true }));
+  }
   return scoreSellStationsForPackage(needs, offersByType);
 }
 
@@ -344,57 +308,55 @@ function selectBestJitaSeedStation(needs, offersByType, stationIsJita = isJitaSt
 // system. A bot must be able to fall through to another one when its canonical
 // station has been bought out, while still checking non-Jita regional supply
 // first at the caller.
-function findBestJitaSeedStation(needs, excludedStationIDs = []) {
-  const typeIDs = [...new Set((Array.isArray(needs) ? needs : [])
-    .map((need) => Math.trunc(Number(need && need.typeID)) || 0).filter(Boolean))];
-  const offersByType = new Map(typeIDs.map((typeID) => [typeID, listSellOffers(typeID)]));
-  const candidate = selectBestJitaSeedStation(needs, offersByType, isJitaStation, excludedStationIDs);
-  return candidate ? Number(candidate.stationID) : 0;
-}
-
-// Open sell orders bots still have in Jita (left from before the rule).
-function listBotSellOrdersInJita() {
+async function listJitaSellOffers(typeID) {
   try {
-    const rows = openMarketDatabase().prepare(
-      "SELECT order_id, owner_id, station_id, type_id, vol_remaining FROM market_orders " +
-      "WHERE bid = 0 AND state = 'open' AND solar_system_id = ?",
-    ).all(JITA_SYSTEM_ID);
-    // Cleanup may only cancel orders owned by bot characters. A bot can be a
-    // member of a human-led corporation; its corporation's orders belong to
-    // that corporation and must never be treated as bot-owned cleanup work.
-    const bots = new Set(require("./playerBotRuntime").listBots()
-      .map((bot) => Number(bot.characterID) || 0)
-      .filter((characterID) => characterID > 0));
-    return rows.filter((row) => bots.has(Number(row.owner_id)));
-  } catch (error) {
+    return sellOffers(await readMarketBook(JITA_REGION_ID, typeID))
+      .filter((offer) => offer.solarSystemID === JITA_SYSTEM_ID);
+  } catch (_) {
     return [];
   }
 }
 
-// Snapshot the owner's open orders for durable listing reconciliation.
-function listOpenSellOrders(ownerID, stationID, typeID) {
+async function findJitaSellStationsForPackage(needs) {
+  const offersByType = new Map();
+  for (const typeID of new Set(needs.map((need) => Number(need.typeID)).filter(Boolean))) {
+    offersByType.set(typeID, await listJitaSellOffers(typeID));
+  }
+  return scoreSellStationsForPackage(needs, offersByType);
+}
+
+async function findBestJitaSeedStation(needs, excludedStationIDs = []) {
+  const typeIDs = [...new Set((Array.isArray(needs) ? needs : [])
+    .map((need) => Math.trunc(Number(need && need.typeID)) || 0).filter(Boolean))];
+  const offersByType = new Map();
+  for (const typeID of typeIDs) {
+    offersByType.set(typeID, await listJitaSellOffers(typeID));
+  }
+  const candidate = selectBestJitaSeedStation(needs, offersByType, isJitaStation, excludedStationIDs);
+  return candidate ? Number(candidate.stationID) : 0;
+}
+
+async function listOpenSellOrders(ownerID, stationID, typeID, isCorp = false) {
   try {
-    const orders = openMarketDatabase().prepare(
-      "SELECT order_id, owner_id, station_id, type_id, price, vol_entered, vol_remaining, updated_at " +
-      "FROM market_orders WHERE owner_id = ? AND station_id = ? AND type_id = ? AND bid = 0 AND state = 'open'",
-    ).all(Number(ownerID), Number(stationID), Number(typeID));
+    const orders = (await ownerOrders(ownerID, isCorp)).filter((order) =>
+      order.state === "open" && !order.bid && Number(order.station_id) === Number(stationID) &&
+      Number(order.type_id) === Number(typeID));
     return { success: true, orders };
   } catch (error) {
-    return { success: false, error: String(error && error.message || error).slice(0, 160) };
+    return { success: false, error: String(error.message).slice(0, 160) };
   }
 }
 
 // A bot's open buy orders, optionally at one station and of one type.
-function listOpenBuyOrders(ownerID, stationID = 0, typeID = 0) {
+async function listOpenBuyOrders(ownerID, stationID = 0, typeID = 0) {
   try {
-    const clauses = ["owner_id = ?", "bid = 1", "state = 'open'", "vol_remaining > 0"];
-    const parameters = [Number(ownerID)];
-    if (Number(stationID) > 0) { clauses.push("station_id = ?"); parameters.push(Number(stationID)); }
-    if (Number(typeID) > 0) { clauses.push("type_id = ?"); parameters.push(Number(typeID)); }
-    const orders = openMarketDatabase().prepare(
-      "SELECT order_id, owner_id, station_id, region_id, type_id, price, vol_entered, vol_remaining, escrow " +
-      `FROM market_orders WHERE ${clauses.join(" AND ")}`,
-    ).all(...parameters);
+    const { marketDaemonClient } = require("../market/marketDaemonClient");
+    const owners = await marketDaemonClient.call("GetCharOrders", { owner_id: Number(ownerID) });
+    const orders = owners.filter((order) => order.state === "open" && order.row.bid &&
+      order.row.vol_remaining > 0 &&
+      (!Number(stationID) || Number(order.row.station_id) === Number(stationID)) &&
+      (!Number(typeID) || Number(order.row.type_id) === Number(typeID)))
+      .map((order) => ({ ...order.row, owner_id: order.owner_id }));
     return { success: true, orders };
   } catch (error) {
     return { success: false, orders: [], error: String(error && error.message || error).slice(0, 160) };
@@ -402,51 +364,29 @@ function listOpenBuyOrders(ownerID, stationID = 0, typeID = 0) {
 }
 
 // Every open order (buy and sell) of one owner.
-function listOpenOrdersForOwner(ownerID) {
-  try {
-    return openMarketDatabase().prepare(
-      "SELECT order_id, bid, station_id, type_id, vol_remaining FROM market_orders WHERE owner_id = ? AND state = 'open'",
-    ).all(Number(ownerID));
-  } catch (error) {
-    return [];
-  }
+async function listOpenOrdersForOwner(ownerID) {
+  return (await ownerOrders(ownerID)).filter((order) => order.state === "open");
 }
 
 // Lowest Jita seed ask with stock: the reference traders price against.
-function getJitaReferencePrice(typeID) {
+async function getJitaReferencePrice(typeID) {
+  const offers = await listJitaSellOffers(Number(typeID));
+  return offers.find((order) => order.source === "seed" && order.price > 0 && order.quantity > 0)?.price || 0;
+}
+
+async function getOpenOrder(orderID) {
   try {
-    const row = openMarketDatabase().prepare(
-      "SELECT MIN(price) AS price FROM seed_stock WHERE type_id = ? AND solar_system_id = ? AND quantity > 0",
-    ).get(Number(typeID), JITA_SYSTEM_ID);
-    const price = Number(row && row.price);
-    return Number.isFinite(price) && price > 0 ? price : 0;
+    return flattenOrder(await marketDaemonClient.call("GetOrder", { order_id: String(orderID) }));
   } catch (error) {
-    return 0;
+    if (/order -?\d+ not found/i.test(String(error.message))) return null;
+    throw error;
   }
 }
 
-function getOpenOrder(orderID) {
-  try {
-    return openMarketDatabase().prepare(
-      "SELECT order_id, owner_id, station_id, type_id, price, vol_remaining, bid, state FROM market_orders WHERE order_id = ?",
-    ).get(Number(orderID)) || null;
-  } catch (error) {
-    return null;
-  }
-}
-
-function getPlayerBuyOrder(orderID) {
-  try {
-    const row = openMarketDatabase().prepare(
-      "SELECT order_id, owner_id, is_corp, station_id, solar_system_id, region_id, type_id, price, vol_remaining, min_volume, bid, state " +
-      "FROM market_orders WHERE order_id = ?",
-    ).get(Number(orderID));
-    if (!row || Number(row.bid) !== 1 || row.state !== "open" || Number(row.vol_remaining) <= 0 ||
-        Number(row.solar_system_id) === JITA_SYSTEM_ID || getBotOwnerIDs().has(Number(row.owner_id))) return null;
-    return row;
-  } catch (_) {
-    return null;
-  }
+async function getPlayerBuyOrder(orderID) {
+  const order = await getOpenOrder(orderID);
+  return order && order.bid && order.state === "open" && Number(order.vol_remaining) > 0 &&
+    Number(order.solar_system_id) !== JITA_SYSTEM_ID ? order : null;
 }
 
 module.exports = {
@@ -463,7 +403,10 @@ module.exports = {
   findSellStationsForPackage,
   findBestJitaSeedStation,
   listSellOffers,
-  listBotSellOrdersInJita,
+  listJitaSellOffers,
+  findJitaSellStationsForPackage,
+  getBotMarketRegion,
+  readMarketBook,
   listOpenSellOrders,
   listOpenBuyOrders,
   getJitaReferencePrice,
@@ -476,9 +419,6 @@ module.exports = {
     getListingReferencePrice,
     readMarketSupplyCache,
     writeMarketSupplyCache,
-    getMarketSupplyRegionIDs,
-    buildSellOffersQuery,
-    querySellOffers,
     MARKET_SUPPLY_CACHE_MAX_ENTRIES,
     MARKET_SUPPLY_CACHE_MS,
   },
