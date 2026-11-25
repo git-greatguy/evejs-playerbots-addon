@@ -78,8 +78,11 @@ function writeMarketSupplyCache(cache, typeID, offers, readAt = Date.now()) {
 function openMarketDatabase() {
   if (marketDatabase) return marketDatabase;
   const { DatabaseSync } = require("node:sqlite");
-  const root = process.env.EVEJS_DATA_ROOT || "/var/lib/evejs";
-  marketDatabase = new DatabaseSync(path.join(root, "market", "market.sqlite"), { readOnly: true });
+  const dataRoot = process.env.EVEJS_DATA_ROOT;
+  const databasePath = process.platform !== "win32" && dataRoot
+    ? path.join(dataRoot, "market", "market.sqlite")
+    : path.resolve(__dirname, "../../../../externalservices/market-server/data/generated/market.sqlite");
+  marketDatabase = new DatabaseSync(databasePath, { readOnly: true });
   return marketDatabase;
 }
 
