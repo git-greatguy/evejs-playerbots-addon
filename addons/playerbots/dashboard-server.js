@@ -7,6 +7,10 @@ const path = require("node:path");
 const STATIC_ROOT = path.join(__dirname, "dashboard");
 const MAX_PROXY_BYTES = 4 * 1024 * 1024;
 const MAX_REQUEST_BYTES = 16 * 1024;
+// A corporation logo upload: six base64 PNGs, 32 to 1024 pixels.
+const MAX_LOGO_REQUEST_BYTES = 12 * 1024 * 1024;
+const MAX_CORPORATION_LOGO_BYTES = 2 * 1024 * 1024;
+const CORPORATION_LOGO_SIZES = new Set([32, 64, 128, 256, 512, 1024]);
 const MAX_SHIP_RENDER_BYTES = 512 * 1024;
 const MAX_CHARACTER_PORTRAIT_BYTES = 2 * 1024 * 1024;
 const SHIP_RENDER_SIZES = new Set([32, 64, 128, 256, 512]);
@@ -124,6 +128,44 @@ function createDashboardServer(options = {}) {
     }
   }
 
+  async function proxyCorporationLogo(response, request, url) {
+    const rawCorporationID = Number(url.searchParams.get("corporationID"));
+    const rawSize = Number(url.searchParams.get("size") || 64);
+    const corporationID = Math.trunc(rawCorporationID);
+    const size = Math.trunc(rawSize);
+    if (!Number.isSafeInteger(rawCorporationID) || corporationID <= 0 || corporationID > 10_000_000_000 ||
+        !Number.isSafeInteger(rawSize) || !CORPORATION_LOGO_SIZES.has(size)) {
+      send(response, 400, "application/json; charset=utf-8", JSON.stringify({ error: "A valid corporation and logo size are required." }));
+      return;
+    }
+    try {
+      const query = new URLSearchParams({ corporationID: String(corporationID), size: String(size) });
+      const upstream = await fetchImpl(`${apiURL}/v1/dashboard/corporation-logo?${query}`, {
+        method: "GET",
+        headers: { authorization: `Bearer ${token}`, accept: "image/png" },
+        signal: timeoutSignal(proxyTimeoutMs()),
+      });
+      const contentType = String(upstream.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+      if (!upstream.ok || contentType !== "image/png") {
+        send(response, upstream.status === 404 ? 404 : 502, "application/json; charset=utf-8", "");
+        return;
+      }
+      const body = Buffer.from(await upstream.arrayBuffer());
+      if (!body.length || body.length > MAX_CORPORATION_LOGO_BYTES) {
+        send(response, 502, "application/json; charset=utf-8", "");
+        return;
+      }
+      // The page asks with ?v=<file time>, so a new upload gets a new URL.
+      send(response, 200, "image/png", request.method === "HEAD" ? Buffer.alloc(0) : body, {
+        "cache-control": "private, max-age=86400",
+        "content-length": body.length,
+      });
+    } catch (error) {
+      logger.warn(`[PlayerBotsDashboard] Corporation logo request failed for ${corporationID}: ${String(error && error.message || error).slice(0, 180)}`);
+      send(response, 503, "application/json; charset=utf-8", "");
+    }
+  }
+
   async function proxyShipRender(response, request, url) {
     const rawTypeID = Number(url.searchParams.get("typeID"));
     const rawSize = Number(url.searchParams.get("size") || 64);
@@ -234,7 +276,7 @@ function createDashboardServer(options = {}) {
     }
   }
 
-  async function readJsonBody(request) {
+  async function readJsonBody(request, maxBytes = MAX_REQUEST_BYTES) {
     if (!/^application\/json(?:\s*;|$)/i.test(String(request.headers["content-type"] || ""))) {
       const error = new Error("Settings must be submitted as JSON.");
       error.statusCode = 415;
@@ -244,7 +286,7 @@ function createDashboardServer(options = {}) {
     const chunks = [];
     for await (const chunk of request) {
       size += chunk.length;
-      if (size > MAX_REQUEST_BYTES) {
+      if (size > maxBytes) {
         const error = new Error("Request body exceeds the dashboard size limit.");
         error.statusCode = 413;
         throw error;
@@ -307,6 +349,25 @@ function createDashboardServer(options = {}) {
         return;
       }
       return proxyCharacterPortrait(response, request, url);
+    }
+    if (url.pathname === "/api/corporation-logos") {
+      if (request.method !== "GET") {
+        send(response, 405, "text/plain; charset=utf-8", "Method not allowed.", { allow: "GET" });
+        return;
+      }
+      return proxyApi(response, "/v1/dashboard/corporation-logos");
+    }
+    if (url.pathname === "/api/corporation-logo") {
+      if (request.method === "GET" || request.method === "HEAD") return proxyCorporationLogo(response, request, url);
+      if (!isSameOriginRequest(request)) {
+        send(response, 403, "application/json; charset=utf-8", JSON.stringify({ error: "Cross-origin dashboard updates are blocked." }));
+        return;
+      }
+      const body = await readJsonBody(request, MAX_LOGO_REQUEST_BYTES);
+      const images = body.images && typeof body.images === "object" && !Array.isArray(body.images) ? body.images : null;
+      return proxyMutation(response, "/v1/dashboard/corporation-logo", "POST", body.remove === true
+        ? { corporationID: body.corporationID, remove: true }
+        : { corporationID: body.corporationID, images });
     }
     if (url.pathname === "/api/summary") {
       if (request.method !== "GET") {

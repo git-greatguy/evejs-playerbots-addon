@@ -56,9 +56,32 @@ export function portrait(characterID, size = 64) {
   return `<img src="/api/character-portrait?characterID=${id}&amp;size=${size}&amp;v=2" alt="" loading="lazy">`;
 }
 
+// Corporation logos uploaded on the Corporations page. The shell loads the
+// list (corporationID -> file time) with each summary refresh.
+export const corporationLogos = { logos: {}, inGame: false, sizes: [] };
+
+export function setCorporationLogos(data) {
+  corporationLogos.logos = data && data.logos && typeof data.logos === "object" ? data.logos : {};
+  corporationLogos.inGame = Boolean(data && data.inGame);
+  corporationLogos.sizes = Array.isArray(data && data.sizes) ? data.sizes : [];
+}
+
+export function hasCorporationLogo(corporationID) {
+  return Boolean(corporationLogos.logos[Math.trunc(Number(corporationID) || 0)]);
+}
+
+// A small logo for a corporation that has one; "" for the rest.
+export function corpLogo(corporationID, size = 32, cls = "corp-logo") {
+  const id = Math.trunc(Number(corporationID) || 0);
+  const version = corporationLogos.logos[id];
+  if (id <= 0 || !version) return "";
+  const source = size <= 32 ? 64 : size <= 64 ? 128 : 256;
+  return `<img class="${esc(cls)}" src="/api/corporation-logo?corporationID=${id}&amp;size=${source}&amp;v=${esc(version)}" alt="" width="${size}" height="${size}" loading="lazy">`;
+}
+
 export function pilotCell(row) {
   const corp = row.corporationTicker ? `[${esc(row.corporationTicker)}] ` : "";
-  return `<div class="pilot">${portrait(row.characterID)}<span><strong>${esc(row.characterName)}</strong><span class="sub">${corp}${esc(row.corporationName || "")}</span></span></div>`;
+  return `<div class="pilot">${portrait(row.characterID)}<span><strong>${esc(row.characterName)}</strong><span class="sub">${corpLogo(row.corporationID, 14, "corp-logo inline")}${corp}${esc(row.corporationName || "")}</span></span></div>`;
 }
 
 export const STATE_ORDER = ["working", "travelling", "holding", "queued", "cooling", "paused", "standby", "idle", "offline"];

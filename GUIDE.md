@@ -361,6 +361,33 @@ active wars, structures missing Quantum Cores or running low-power, and claimed
 sovereignty systems. Pilot tables are paginated at 100 rows per request, and
 the aggregate snapshot is cached for 30 seconds. The dashboard refreshes live views every 15 seconds while visible.
 
+### Corporation logos
+
+Any player or bot corporation (ID 2,000,000 or above) can have a picture logo.
+On the corporation's page, the **Logo** panel takes a PNG, JPEG, WebP or GIF
+of up to 20 MB. The browser centres it on a transparent square and makes PNGs
+at 32, 64, 128, 256, 512 and 1024 pixels; the server checks that each is a PNG
+of the right size (at most 2 MB) and stores them where EveJS keeps runtime
+images, as `Corporation/<corporationID>_<size>.png` beside the alliance logos.
+**Remove logo** deletes all six files. Uploads go through the same
+same-origin check and private API token as the other dashboard orders.
+
+Logos show next to the corporation's name across the dashboard: the
+corporation list and page, pilot rows, the pilot panel, History and the
+killboard. The dashboard serves them through the add-on API, so this works
+with or without anything else installed.
+
+The game client is different: it always draws a player corporation from its
+emblem layers and never asks the image server for a picture. The separate
+[corporation-logo add-on](https://github.com/ubermidas/evejs-corporation-logos) (`evejs-corporation-logos`) adds a small
+client patch to EveJS's login script so corporations with a PNG are drawn
+from it, and makes sure the image server serves the stored PNGs. Install it
+once per server with its `install.py`, then rebuild. With that add-on installed, the
+Logo panel says so. A corporation's first logo shows from each player's next
+login; a changed logo shows within an hour, when the client re-checks its
+cached copy (clearing the client's `Pictures\Corporations` cache shows it at
+once).
+
 ### Corporation and alliance name library
 
 Open **Settings → Corporation and alliance names**, paste a name library and

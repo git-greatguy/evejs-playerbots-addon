@@ -196,12 +196,22 @@ see `DASHBOARD_BIND` below and only on a network you trust.
 | --- | --- |
 | **Activity** | How many pilots are working, travelling, holding, queued, paused, standing by, idle or offline; what they are doing; why the others are not; a searchable pilot list. |
 | **Pilot panel** | Click any pilot: what it is doing and why, its location, ship, current job step by step, recent jobs with ISK in and out, and orders (pause, resume, stop, recall, mine, colony, patrol, upgrade). |
-| **Corporations** | Every bot corporation; a page each with whole-corporation orders, headquarters, where goods go, work priorities, per-pilot orders and an order log. |
+| **Corporations** | Every bot corporation; a page each with whole-corporation orders, headquarters, where goods go, work priorities, a picture logo, per-pilot orders and an order log. |
 | **History** | Every finished and running job, with filters and a step-by-step timeline. |
 | **World** | Systems, territory (fleets, wars, structures, sovereignty) and the killboard. |
 | **Performance** | Server load, director timing and long server ticks. |
 | **Settings** | Autonomous work, seeding, population and work limits, timings, the name library, Delete all bots. |
 | **Guide** | Plain-language help for every page and command, built in. |
+
+**Corporation logos.** On a corporation's page, the **Logo** panel takes a
+PNG, JPEG, WebP or GIF, makes square PNGs from 32 to 1024 pixels in the
+browser, and stores them in EveJS's image folder
+(`<runtime images>/Corporation/<id>_<size>.png`). The logo then shows next to
+the corporation's name across the dashboard. In game, the client keeps
+drawing the emblem unless the separate
+[corporation-logo add-on](https://github.com/ubermidas/evejs-corporation-logos) is installed on the server; with it, players
+see the logo from their next login. That add-on also sets logos without
+Playerbots, from the command line.
 
 ---
 

@@ -2,7 +2,7 @@
 // give it.
 
 import { getJSON, botCommand, corpCommand } from "./api.js";
-import { $, esc, num, isk, portrait, stateTag, when, toast } from "./ui.js";
+import { $, esc, num, isk, portrait, stateTag, when, toast, corpLogo } from "./ui.js";
 
 let current = { characterID: 0, onChange: null, pilot: null };
 
@@ -46,7 +46,7 @@ function drawerHtml(p) {
   const working = ["working", "travelling", "holding"].includes(p.state);
   return `
   <div class="drawer-head">${portrait(p.characterID, 128)}
-    <div><h2>${esc(p.characterName)}</h2><div class="muted">${ticker}${esc(p.corporationName || "No corporation")} · ${esc(p.specialty)}</div><div style="margin-top:4px">${stateTag(p.state, p.stateLabel)}</div></div>
+    <div><h2>${esc(p.characterName)}</h2><div class="muted">${corpLogo(p.corporationID, 16, "corp-logo inline")}${ticker}${esc(p.corporationName || "No corporation")} · ${esc(p.specialty)}</div><div style="margin-top:4px">${stateTag(p.state, p.stateLabel)}</div></div>
     <button class="close" type="button" data-close aria-label="Close">×</button></div>
   <section><h3>Now</h3>
     <p style="margin:0 0 4px"><strong>${esc(p.doing)}</strong></p>
